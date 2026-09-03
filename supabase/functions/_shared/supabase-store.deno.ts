@@ -15,6 +15,7 @@ import type {
   StatusEventInput,
   StudentRow,
   StudentStatus,
+  StudentWriteInput,
 } from "./ports.ts";
 
 export function createSupabaseStore(env: FunctionEnv): RosterStore {
@@ -88,6 +89,95 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       }
 
       return false;
+    },
+
+    async createStudent(input: StudentWriteInput): Promise<StudentRow> {
+      // status/arrived_at are never in this payload: the table default and
+      // the sync trigger are what put a new student in `waiting`, the same
+      // path every other student took.
+      const { data, error } = await client
+        .from("students")
+        .insert({
+          first_name: input.first_name,
+          last_name: input.last_name,
+          aliases: input.aliases,
+          grade: input.grade,
+          class_group: input.class_group,
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(`Could not add that student: ${error.message}`);
+      return data as StudentRow;
+    },
+
+    async updateStudent(
+      id: string,
+      patch: Partial<StudentWriteInput>,
+    ): Promise<StudentRow | null> {
+      const { data, error } = await client
+        .from("students")
+        .update(patch)
+        .eq("id", id)
+        .select()
+        .maybeSingle();
+
+      if (error)
+        throw new Error(`Could not update that student: ${error.message}`);
+      return (data as StudentRow | null) ?? null;
+    },
+
+    async removeStudent(id: string): Promise<boolean> {
+      // The FK on status_events.student_id is `on delete set null`, not
+      // cascade, so this delete cannot destroy that child's audit history --
+      // Postgres nulls the reference for us, nothing here has to.
+      const { data, error } = await client
+        .from("students")
+        .delete()
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
+
+      if (error)
+        throw new Error(`Could not remove that student: ${error.message}`);
+      return data !== null;
+    },
+
+    async bulkCreateStudents(
+      inputs: StudentWriteInput[],
+    ): Promise<StudentRow[]> {
+      const { data, error } = await client
+        .from("students")
+        .insert(
+          inputs.map((input) => ({
+            first_name: input.first_name,
+            last_name: input.last_name,
+            aliases: input.aliases,
+            grade: input.grade,
+            class_group: input.class_group,
+          })),
+        )
+        .select();
+
+      if (error)
+        throw new Error(`Could not import the roster: ${error.message}`);
+      return (data ?? []) as StudentRow[];
+    },
+
+    async resetAllToWaiting(): Promise<StudentRow[]> {
+      // `eq("status", "arrived")` is the point: an already-waiting row is
+      // never part of this UPDATE, so it never appears in `data`, is never
+      // handed to logEvent, and never reaches Realtime as a change at all --
+      // one bulk reset cannot manufacture hundreds of no-op flashes.
+      const { data, error } = await client
+        .from("students")
+        .update({ status: "waiting" })
+        .eq("status", "arrived")
+        .select();
+
+      if (error)
+        throw new Error(`Could not reset the roster: ${error.message}`);
+      return (data ?? []) as StudentRow[];
     },
   };
 }
