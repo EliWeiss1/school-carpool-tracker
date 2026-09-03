@@ -3,8 +3,10 @@
 @tailwind utilities;
 
 /*
- * Light-only on purpose: the /display screen lives on a fixed TV or monitor
- * and red/green status must read identically no matter what the OS theme is.
+ * Light-only on purpose: red/green status must read identically no matter what
+ * the OS theme is. /display is the one exception and it is not a theme — it is
+ * a fixed ink ground, chosen because a wall-mounted TV in a lit corridor washes
+ * out a white board long before it washes out a dark one.
  */
 :root {
   color-scheme: light;
@@ -16,7 +18,57 @@ body {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-curb-50 font-sans text-curb-900 antialiased;
+  line-height: 1.7;
+}
+
+/* Display face is set tight and never inherits the body's generous leading. */
+h1,
+h2,
+h3 {
+  @apply font-display tracking-display;
+  line-height: 1.1;
+}
+
+@layer components {
+  /*
+   * The signature element: the painted hazard band from the pickup lane itself.
+   * It appears exactly once per screen, directly under the header, and on
+   * /announce it doubles as the listening indicator — the same stripe that
+   * marks the lane outside is the one that tells you the mic is open.
+   *
+   * The stripes live on an over-wide child so the motion is a translateX and
+   * never a background-position, which cannot be composited.
+   */
+  .hazard-rule {
+    @apply relative h-1.5 w-full overflow-hidden bg-curb-900;
+  }
+
+  .hazard-rule::before {
+    content: "";
+    @apply absolute inset-y-0 left-0;
+    width: 150%;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      theme("colors.marigold.500") 0,
+      theme("colors.marigold.500") 10px,
+      theme("colors.curb.900") 10px,
+      theme("colors.curb.900") 20px
+    );
+  }
+
+  /* /announce adds this while the mic is open. */
+  .hazard-rule--live::before {
+    @apply animate-hazard-slide;
+  }
+
+  /*
+   * One focus treatment for the whole app. Marigold reads on the light routes
+   * and on the ink /display ground, which a slate ring does not.
+   */
+  .focus-ring {
+    @apply focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-marigold-500;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

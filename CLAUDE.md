@@ -12,9 +12,10 @@ notices without watching the screen.
 Small, low-traffic, single-building, no user accounts. **Optimize for
 reliability and low maintenance, not scale.**
 
-**Status: phases 1–2 done, phase 3 next.** The per-phase checklists below are the
-source of truth for what is built — keep them updated as you go. This repo has
-`git init` but no commits yet, so there is no history to diff against.
+**Status: phases 1–3 done and committed; the phase 4–6 foundation (design
+system, `api.ts`, PIN session, shared UI, screenshot tooling) is committed on top
+of them.** The per-phase checklists below are the source of truth for what is
+built — keep them updated as you go.
 
 ## Architecture — decided, do not re-litigate
 
@@ -42,16 +43,17 @@ source of truth for what is built — keep them updated as you go. This repo has
 
 ## Dev commands
 
-| Command              | What it does                                                 |
-| -------------------- | ------------------------------------------------------------ |
-| `npm run dev`        | Next.js dev server on http://localhost:3000                  |
-| `npm run build`      | Production build (also the real typecheck of app code)       |
-| `npm run lint`       | ESLint via `next lint`                                       |
-| `npm run typecheck`  | `tsc --noEmit`                                               |
-| `npm test`           | Vitest, single run                                           |
-| `npm run test:watch` | Vitest in watch mode                                         |
-| `npm run seed`       | Load the sample dev roster into Supabase (`scripts/seed.ts`) |
-| `npm run format`     | Prettier across the repo                                     |
+| Command              | What it does                                                    |
+| -------------------- | --------------------------------------------------------------- |
+| `npm run dev`        | Next.js dev server on http://localhost:3000                     |
+| `npm run build`      | Production build (also the real typecheck of app code)          |
+| `npm run lint`       | ESLint via `next lint`                                          |
+| `npm run typecheck`  | `tsc --noEmit`                                                  |
+| `npm test`           | Vitest, single run                                              |
+| `npm run test:watch` | Vitest in watch mode                                            |
+| `npm run seed`       | Load the sample dev roster into Supabase (`scripts/seed.ts`)    |
+| `npm run format`     | Prettier across the repo                                        |
+| `npm run screenshot` | `<url> --size display\|phone\|desk\|WxH --out FILE` (Puppeteer) |
 
 Supabase CLI is intentionally not a project dependency — use `npx`:
 
@@ -74,9 +76,17 @@ src/
     announce/           phase 4 — mic capture, candidate confirm, search fallback
     display/            phase 5 — realtime status grid, flash + chime
     admin/              phase 6 — roster CRUD, CSV import, reset
-  components/           shared UI, kept small and presentational
+  components/
+    ui/                 the shared kit: Button, PageHeader, HazardRule, PinGate,
+                        ErrorBanner, EmptyState, LoadingState
+    announce/ display/ admin/   route-specific presentational components
   lib/
     env.ts              single place env vars are read and validated
+    api.ts              typed client for the three Edge Functions + ApiError
+    pin-session.ts      the PIN store: memory only, no React
+    use-pin-session.ts  the React hook over it
+    device-id.ts        per-tab id for the rate-limit bucket
+    cn.ts               class-name join
     supabase/
       browser.ts        memoised anon client for client components
       server.ts         anon client for server components (never service-role)
@@ -104,6 +114,7 @@ supabase/
     set-status/         entrypoint: the only write path
   seed/roster.ts        sample dev roster, deliberately full of confusable surnames
 scripts/seed.ts         loads the sample roster (refuses non-local without --allow-remote)
+scripts/screenshot.mjs  Puppeteer: URL + viewport -> PNG (npm run screenshot)
 .claude/agents/         subagent definitions (see Model delegation)
 ```
 
@@ -193,6 +204,151 @@ Notes phase 4 will need:
   whole request path be tested with no database and no runtime.
 - Errors a school staff member could hit need a human-readable message on
   screen, not a console log.
+
+## Design system — "Curbside"
+
+Locked in the phase 4–6 foundation commit. **Every token below already exists in
+`tailwind.config.ts` or `globals.css`.** Do not invent a colour, a font, a shadow
+or a spacing step. If a screen needs something that is not here, add it to the
+config and to this section in the same commit, so the next screen inherits it.
+
+**The idea.** The visual language is the pickup lane itself: road markings,
+crossing-guard hi-vis, school-bus marigold on asphalt ink. It is not decorative
+— it is the only vernacular that is already legible outdoors, at speed, from a
+distance, to people who are not looking directly at it.
+
+### Colour
+
+| Token                            | Hex                           | Used for                                              |
+| -------------------------------- | ----------------------------- | ----------------------------------------------------- |
+| `ink` / `curb-900`               | `#10151f`                     | Headers, the `/display` ground, all display type      |
+| `curb-800` → `curb-600`          | `#232a34` `#353d4a` `#4c5666` | Body copy on light, secondary text on dark            |
+| `curb-500` / `curb-400`          | `#6b7686` `#98a2b3`           | Captions, disabled, hairline emphasis                 |
+| `curb-300` / `curb-200`          | `#c3cad5` `#dde1e8`           | Borders. `200` at rest, `300`+ on hover               |
+| `curb-100` / `curb-50`           | `#eceef2` `#f6f7f9`           | Pressed fills; the page ground                        |
+| `marigold-500`                   | `#f5a524`                     | **The brand.** Primary buttons, focus rings, eyebrows |
+| `marigold-400` / `600`           | `#ffc24d` `#d9860b`           | Primary hover / active. `400` for text on ink         |
+| `marigold-50`                    | `#fff7e6`                     | Warning banner ground                                 |
+| `waiting`                        | `#b91c1c`                     | Waiting, on light surfaces                            |
+| `waiting-screen`                 | `#f04438`                     | Waiting, **only** on the `/display` ink ground        |
+| `arrived`                        | `#15803d`                     | Arrived, on light surfaces                            |
+| `arrived-screen`                 | `#12b76a`                     | Arrived, **only** on the `/display` ink ground        |
+| `*-soft` / `*-border` / `*-deep` | see config                    | Status banner fills, borders, pressed states          |
+
+**The one inviolable rule: red and green mean waiting and arrived, and nothing
+else, anywhere in the app.** No red delete buttons outside a genuine
+back-to-waiting action, no green success toasts. That is why the brand colour is
+marigold — it is unmistakable against both at twenty feet. Marigold never fills a
+status tile.
+
+`/display` is the one route on an ink ground. That is not a dark theme and does
+not follow the OS: it is fixed, because a wall-mounted TV in a lit corridor
+washes out a white board long before it washes out a dark one. Use only the
+`-screen` status values there; `waiting`/`arrived` disappear against `ink`.
+
+### Typography
+
+Three faces, wired up in `layout.tsx` via `next/font`, reached through Tailwind:
+
+| Class          | Face                      | Job                                                                                                     |
+| -------------- | ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `font-display` | Archivo 600/700/800       | Every heading, every button label, every name on `/display`                                             |
+| `font-sans`    | IBM Plex Sans 400/500/600 | All body copy and form fields. The default on `body`                                                    |
+| `font-mono`    | IBM Plex Mono 400/500     | Only things that line up in columns: grades, class groups, times, device ids, CSV row numbers, eyebrows |
+
+- Anything `text-4xl` or larger takes `tracking-display` (`-0.03em`).
+- Body copy runs at `line-height: 1.7`, set once on `body`. Headings are `1.1`.
+- Eyebrows are `font-mono text-xs uppercase tracking-eyebrow` (`0.14em`), in
+  `marigold-400` on ink or `curb-500` on light. They name the audience for the
+  screen, never the software.
+- Type scale, and nothing between: `text-sm` `text-base` `text-lg` `text-xl`
+  `text-2xl` `text-3xl` `text-5xl` `text-6xl`. `/display` tiles go bigger —
+  measure those against a screenshot at 1920×1080, not against the scale.
+
+### Spacing
+
+One ladder, in Tailwind steps: **1, 2, 3, 4, 6, 8, 12, 16, 24** (4px → 96px).
+Nothing else. Gaps between cards are `gap-4`; padding inside a card is `p-6`;
+a section break is `py-12`.
+
+Touch targets are not a spacing decision, they are a requirement:
+`min-h-tap` (56px) is the floor anywhere; `min-h-tap-lg` (64px) is the floor for
+**everything** on `/announce`; `min-h-candidate` (96px) is a candidate confirm
+button. `/announce` is used one-handed, outdoors, sometimes gloved.
+
+### Elevation
+
+Three levels and nothing in between. Shadows are ink-tinted and layered — never
+`shadow-md`, never a neutral black.
+
+| Level    | Classes                                                   | What lives here                       |
+| -------- | --------------------------------------------------------- | ------------------------------------- |
+| base     | `bg-curb-50`                                              | The page ground                       |
+| elevated | `bg-white border border-curb-200 rounded-2xl shadow-card` | Cards, list rows, panels              |
+| floating | `bg-white rounded-2xl shadow-float`                       | The PIN gate, confirm sheets, dialogs |
+
+`shadow-press` is the inset used on `:active`. On `/display`, tiles use
+`shadow-tile-waiting` / `shadow-tile-arrived`, which carry their own colour.
+
+Radii: `rounded-xl` for controls, `rounded-2xl` for surfaces. Nothing else.
+
+### Motion
+
+Only `transform` and `opacity`. **Never `transition-all`** — on the slow stick PC
+driving the display that is a repaint of every tile. Name the properties:
+`transition-[transform,box-shadow] duration-200 ease-spring`.
+
+| Animation                                        | Where                                                                                        |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `animate-arrival-flash` + `animate-arrival-glow` | A tile going waiting → arrived on `/display`. The glow is an opacity overlay, not a `filter` |
+| `animate-listen-pulse`                           | The ring on the push-to-talk button while the mic is open                                    |
+| `animate-hazard-slide`                           | The signature band, while listening                                                          |
+| `animate-tile-in`                                | A row or tile entering                                                                       |
+
+`ease-spring` (`cubic-bezier(0.34,1.56,0.64,1)`) for anything a finger touches;
+`ease-out` for everything else. The `prefers-reduced-motion` guard in
+`globals.css` neutralises all of them globally — verify with the OS setting on,
+and make sure the arrival is still legible without the flash (it is: the tile
+changes colour).
+
+### The signature: the hazard rule
+
+`<HazardRule />` — a 6px band of marigold/ink diagonal stripes, the painted
+warning band from the kerb. **It appears exactly once per screen**, directly
+under the header, and it is the only ornament in the app. Spend the boldness
+here and keep everything else quiet.
+
+On `/announce` it earns a second job: `<HazardRule live />` slides the stripes
+while the microphone is open. That is the listening indicator — readable at arm's
+length in sunlight in a way a small red dot is not. The motion is a `translateX`
+on an over-wide child, never a `background-position`.
+
+### Interactive states
+
+Every clickable element has hover, `focus-visible` and active. No exceptions.
+Use the `.focus-ring` utility (3px `marigold-500`, 2px offset) — it is the one
+focus treatment in the app and it reads on both the light routes and the ink
+`/display` ground, which a slate ring does not.
+
+### Shared components — reuse, do not reimplement
+
+`src/components/ui/`: `Button` (variants `primary` | `secondary` | `quiet` |
+`danger`; sizes `sm` | `md` | `tap` | `candidate`), `PageHeader`, `HazardRule`,
+`PinGate`, `ErrorBanner`, `EmptyState`, `LoadingState`.
+
+`src/lib/`: `api.ts` (typed client for all three endpoints, `ApiError` with
+`kind`/`status`/`retryAfterSeconds`), `use-pin-session.ts` + `pin-session.ts`
+(PIN in memory for the tab, never storage), `device-id.ts`, `cn.ts`.
+
+### Words
+
+Sentence case everywhere. Name things by what a staff member controls, never by
+how the system is built — "Send back to waiting", not "Revert status". A control
+keeps its name through the whole flow: a button that says "Confirm" produces a
+line that says "Confirmed". Errors say what happened and what to do next, in one
+sentence, and the Edge Functions already write that sentence — render it
+verbatim rather than paraphrasing it. Empty states say what is true and what to
+do next.
 
 ## Build phases and definition of done
 
