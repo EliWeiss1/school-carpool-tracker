@@ -38,15 +38,41 @@ export function PushToTalkButton({
   const listening = status === "listening";
   const busy = status === "connecting" || status === "processing";
 
+  /**
+   * Pointer capture is a nicety -- it keeps the press alive if a thumb slides
+   * off the button mid-sentence -- but both calls throw `InvalidPointerId` if
+   * the pointer is no longer active, and an exception here used to abort the
+   * handler before it ever reached `onPressEnd`. That leaves the microphone
+   * stuck open with the screen saying "listening", one-handed, outdoors, with
+   * a queue of cars waiting. Capture is therefore best-effort, and starting
+   * and stopping the mic is not.
+   */
+  function capture(button: HTMLButtonElement, pointerId: number) {
+    try {
+      button.setPointerCapture(pointerId);
+    } catch {
+      // No capture; a thumb sliding off will end the press early, which is
+      // recoverable. Failing to start the mic is not.
+    }
+  }
+
+  function releaseCapture(button: HTMLButtonElement, pointerId: number) {
+    try {
+      button.releasePointerCapture(pointerId);
+    } catch {
+      // Already released, or never captured. Either way the mic still stops.
+    }
+  }
+
   function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
     if (disabled || busy) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    capture(event.currentTarget, event.pointerId);
     onPressStart();
   }
 
   function handlePointerUp(event: ReactPointerEvent<HTMLButtonElement>) {
     if (disabled) return;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    releaseCapture(event.currentTarget, event.pointerId);
     onPressEnd();
   }
 
