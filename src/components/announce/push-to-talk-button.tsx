@@ -57,11 +57,11 @@ export function PushToTalkButton({
           <>
             <span
               aria-hidden="true"
-              className="absolute inset-0 rounded-full bg-marigold-500 animate-listen-pulse"
+              className="absolute inset-0 animate-listen-pulse rounded-full bg-marigold-500"
             />
             <span
               aria-hidden="true"
-              className="absolute inset-0 rounded-full bg-marigold-500 animate-listen-pulse [animation-delay:0.45s]"
+              className="absolute inset-0 animate-listen-pulse rounded-full bg-marigold-500 [animation-delay:0.45s]"
             />
           </>
         )}
@@ -89,10 +89,19 @@ export function PushToTalkButton({
         </button>
       </div>
 
+      {/* The eyebrow treatment is for one- and two-word labels. A whole
+          sentence set in wide-tracked caps is markedly harder to read, which
+          is the opposite of what an explanation is for -- so the mic status
+          keeps it and the explanation drops to sentence case. */}
       <p
         role="status"
         aria-live="polite"
-        className="min-h-[1.5rem] text-center font-mono text-sm uppercase tracking-eyebrow text-curb-600"
+        className={cn(
+          "min-h-[1.5rem] text-center",
+          disabledReason
+            ? "text-sm leading-snug text-curb-600"
+            : "font-mono text-sm uppercase tracking-eyebrow text-curb-600",
+        )}
       >
         {disabledReason ?? CAPTION[status]}
       </p>

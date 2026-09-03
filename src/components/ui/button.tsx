@@ -10,7 +10,8 @@ import { cn } from "@/lib/cn";
  * on /announce, which is operated one-handed, outdoors, sometimes with a glove
  * on, and `candidate` is the confirm target for a child's name.
  */
-export type ButtonVariant = "primary" | "secondary" | "quiet" | "danger";
+export type ButtonVariant =
+  "primary" | "secondary" | "quiet" | "quiet-ink" | "danger";
 export type ButtonSize = "sm" | "md" | "tap" | "candidate";
 
 const VARIANTS: Record<ButtonVariant, string> = {
@@ -22,6 +23,10 @@ const VARIANTS: Record<ButtonVariant, string> = {
     "border border-curb-300 bg-white text-curb-900 shadow-card hover:border-curb-400 hover:bg-curb-50 active:bg-curb-100 active:shadow-press",
   quiet:
     "text-curb-600 hover:bg-curb-100 hover:text-curb-900 active:bg-curb-200",
+  // The same weight of action, but sitting on the ink header. `quiet` on ink is
+  // curb-600 on #10151f -- about 2:1, which is not a readable control.
+  "quiet-ink":
+    "text-curb-300 hover:bg-white/10 hover:text-white active:bg-white/20",
   // Reaches for the waiting scale on purpose: sending a child back to waiting
   // is the destructive action here, and it should look like the red tile does.
   danger:

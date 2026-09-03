@@ -333,8 +333,16 @@ focus treatment in the app and it reads on both the light routes and the ink
 ### Shared components — reuse, do not reimplement
 
 `src/components/ui/`: `Button` (variants `primary` | `secondary` | `quiet` |
-`danger`; sizes `sm` | `md` | `tap` | `candidate`), `PageHeader`, `HazardRule`,
-`PinGate`, `ErrorBanner`, `EmptyState`, `LoadingState`.
+`quiet-ink` | `danger`; sizes `sm` | `md` | `tap` | `candidate`), `PageHeader`,
+`HazardRule`, `PinGate`, `ErrorBanner`, `EmptyState`, `LoadingState`.
+
+A button in `PageHeader`'s `action` slot sits on the ink bar and must use
+`quiet-ink`, not `quiet` — `quiet` is `curb-600`, which against `#10151f` is
+about 2:1 and not a readable control.
+
+The eyebrow treatment (`font-mono uppercase tracking-eyebrow`) is for one- and
+two-word labels only. A whole sentence in wide-tracked caps is harder to read,
+not more emphatic — explanations go in sentence case.
 
 `src/lib/`: `api.ts` (typed client for all three endpoints, `ApiError` with
 `kind`/`status`/`retryAfterSeconds`), `use-pin-session.ts` + `pin-session.ts`

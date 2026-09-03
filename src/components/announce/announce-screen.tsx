@@ -24,10 +24,7 @@ import { expiresAt, isFresh } from "@/lib/announce-token";
 import { formatRemaining, remainingMs } from "@/lib/announce-undo";
 import { ApiError, api } from "@/lib/api";
 import { publicEnv } from "@/lib/env";
-import {
-  type SpeechSource,
-  createMockSpeechSource,
-} from "@/lib/speech-mock";
+import { type SpeechSource, createMockSpeechSource } from "@/lib/speech-mock";
 import { usePinSession } from "@/lib/use-pin-session";
 
 /** Everything `deepgram-token` handed back, kept until it goes stale. */
@@ -49,7 +46,11 @@ interface MicSession {
 
 export function AnnounceScreen() {
   const session = usePinSession();
-  const [state, dispatch] = useReducer(announceReducer, undefined, initialAnnounceState);
+  const [state, dispatch] = useReducer(
+    announceReducer,
+    undefined,
+    initialAnnounceState,
+  );
 
   const tokenCacheRef = useRef<TokenCache | null>(null);
   const micSessionRef = useRef<MicSession | null>(null);
@@ -135,7 +136,9 @@ export function AnnounceScreen() {
   }
 
   async function runResolve(
-    input: { transcript: string } | { alternatives: { transcript: string; confidence?: number }[] },
+    input:
+      | { transcript: string }
+      | { alternatives: { transcript: string; confidence?: number }[] },
     origin: "voice" | "manual",
   ) {
     const creds = session.credentials();
@@ -302,7 +305,7 @@ export function AnnounceScreen() {
   const showUndo = state.undo !== null && undoRemaining > 0;
   const speechDisabledReason = publicEnv.mockSpeech
     ? undefined
-    : "Voice capture isn't set up on this device yet — type the name below.";
+    : "Voice capture is not set up on this device. Use the search above.";
 
   return (
     <main className="flex min-h-screen flex-col bg-curb-50">
@@ -311,7 +314,7 @@ export function AnnounceScreen() {
         title="Announce"
         live={state.micStatus === "listening"}
         action={
-          <Button variant="quiet" size="sm" onClick={() => session.lock()}>
+          <Button variant="quiet-ink" size="sm" onClick={() => session.lock()}>
             Lock
           </Button>
         }
@@ -320,7 +323,10 @@ export function AnnounceScreen() {
       <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4 sm:px-6">
         <div className="mx-auto flex w-full max-w-md flex-col gap-4">
           {state.banner && (
-            <ErrorBanner tone={state.banner.tone} message={state.banner.message} />
+            <ErrorBanner
+              tone={state.banner.tone}
+              message={state.banner.message}
+            />
           )}
 
           {showUndo && state.undo && (
@@ -349,29 +355,38 @@ export function AnnounceScreen() {
             }
           />
 
-          {state.resolving && <LoadingState label="Matching the name…" rows={2} />}
-
-          {!state.resolving && state.results && state.results.tier !== "none" && (
-            <CandidateList
-              results={state.results}
-              confirmingId={state.confirmingId}
-              onConfirm={handleConfirm}
-            />
+          {state.resolving && (
+            <LoadingState label="Matching the name…" rows={2} />
           )}
 
-          {!state.resolving && state.results && state.results.tier === "none" && (
-            <EmptyState
-              title="No match on the roster"
-              hint={`Heard "${state.results.transcript}." Type the name below instead.`}
-            />
-          )}
+          {!state.resolving &&
+            state.results &&
+            state.results.tier !== "none" && (
+              <CandidateList
+                results={state.results}
+                confirmingId={state.confirmingId}
+                onConfirm={handleConfirm}
+              />
+            )}
 
-          {!state.resolving && !state.results && !state.info && !state.banner && (
-            <EmptyState
-              title="Ready when you are"
-              hint="Hold the button below and say the last name, or type it below."
-            />
-          )}
+          {!state.resolving &&
+            state.results &&
+            state.results.tier === "none" && (
+              <EmptyState
+                title="No match on the roster"
+                hint={`Heard "${state.results.transcript}." Type the name below instead.`}
+              />
+            )}
+
+          {!state.resolving &&
+            !state.results &&
+            !state.info &&
+            !state.banner && (
+              <EmptyState
+                title="Ready when you are"
+                hint="Hold the button below and say the last name, or type it below."
+              />
+            )}
 
           <SearchFallback
             value={state.searchText}
