@@ -549,9 +549,9 @@ Supabase, `NEXT_PUBLIC_MOCK_SPEECH=true` on Vercel.)
    one thing only a human with the hardware can do; everything above de-risks
    it, none of it replaces it.
 
-466 tests, lint, typecheck, and build are all green. Full diff not yet
-committed as of this entry — working tree changes: `src/lib/speech-deepgram.ts`,
-`src/lib/speech-deepgram.test.ts`, `src/lib/audio-resample.ts`,
-`src/lib/audio-resample.test.ts`, `src/components/announce/announce-screen.tsx`,
-`src/lib/speech-mock.ts` (doc comments only), `scripts/verify-deepgram-live.ts`,
-plus this file and `CLAUDE.md`.
+466 tests, lint, typecheck, and build are all green. Committed and pushed to
+`master` (commit `b6c40a6`), which triggered Vercel's normal auto-deploy —
+`NEXT_PUBLIC_MOCK_SPEECH=true` is unchanged in that deploy, so this only ships
+the reuse-across-presses fix (real even in mock mode) and the real client's
+code; it does not yet turn real voice on for staff. That's still the two
+switches above.
