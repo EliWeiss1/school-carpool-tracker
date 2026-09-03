@@ -16,11 +16,18 @@ reliability and low maintenance, not scale.**
 accessibility, deploy, staff README) has not been started.** The per-phase
 checklists below are the source of truth — keep them updated as you go.
 
-**Nothing has ever run against a real Supabase project.** There is no
-`.env.local` in this checkout. Everything is verified by unit tests, typecheck,
-lint, a production build, and screenshots of the running pages; every round
-trip to a database or a realtime socket is unproven. `HANDOFF.md` has the
-numbered commands that change that.
+**All eight Edge Functions are deployed to a live Supabase project, and every
+end-to-end path has been run against it**: schema pushed, roster seeded, RLS
+probed directly with the anon key, the PIN boundary checked on both a phase-3
+and a phase-6 endpoint, `/display` proven to update from a real `set-status`
+call with no reload, `/announce` walked through PIN → mic → candidates →
+confirm with mock speech, and `/admin` walked through a CSV import producing a
+validation report — including the file that reproduces the critical
+unterminated-quote bug, confirmed still rejected. Two real defects were only
+found by this: a font-sizing regression on `/display` that clipped names
+against the real 36-student roster (fixed, verified at both 26 and 36
+students), and a Puppeteer-only false alarm on the mic button that led to a
+defensive fix on its own merits. See `HANDOFF.md` for the full account.
 
 ## Architecture — decided, do not re-litigate
 
@@ -384,9 +391,17 @@ starting the next phase.**
 - [x] `status_events` not publicly readable
 - [x] Realtime publication includes `students`
 - [x] Seed script with a sample roster including deliberately confusable surnames
-- [ ] `npx supabase db reset && npm run seed` works from clean — **unverified,
-      no Docker on this machine.** The migration itself is verified by execution
-      (see below); the seed script's insert path against a live Supabase is not.
+- [x] `npm run seed -- --allow-remote` works against a live, linked Supabase
+      project — **verified**: 36 students inserted, grouped correctly by grade.
+      `npx supabase db reset` (the local Docker stack variant) is still
+      unverified, since there is no Docker on this machine — `npx supabase db
+    push --linked` was used against the hosted project instead, which is the
+      real deploy path and the one `HANDOFF.md` documents. One real bug caught
+      in the process: `NEXT_PUBLIC_SUPABASE_URL` must be the bare project URL
+      (`https://<ref>.supabase.co`), not the REST endpoint
+      (`.../rest/v1/`) — the latter silently doubles the path segment
+      supabase-js appends and every request 400s with "Invalid path specified
+      in request URL". `.env.example`'s comment now says so explicitly.
 
 The migration is tested by _running_ it, not by reading it:
 `supabase/migrations/schema.test.ts` boots an in-process Postgres
@@ -415,12 +430,16 @@ and this picks them up automatically.
 matching pipeline, the PIN check, the rate limiter, the keyterm builder, the
 Deepgram token minting (with an injected `fetch`), and all three request
 handlers end to end against an in-memory roster — is covered by Vitest and runs
-in `npm test` with no Deno, no Docker, no database and no API credits. What is
-**not** verified by execution on this machine: the three `index.ts` entrypoints
-and the two `*.deno.ts` files, because there is no Deno and no Docker here to run
-`npx supabase functions serve` against. They are deliberately thin — env reading
-and supabase-js wiring, no logic — but they are unrun code until someone starts
-the local stack.
+in `npm test` with no Deno, no Docker, no database and no API credits.
+**Additionally, all three entrypoints and both `*.deno.ts` files are now
+deployed to a live Supabase project and have been called over HTTP**: the
+`resolve-name` smoke test (Cohen → ambiguous, Maya Cohen / Elias Kohen / Zoe
+Koen) matches the local resolver exactly, `set-status` was confirmed
+idempotent live (`changed: false` on a repeat, `arrived_at` cleared correctly
+on undo), and the PIN boundary was checked with a wrong PIN (401). There is
+still no Deno and no Docker on this development machine, so `npx supabase
+functions serve` has never been run locally — but the deployed functions
+themselves are proven, not merely written.
 
 **What makes a match "clear"** (all four must hold; `MATCH_POLICY` in
 `resolver.ts` holds every number, and they are meant to be retuned from real
@@ -479,11 +498,13 @@ boxes.
 - [x] Top 2–3 candidates as large tap targets; nothing auto-commits
 - [x] Searchable/typeable roster fallback always available
 - [x] Undo window (~2 minutes) after a confirm
-- [ ] Works end to end with `NEXT_PUBLIC_MOCK_SPEECH=true` — **unverified, no
-      Supabase project on this machine.** The mock speech source, the reducer,
-      the undo timer and the token cache are all unit-tested; the screen renders
-      and degrades correctly with no backend (screenshotted). What has never
-      run is the actual `resolve-name` → tap → `set-status` round trip.
+- [x] Works end to end with `NEXT_PUBLIC_MOCK_SPEECH=true` — **verified live**,
+      driven with real PointerEvents against the deployed functions: PIN gate →
+      hold-to-talk (CONNECTING → LISTENING captions confirmed) → release →
+      `resolve-name` returned tier `ambiguous` with Maya Cohen / Elias Kohen /
+      Zoe Koen, nothing preselected → typed search on "Cohen" → tap Maya Cohen
+      → `set-status` confirmed her arrived, with the 2-minute undo window
+      showing and counting down.
 
 **How phase 4 is verified.** The whole screen is a pure reducer
 (`src/lib/announce-reducer.ts`) with `announce-screen.tsx` as a thin dispatcher,
@@ -492,16 +513,29 @@ are all unit-tested with no DOM and no network. `speech-mock.ts` implements the
 `SpeechSource` interface a real Deepgram client will later fulfil, and a test
 stubs `fetch` and `WebSocket` to throw and asserts they are never touched — so
 mock mode cannot leak a real Deepgram call. `announce-undo.ts` and
-`announce-token.ts` take an injected `now`.
+`announce-token.ts` take an injected `now`. On top of that, the whole PIN →
+mic → candidates → confirm path has been run against the deployed
+`deepgram-token`, `resolve-name` and `set-status` functions and the live
+seeded roster (see `HANDOFF.md`).
 
 Two writes exist in the whole screen, both in user-triggered handlers
 (`handleConfirm`, `handleUndo`). There is no code path from a transcript to a
 status change that does not pass through a tap.
 
+One defensive fix came out of the live run: `setPointerCapture` /
+`releasePointerCapture` both throw `InvalidPointerId` when the pointer is no
+longer active, and an uncaught throw on release used to be able to abort the
+handler before it reached `onPressEnd` — the failure mode being a microphone
+stuck open with the screen reading "listening". Both calls are now
+best-effort; starting and stopping the mic never is.
+
 ### Phase 5 — `/display`
 
-- [ ] Realtime subscription updates the grid with no reload — **written and
-      unit-tested against synthetic payloads; never run against a live socket.**
+- [x] Realtime subscription updates the grid with no reload — **verified live**:
+      `/display` was opened against the deployed project, a real `set-status`
+      call flipped a student to arrived over HTTP, and the tile changed colour
+      and flashed with no page reload, driven purely by the Postgres Changes
+      subscription.
 - [x] Red/green grid readable across a room
 - [x] Flash animation + audio chime on a new arrival
 - [x] Reconnect **refetches** current state rather than waiting for the next event
@@ -524,6 +558,17 @@ Two deliberate departures from the brief, both defensible:
 - `/display` is `h-screen`, not `min-h-screen`. A board screwed to a wall is
   exactly one screen and nobody scrolls it; the definite height is also what
   lets the grid's `1fr` rows divide the space instead of resolving to content.
+
+**A real bug only the live 36-student roster caught.** Tile type was originally
+sized off the viewport (`vw` units), tuned by eye against a 26-student mock
+roster. Against the real seeded roster of 36, the same board has six rows
+instead of four, and names clipped in half. Font size is now derived from the
+tile's own height via CSS container queries (`.tile-surname` etc. in
+`globals.css`), so the board self-adjusts to however many rows the roster
+actually needs — verified by screenshot at both 26 and 36 students, nothing
+clips at either size. **The lesson for future screens: viewport-relative sizing
+on a screen whose row count depends on live data is not verified by a mock
+roster of a different size.**
 
 The chime is generated by `scripts/generate-chime.mjs` rather than fetched, and
 `public/chime.wav` is committed. Autoplay policy is handled honestly: if the
@@ -553,14 +598,22 @@ the way `set-status` covers both directions), `roster-delete`, `roster-import`,
 `supabase/functions/pin-budget.test.ts` now asserts that across every deployed
 entrypoint — the PIN budget does not pool between isolates, so the real
 allowance is the sum, and it grew from 30 to 80 the moment five endpoints were
-added without anyone noticing. **None of the five is deployed** (see HANDOFF.md).
+added without anyone noticing. **All five are now deployed and have been run
+live**: PIN boundary checked on `roster-list` (401 on a wrong PIN), `roster-write`'s
+duplicate guard confirmed against the live roster (409 on re-adding Maya Cohen),
+`roster-reset` confirmed idempotent (`reset: 1` then `reset: 0`), and a CSV
+import walked through `/admin` end to end — including the exact file that
+reproduces the critical unterminated-quote bug, confirmed still refused with
+"A quotation mark in this file is never closed."
 
 **How phase 6 is verified.** Handler logic, the store port, the fake store,
-`csv-import.ts` and `admin-api.ts` are covered by Vitest. The five `index.ts`
-entrypoints and the `supabase-store.deno.ts` additions are **unrun** — no Deno
-and no Docker here, exactly as in phase 3 — except that `pin-budget.test.ts`
-reads the entrypoints as text and checks their limiter wiring, which is the only
-automated check those files have at all.
+`csv-import.ts` and `admin-api.ts` are covered by Vitest, and on top of that
+all five entrypoints and the `supabase-store.deno.ts` additions have now run
+against real Postgres via the deployed functions (see above and `HANDOFF.md`).
+There is still no Deno and no Docker on this development machine, so nothing
+here was run _locally_ — but the deployed code is proven, not merely written.
+`pin-budget.test.ts` remains the one thing that reads the entrypoints as text
+and checks their limiter wiring on every future change, deployed or not.
 
 **Reviewed before merge** by `careful-review`, which cleared mass-assignment,
 the `status`/`arrived_at` boundary, RLS, secret leakage and ReDoS, and found
