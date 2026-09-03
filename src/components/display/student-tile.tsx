@@ -28,7 +28,7 @@ export function StudentTile({
   return (
     <li
       className={cn(
-        "relative flex min-h-[8rem] flex-col justify-between overflow-hidden rounded-2xl p-4 text-white sm:min-h-[9rem] sm:p-5",
+        "relative flex max-h-[20rem] min-h-[8rem] flex-col justify-between overflow-hidden rounded-2xl p-4 text-white sm:min-h-[9rem] sm:p-5",
         "animate-tile-in",
         arrived
           ? "bg-arrived-screen shadow-tile-arrived"
@@ -62,16 +62,27 @@ export function StudentTile({
         {meta || " "}
       </p>
 
-      <div className="relative mt-1 min-w-0">
-        <p className="truncate font-display text-2xl font-extrabold leading-tight tracking-display sm:text-3xl">
+      {/* min-h-0 matters more than it looks: without it this block's
+          intrinsic height (a two-line surname) becomes the grid row's
+          min-content size and pushes the last row off a 1080p screen. Nobody
+          scrolls a board mounted on a wall, so the tile clips instead. */}
+      <div className="relative mt-1 flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden">
+        {/* The surname is the thing being read from twenty feet away, so it
+            scales with the screen rather than sitting at a fixed step off the
+            type scale. On a 1080p wall TV that is ~46px instead of ~30px; the
+            clamp floor keeps it sane on a laptop, the ceiling stops it
+            overwhelming the tile on a very wide display. */}
+        <p className="line-clamp-2 break-words font-display text-[clamp(1.5rem,2.4vw,3.25rem)] font-extrabold leading-tight tracking-display">
           {student.last_name}
         </p>
-        <p className="truncate text-base font-medium text-white/85 sm:text-lg">
+        <p className="truncate text-[clamp(1rem,1.1vw,1.5rem)] font-medium text-white/85">
           {student.first_name}
         </p>
       </div>
 
-      <p className="relative mt-3 font-mono text-[0.6875rem] uppercase tracking-eyebrow text-white/75">
+      {/* Not decoration and not redundant: it is the whole signal for anyone
+          in the room who cannot separate the red from the green. */}
+      <p className="relative mt-3 font-mono text-[clamp(0.6875rem,0.7vw,1rem)] uppercase tracking-eyebrow text-white/85">
         {arrived ? "Arrived" : "Waiting"}
       </p>
     </li>

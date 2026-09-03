@@ -52,7 +52,9 @@ type ConnectionState = "connecting" | "live" | "error";
  * table's replica identity. This is the one place that gap is bridged, with a
  * runtime check rather than a blind cast.
  */
-function fullRowOrNull(row: Partial<Student> | Record<string, never>): Student | null {
+function fullRowOrNull(
+  row: Partial<Student> | Record<string, never>,
+): Student | null {
   return "id" in row && "status" in row && "updated_at" in row
     ? (row as Student)
     : null;
@@ -99,7 +101,9 @@ export function DisplayBoard({
     createChimeCoalescer({ windowMs: CHIME_COALESCE_WINDOW_MS }),
   );
   const playerRef = useRef(createChimePlayer("/chime.wav"));
-  const flashTimeoutsRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const flashTimeoutsRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>(),
+  );
 
   /**
    * Flashes the given tiles and fires at most one chime for the whole batch.
@@ -159,7 +163,12 @@ export function DisplayBoard({
             const now = new Date().toISOString();
             const payload: StudentChangePayload = {
               eventType: "UPDATE",
-              new: { ...current, status: "arrived", arrived_at: now, updated_at: now },
+              new: {
+                ...current,
+                status: "arrived",
+                arrived_at: now,
+                updated_at: now,
+              },
               old: current,
             };
             const result = reconcile(prev, payload);
@@ -274,7 +283,13 @@ export function DisplayBoard({
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-ink">
+    // h-screen, not min-h-screen: a board screwed to a wall is exactly one
+    // screen tall and nobody is going to scroll it. A definite height is also
+    // what lets the grid's `1fr` rows divide the space instead of resolving to
+    // their content -- with min-h-screen the last row simply fell off a 1080p
+    // display. If a roster is long enough that the rows hit their legibility
+    // floor, the grid itself scrolls; the header stays put.
+    <main className="flex h-screen flex-col overflow-hidden bg-ink">
       <PageHeader
         eyebrow="Pickup line · live"
         title="Display"
@@ -283,9 +298,13 @@ export function DisplayBoard({
             {soundBlocked && <SoundToggle onEnable={enableSound} />}
             {!configError && (
               <p className="whitespace-nowrap font-mono text-xs">
-                <span className="text-waiting-screen">{waitingCount} waiting</span>
+                <span className="text-waiting-screen">
+                  {waitingCount} waiting
+                </span>
                 <span className="text-white/40"> · </span>
-                <span className="text-arrived-screen">{arrivedCount} arrived</span>
+                <span className="text-arrived-screen">
+                  {arrivedCount} arrived
+                </span>
               </p>
             )}
           </div>
@@ -298,7 +317,9 @@ export function DisplayBoard({
       <p aria-live="polite" className="sr-only">
         {students
           .filter((student) => flashingIds.has(student.id))
-          .map((student) => `${student.first_name} ${student.last_name} arrived`)
+          .map(
+            (student) => `${student.first_name} ${student.last_name} arrived`,
+          )
           .join(". ")}
       </p>
 
