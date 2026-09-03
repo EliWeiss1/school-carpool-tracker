@@ -104,3 +104,89 @@ describe("createRosterImportHandler", () => {
     expect(store.rows()).toHaveLength(1);
   });
 });
+
+describe("roster-import — a repeated import must not duplicate the roster", () => {
+  // A duplicated roster is not a cosmetic problem. Two identical rows score
+  // identically in the resolver, so the margin between them is 0, which is
+  // below MATCH_POLICY.clearMargin -- and the "clear" tier stops existing for
+  // every child in the school. The realistic trigger is mundane: the request
+  // commits, the response is lost on school wifi, the admin presses Import
+  // again.
+  it("rejects an import containing a student already on the roster", async () => {
+    const { store, handle } = setup();
+
+    const response = await handle(
+      imp([{ first_name: "Maya", last_name: "Cohen" }]),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/already on the roster/i),
+    });
+    expect(store.rows()).toHaveLength(1);
+  });
+
+  it("names the child that collided, so the admin can find the row", async () => {
+    const { handle } = setup();
+
+    const response = await handle(
+      imp([
+        { first_name: "Theo", last_name: "Ng" },
+        { first_name: "Maya", last_name: "Cohen" },
+      ]),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("Maya Cohen"),
+    });
+  });
+
+  it("writes nothing at all when one row collides", async () => {
+    const { store, handle } = setup();
+
+    await handle(
+      imp([
+        { first_name: "Theo", last_name: "Ng" },
+        { first_name: "Maya", last_name: "Cohen" },
+      ]),
+    );
+
+    // All-or-nothing: half a roster is worse than none, because nobody can
+    // tell which half landed.
+    expect(store.rows()).toHaveLength(1);
+  });
+
+  it("matches names case-insensitively, the way the resolver does", async () => {
+    const { handle } = setup();
+
+    const response = await handle(
+      imp([{ first_name: "maya", last_name: "COHEN" }]),
+    );
+
+    expect(response.status).toBe(409);
+  });
+
+  it("still accepts an import of genuinely new students", async () => {
+    const { store, handle } = setup();
+
+    const response = await handle(
+      imp([
+        { first_name: "Theo", last_name: "Ng" },
+        { first_name: "Ava", last_name: "Marsh" },
+      ]),
+    );
+
+    expect(response.status).toBe(200);
+    expect(store.rows()).toHaveLength(3);
+  });
+
+  it("rejects a name too long to be a name", async () => {
+    const { handle } = setup();
+
+    const response = await handle(
+      imp([{ first_name: "Theo", last_name: "N".repeat(400) }]),
+    );
+
+    expect(response.status).toBe(400);
+  });
+});

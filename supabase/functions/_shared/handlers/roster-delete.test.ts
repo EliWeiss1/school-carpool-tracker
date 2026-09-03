@@ -26,7 +26,12 @@ const post = (body: unknown) =>
   });
 
 const del = (overrides: Record<string, unknown> = {}) =>
-  post({ pin: STAFF_PIN, deviceId: "office-1", studentId: "cohen", ...overrides });
+  post({
+    pin: STAFF_PIN,
+    deviceId: "office-1",
+    studentId: "cohen",
+    ...overrides,
+  });
 
 describe("createRosterDeleteHandler", () => {
   it("removes a student from the roster", async () => {

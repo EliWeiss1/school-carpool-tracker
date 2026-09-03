@@ -107,7 +107,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
         .select()
         .single();
 
-      if (error) throw new Error(`Could not add that student: ${error.message}`);
+      if (error)
+        throw new Error(`Could not add that student: ${error.message}`);
       return data as StudentRow;
     },
 

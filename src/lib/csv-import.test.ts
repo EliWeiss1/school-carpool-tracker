@@ -22,7 +22,7 @@ describe("parseRosterCsv — header handling", () => {
 
   it("matches friendly header names case-insensitively", () => {
     const report = parseRosterCsv(
-      "First Name,Last Name,Aliases,Grade,Class\nTheo,Ng,\"Eng, Ang\",K,K-Alvarez\n",
+      'First Name,Last Name,Aliases,Grade,Class\nTheo,Ng,"Eng, Ang",K,K-Alvarez\n',
     );
 
     expect(report.headerErrors).toEqual([]);
@@ -78,14 +78,32 @@ describe("parseRosterCsv — row handling", () => {
     ]);
   });
 
-  it("flags a row with the wrong number of fields as broken, without crashing the rest of the file", () => {
+  it("imports a row that stopped short, treating the missing columns as blank", () => {
+    // Dropping trailing empty columns is normal exporter behaviour, not a
+    // broken file. Erroring on it turned a 400-row import into 400 errors.
     const report = parseRosterCsv(
       "first_name,last_name,grade\nMaya,Cohen,K\nTheo,Ng\nNora,Chen,K\n",
     );
 
+    expect(report.toImport.map((s) => s.last_name)).toEqual([
+      "Cohen",
+      "Ng",
+      "Chen",
+    ]);
+    expect(report.errors).toEqual([]);
+    expect(report.toImport[1].grade).toBeNull();
+  });
+
+  it("flags a row with MORE fields than the header, without crashing the rest of the file", () => {
+    // This direction really is broken: the values no longer line up with the
+    // column names, so there is no safe way to guess what was meant.
+    const report = parseRosterCsv(
+      "first_name,last_name,grade\nMaya,Cohen,K\nTheo,Ng,K,extra\nNora,Chen,K\n",
+    );
+
     expect(report.toImport.map((s) => s.last_name)).toEqual(["Cohen", "Chen"]);
     expect(report.errors).toEqual([
-      { rowNumber: 3, message: expect.stringMatching(/3 columns.*2/i) },
+      { rowNumber: 3, message: expect.stringMatching(/3 columns.*4/i) },
     ]);
   });
 
@@ -94,9 +112,9 @@ describe("parseRosterCsv — row handling", () => {
       "first_name,last_name\nMaya,Cohen\nElias,Kohen\nMaya,Cohen\n",
     );
 
-    expect(report.toImport.map((s) => `${s.first_name} ${s.last_name}`)).toEqual(
-      ["Maya Cohen", "Elias Kohen"],
-    );
+    expect(
+      report.toImport.map((s) => `${s.first_name} ${s.last_name}`),
+    ).toEqual(["Maya Cohen", "Elias Kohen"]);
     expect(report.errors).toEqual([
       {
         rowNumber: 4,
@@ -157,9 +175,7 @@ describe("parseRosterCsv — quoting, BOM, and line endings", () => {
   });
 
   it("strips a UTF-8 BOM at the start of the file", () => {
-    const report = parseRosterCsv(
-      "﻿first_name,last_name\nMaya,Cohen\n",
-    );
+    const report = parseRosterCsv("﻿first_name,last_name\nMaya,Cohen\n");
 
     expect(report.headerErrors).toEqual([]);
     expect(report.toImport).toHaveLength(1);
@@ -193,5 +209,77 @@ describe("parseRosterCsv — summary counts", () => {
     expect(report.errors).toHaveLength(2);
     expect(report.blankRowsSkipped).toBe(1);
     expect(report.totalDataRows).toBe(5);
+  });
+});
+
+describe("parseRosterCsv — malformed files must never import silently", () => {
+  // The worst failure this parser can have is not a crash, it is a clean
+  // bill of health on a file it did not fully read. One stray quotation mark
+  // used to swallow every row after it into the field it opened, and the
+  // report said "1 row, 1 will import, 0 errors".
+  it("refuses a file whose quotation mark is never closed", () => {
+    const report = parseRosterCsv(
+      'first_name,last_name\nMaya,"Cohen\nTheo,Ng\nAva,Marsh\n',
+    );
+
+    expect(report.headerErrors.length).toBeGreaterThan(0);
+    expect(report.headerErrors[0]).toMatch(/quotation mark/i);
+    expect(report.toImport).toHaveLength(0);
+  });
+
+  it("does not swallow later rows into the field an unclosed quote opened", () => {
+    const report = parseRosterCsv(
+      'first_name,last_name\nMaya,"Cohen\nTheo,Ng\n',
+    );
+
+    expect(
+      report.toImport.some((student) => student.last_name.includes("Theo")),
+    ).toBe(false);
+  });
+
+  it("binds a field to its own column, not to whichever alias appears first", () => {
+    // "last" and "last_name" are both aliases of last_name. Scanning the
+    // file's columns for "any alias" let the wrong one win.
+    const report = parseRosterCsv("last,first_name,last_name\nX,Maya,Cohen\n");
+
+    expect(report.toImport[0]?.last_name).toBe("Cohen");
+    expect(report.toImport[0]?.first_name).toBe("Maya");
+  });
+
+  it("pads a row that omits its trailing empty columns", () => {
+    // Plenty of SIS exports drop trailing empties. Rejecting all 400 rows
+    // with a column-count error is a report nobody can act on.
+    const report = parseRosterCsv(
+      "first_name,last_name,grade,class_group\nMaya,Cohen\n",
+    );
+
+    expect(report.errors).toHaveLength(0);
+    expect(report.toImport[0]).toMatchObject({
+      first_name: "Maya",
+      last_name: "Cohen",
+      grade: null,
+      class_group: null,
+    });
+  });
+
+  it("still rejects a row with more columns than the header", () => {
+    const report = parseRosterCsv(
+      "first_name,last_name\nMaya,Cohen,extra,more\n",
+    );
+
+    expect(report.errors).toHaveLength(1);
+    expect(report.toImport).toHaveLength(0);
+  });
+
+  it("rejects a name too long to be a name rather than storing it", () => {
+    // An unbounded name reaches the Deepgram keyterm list and the display
+    // tile. Nothing between the file and Postgres bounded this.
+    const report = parseRosterCsv(
+      `first_name,last_name\nMaya,${"C".repeat(500)}\n`,
+    );
+
+    expect(report.errors).toHaveLength(1);
+    expect(report.errors[0].message).toMatch(/too long/i);
+    expect(report.toImport).toHaveLength(0);
   });
 });

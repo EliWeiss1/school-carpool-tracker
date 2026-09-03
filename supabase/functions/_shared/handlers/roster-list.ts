@@ -8,11 +8,7 @@
  * write-adjacent endpoint is, even though it only reads.
  */
 
-import {
-  jsonResponse,
-  preflight,
-  withStoreErrors,
-} from "../http.ts";
+import { jsonResponse, preflight, withStoreErrors } from "../http.ts";
 import type { RosterStore } from "../ports.ts";
 import { rosterFilterFrom } from "./filter.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";

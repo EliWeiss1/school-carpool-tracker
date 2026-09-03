@@ -21,10 +21,10 @@ import {
 } from "../http.ts";
 import type { RosterStore, StudentWriteInput } from "../ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
-import { readAliases } from "./roster-input.ts";
+import { nameKey, nameTooLong, readAliases } from "./roster-input.ts";
 
 export interface RosterWriteHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "createStudent" | "updateStudent">;
+  store: Pick<RosterStore, "createStudent" | "updateStudent" | "list">;
 }
 
 export function createRosterWriteHandler(deps: RosterWriteHandlerDeps) {
@@ -56,12 +56,38 @@ async function create(
     return errorResponse(400, "A student needs a first and last name.");
   }
 
+  const grade = readString(body, "grade");
+  const classGroup = readString(body, "class_group");
+  if (nameTooLong(firstName, lastName, grade, classGroup)) {
+    return errorResponse(
+      400,
+      "One of those entries is far too long to be a name. Check the row for a stray quotation mark.",
+    );
+  }
+
+  // Adding the same child twice is what a double-tapped Add button does, and a
+  // duplicated roster row breaks the matcher rather than merely cluttering it:
+  // two identical rows score identically, the margin between them is 0, and
+  // the "clear" tier stops existing for every child in the school.
+  const existing = await deps.store.list({});
+  const alreadyOnRoster = existing.some(
+    (student) =>
+      nameKey(student.first_name, student.last_name) ===
+      nameKey(firstName, lastName),
+  );
+  if (alreadyOnRoster) {
+    return errorResponse(
+      409,
+      `${firstName} ${lastName} is already on the roster. Edit the existing entry instead of adding a second one.`,
+    );
+  }
+
   const input: StudentWriteInput = {
     first_name: firstName,
     last_name: lastName,
     aliases: readAliases(body),
-    grade: readString(body, "grade"),
-    class_group: readString(body, "class_group"),
+    grade,
+    class_group: classGroup,
   };
 
   const student = await deps.store.createStudent(input);
@@ -96,7 +122,22 @@ async function update(
 
   if ("aliases" in body) patch.aliases = readAliases(body);
   if ("grade" in body) patch.grade = readString(body, "grade");
-  if ("class_group" in body) patch.class_group = readString(body, "class_group");
+  if ("class_group" in body)
+    patch.class_group = readString(body, "class_group");
+
+  if (
+    nameTooLong(
+      patch.first_name ?? null,
+      patch.last_name ?? null,
+      patch.grade ?? null,
+      patch.class_group ?? null,
+    )
+  ) {
+    return errorResponse(
+      400,
+      "One of those entries is far too long to be a name. Check the row for a stray quotation mark.",
+    );
+  }
 
   const student = await deps.store.updateStudent(studentId, patch);
   if (student === null) {

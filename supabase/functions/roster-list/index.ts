@@ -19,7 +19,12 @@ const handle = createRosterListHandler({
   rateLimiter: createRateLimiter({ limit: 60, windowMs: 60_000 }),
   // Keyed on client IP and spent only on a wrong PIN, because deviceId above
   // comes out of the request body and a guesser simply sends a new one.
-  pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
+  //
+  // NOTE: this budget is a SHARED quantity, and nothing in the type system
+  // says so. Each Edge Function is its own isolate, so the limits do not pool
+  // -- a guesser gets the SUM across every deployed endpoint. See
+  // supabase/functions/pin-budget.test.ts, which enforces the total.
+  pinAttemptLimiter: createRateLimiter({ limit: 3, windowMs: 600_000 }),
   store: createSupabaseStore(env),
 });
 

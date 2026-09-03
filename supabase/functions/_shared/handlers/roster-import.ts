@@ -18,10 +18,10 @@ import {
 } from "../http.ts";
 import type { RosterStore, StudentWriteInput } from "../ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
-import { readAliases } from "./roster-input.ts";
+import { nameKey, nameTooLong, readAliases } from "./roster-input.ts";
 
 export interface RosterImportHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "bulkCreateStudents">;
+  store: Pick<RosterStore, "bulkCreateStudents" | "list">;
 }
 
 /** Comfortably above any real school roster; a stop against a malformed body. */
@@ -41,6 +41,15 @@ function readStudentsInput(
     const firstName = readString(row, "first_name");
     const lastName = readString(row, "last_name");
     if (firstName === null || lastName === null) return null;
+    if (
+      nameTooLong(
+        firstName,
+        lastName,
+        readString(row, "grade"),
+        readString(row, "class_group"),
+      )
+    )
+      return null;
 
     out.push({
       first_name: firstName,
@@ -76,6 +85,38 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
     }
 
     return await withStoreErrors(async () => {
+      // Reject the whole import if any child is already on the roster.
+      //
+      // The realistic trigger is not malice, it is a lost response: the insert
+      // commits, school wifi drops the reply, the admin presses Import again.
+      // A duplicated roster is not cosmetic -- two identical rows score
+      // identically in the resolver, so the margin between them is 0, below
+      // MATCH_POLICY.clearMargin, and the "clear" tier stops existing for
+      // every child in the school. Every pickup becomes a two-tap choice
+      // between two buttons the person outside cannot tell apart.
+      //
+      // This is a check-then-write and therefore racy under two simultaneous
+      // imports. That is acceptable here -- imports come from one office
+      // computer, a term at a time -- but a unique index on
+      // (lower(first_name), lower(last_name)) is the real fix and is the
+      // recommended follow-up.
+      const existing = await deps.store.list({});
+      const onRoster = new Set(
+        existing.map((student) =>
+          nameKey(student.first_name, student.last_name),
+        ),
+      );
+
+      const collision = students.find((student) =>
+        onRoster.has(nameKey(student.first_name, student.last_name)),
+      );
+      if (collision) {
+        return errorResponse(
+          409,
+          `${collision.first_name} ${collision.last_name} is already on the roster, so nothing was imported. Remove the students who are already listed and import again.`,
+        );
+      }
+
       const created = await deps.store.bulkCreateStudents(students);
       return jsonResponse({ created: created.length, students: created });
     });

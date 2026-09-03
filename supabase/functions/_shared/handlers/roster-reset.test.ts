@@ -8,9 +8,24 @@ const STAFF_PIN = "4821";
 
 function setup() {
   const store = createFakeStore([
-    makeStudent({ id: "cohen", first_name: "Maya", last_name: "Cohen", status: "arrived" }),
-    makeStudent({ id: "marsh", first_name: "Ava", last_name: "Marsh", status: "arrived" }),
-    makeStudent({ id: "ng", first_name: "Theo", last_name: "Ng", status: "waiting" }),
+    makeStudent({
+      id: "cohen",
+      first_name: "Maya",
+      last_name: "Cohen",
+      status: "arrived",
+    }),
+    makeStudent({
+      id: "marsh",
+      first_name: "Ava",
+      last_name: "Marsh",
+      status: "arrived",
+    }),
+    makeStudent({
+      id: "ng",
+      first_name: "Theo",
+      last_name: "Ng",
+      status: "waiting",
+    }),
   ]);
   const handle = createRosterResetHandler({
     staffPin: STAFF_PIN,

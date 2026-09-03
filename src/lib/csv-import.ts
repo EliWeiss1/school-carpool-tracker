@@ -12,7 +12,8 @@
  * and RFC 4180 quoting is not a large rule set to get right once.
  */
 
-export type CsvField = "first_name" | "last_name" | "aliases" | "grade" | "class_group";
+export type CsvField =
+  "first_name" | "last_name" | "aliases" | "grade" | "class_group";
 
 export interface CsvImportStudent {
   first_name: string;
@@ -49,18 +50,28 @@ export interface CsvImportReport {
 const HEADER_ALIASES: Record<CsvField, string[]> = {
   first_name: ["first_name", "firstname", "first name", "first"],
   last_name: ["last_name", "lastname", "last name", "last", "surname"],
-  aliases: ["aliases", "alias", "alternate spellings", "alt names", "nicknames"],
-  grade: ["grade", "grade level"],
-  class_group: [
-    "class_group",
-    "class",
-    "classroom",
-    "class group",
-    "homeroom",
+  aliases: [
+    "aliases",
+    "alias",
+    "alternate spellings",
+    "alt names",
+    "nicknames",
   ],
+  grade: ["grade", "grade level"],
+  class_group: ["class_group", "class", "classroom", "class group", "homeroom"],
 };
 
 const REQUIRED_FIELDS: CsvField[] = ["first_name", "last_name"];
+
+/**
+ * Nothing between a CSV file and Postgres bounded a name, and the columns are
+ * bare `text`. An unbounded surname does not just sit there: keyterms.ts pushes
+ * it into the Deepgram keyterm list, which plausibly breaks token minting for
+ * the whole school, and /display renders it as one enormous tile.
+ *
+ * 120 is far past any real name and far short of a problem.
+ */
+export const MAX_NAME_LENGTH = 120;
 
 /**
  * RFC 4180 tokenizer: quoted fields, `""` as an escaped quote, commas and
@@ -68,7 +79,17 @@ const REQUIRED_FIELDS: CsvField[] = ["first_name", "last_name"];
  * terminator outside of quotes. A trailing terminator at end-of-file does not
  * manufacture a phantom empty row.
  */
-function tokenizeCsv(text: string): string[][] {
+interface TokenizedCsv {
+  rows: string[][];
+  /**
+   * True when end-of-file arrived with a quoted field still open. Everything
+   * after the stray quote was absorbed into that one field, so the rows are
+   * not what the file's author wrote and must not be imported.
+   */
+  unterminatedQuote: boolean;
+}
+
+function tokenizeCsv(text: string): TokenizedCsv {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
@@ -142,7 +163,7 @@ function tokenizeCsv(text: string): string[][] {
     pushRow();
   }
 
-  return rows;
+  return { rows, unterminatedQuote: inQuotes };
 }
 
 function normalizeHeader(value: string): string {
@@ -153,11 +174,18 @@ function mapHeaders(headerRow: string[]): Partial<Record<CsvField, number>> {
   const normalized = headerRow.map(normalizeHeader);
   const result: Partial<Record<CsvField, number>> = {};
 
+  // Walk the ALIASES in priority order and take the first that the file has,
+  // rather than walking the FILE and taking the first column matching any
+  // alias. The latter let "last" beat "last_name" purely by appearing to its
+  // left, which silently bound every surname to the wrong column.
   for (const field of Object.keys(HEADER_ALIASES) as CsvField[]) {
-    const index = normalized.findIndex((header) =>
-      HEADER_ALIASES[field].includes(header),
-    );
-    if (index !== -1) result[field] = index;
+    for (const alias of HEADER_ALIASES[field]) {
+      const index = normalized.indexOf(alias);
+      if (index !== -1) {
+        result[field] = index;
+        break;
+      }
+    }
   }
 
   return result;
@@ -178,7 +206,19 @@ function nullableTrim(value: string | undefined): string | null {
 
 export function parseRosterCsv(text: string): CsvImportReport {
   const stripped = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-  const rows = tokenizeCsv(stripped);
+  const { rows, unterminatedQuote } = tokenizeCsv(stripped);
+
+  if (unterminatedQuote) {
+    return {
+      headerErrors: [
+        "A quotation mark in this file is never closed, so the rows after it cannot be read. Fix the quotation mark and export the file again.",
+      ],
+      toImport: [],
+      errors: [],
+      blankRowsSkipped: 0,
+      totalDataRows: 0,
+    };
+  }
 
   if (rows.length === 0) {
     return {
@@ -226,16 +266,26 @@ export function parseRosterCsv(text: string): CsvImportReport {
       return;
     }
 
-    if (fields.length !== expectedColumns) {
+    // A row with FEWER columns than the header is almost always an exporter
+    // dropping trailing empties, so pad it. More columns than the header is a
+    // real structural problem -- the values no longer line up with the names.
+    if (fields.length > expectedColumns) {
       errors.push({
         rowNumber,
         message: `Expected ${expectedColumns} columns (matching the header) but this row has ${fields.length}.`,
       });
       return;
     }
+    const padded =
+      fields.length === expectedColumns
+        ? fields
+        : [
+            ...fields,
+            ...Array<string>(expectedColumns - fields.length).fill(""),
+          ];
 
-    const firstName = (fields[columnIndex.first_name!] ?? "").trim();
-    const lastName = (fields[columnIndex.last_name!] ?? "").trim();
+    const firstName = (padded[columnIndex.first_name!] ?? "").trim();
+    const lastName = (padded[columnIndex.last_name!] ?? "").trim();
 
     if (firstName === "") {
       errors.push({ rowNumber, message: "Missing a first name." });
@@ -243,6 +293,18 @@ export function parseRosterCsv(text: string): CsvImportReport {
     }
     if (lastName === "") {
       errors.push({ rowNumber, message: "Missing a last name." });
+      return;
+    }
+
+    const tooLong = [
+      ["first name", firstName],
+      ["last name", lastName],
+    ].find(([, value]) => value.length > MAX_NAME_LENGTH);
+    if (tooLong) {
+      errors.push({
+        rowNumber,
+        message: `That ${tooLong[0]} is too long (${tooLong[1].length} characters, limit ${MAX_NAME_LENGTH}). Check for a stray quotation mark on this row.`,
+      });
       return;
     }
 
@@ -262,15 +324,15 @@ export function parseRosterCsv(text: string): CsvImportReport {
       last_name: lastName,
       aliases:
         columnIndex.aliases !== undefined
-          ? splitAliases(fields[columnIndex.aliases] ?? "")
+          ? splitAliases(padded[columnIndex.aliases] ?? "")
           : [],
       grade:
         columnIndex.grade !== undefined
-          ? nullableTrim(fields[columnIndex.grade])
+          ? nullableTrim(padded[columnIndex.grade])
           : null,
       class_group:
         columnIndex.class_group !== undefined
-          ? nullableTrim(fields[columnIndex.class_group])
+          ? nullableTrim(padded[columnIndex.class_group])
           : null,
     });
   });

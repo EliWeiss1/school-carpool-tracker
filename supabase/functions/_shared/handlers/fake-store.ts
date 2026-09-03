@@ -15,9 +15,18 @@ import type {
   StudentWriteInput,
 } from "../ports.ts";
 
+/**
+ * An audit row as it exists AFTER the roster row it points at may have been
+ * deleted -- `status_events.student_id` is nullable and the FK is
+ * `on delete set null`, so the event outlives the student without naming them.
+ */
+export type LoggedEvent = Omit<StatusEventInput, "studentId"> & {
+  studentId: string | null;
+};
+
 export interface FakeStore extends RosterStore {
   /** Every event the handlers logged, in order. */
-  events: StatusEventInput[];
+  events: LoggedEvent[];
   rows(): StudentRow[];
   row(id: string): StudentRow | undefined;
 }
@@ -42,7 +51,7 @@ export function makeStudent(overrides: Partial<StudentRow> = {}): StudentRow {
 
 export function createFakeStore(initial: StudentRow[]): FakeStore {
   const students = initial.map((student) => ({ ...student }));
-  const events: StatusEventInput[] = [];
+  const events: LoggedEvent[] = [];
 
   return {
     events,
@@ -122,9 +131,16 @@ export function createFakeStore(initial: StudentRow[]): FakeStore {
     removeStudent(id: string): Promise<boolean> {
       const index = students.findIndex((student) => student.id === id);
       if (index === -1) return Promise.resolve(false);
-      // Mirrors the FK's `on delete set null`: any events already logged for
-      // this student stay in place, just no longer joined to a roster row.
       students.splice(index, 1);
+
+      // The FK really is `on delete set null` (schema.test.ts proves it by
+      // execution), so the audit row survives the student but stops naming
+      // them. The fake used to leave studentId intact, which is the more
+      // forgiving behaviour -- and a fake that is kinder than Postgres lets a
+      // handler test pass on something production would not do.
+      for (let i = 0; i < events.length; i++) {
+        if (events[i].studentId === id) events[i].studentId = null;
+      }
       return Promise.resolve(true);
     },
 

@@ -186,3 +186,52 @@ describe("createRosterWriteHandler — update", () => {
     expect(store.row("cohen")?.arrived_at).toBeNull();
   });
 });
+
+describe("createRosterWriteHandler — bounds and duplicates", () => {
+  it("refuses to add a child who is already on the roster", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      base({ first_name: "Maya", last_name: "Cohen" }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(store.rows()).toHaveLength(1);
+  });
+
+  it("compares those names case-insensitively", async () => {
+    const { handle } = setup();
+
+    const response = await handle(
+      base({ first_name: "MAYA", last_name: "cohen" }),
+    );
+
+    expect(response.status).toBe(409);
+  });
+
+  it("still lets an existing student be edited without tripping the check", async () => {
+    const { handle } = setup();
+
+    const response = await handle(
+      base({
+        studentId: "cohen",
+        first_name: "Maya",
+        last_name: "Cohen",
+        grade: "1",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("rejects a name too long to be a name", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      base({ first_name: "Theo", last_name: "N".repeat(400) }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(store.rows()).toHaveLength(1);
+  });
+});
