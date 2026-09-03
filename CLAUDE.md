@@ -510,18 +510,122 @@ boxes.
       Zoe Koen, nothing preselected → typed search on "Cohen" → tap Maya Cohen
       → `set-status` confirmed her arrived, with the 2-minute undo window
       showing and counting down.
+- [x] Real Deepgram streaming client (`src/lib/speech-deepgram.ts`) — built,
+      unit-tested, twice reviewed by `careful-review`, and **verified live**:
+      `scripts/verify-deepgram-live.ts` minted a real token, connected, and
+      transcribed a locally-synthesized "Nguyen" correctly. That run is also
+      what caught the one bug review couldn't have: the client authenticated
+      with the wrong `Sec-WebSocket-Protocol` scheme (`token` instead of
+      `bearer`), which would have made real voice fail silently, every time.
+      **Still not tested on a real device** — see "The real Deepgram client"
+      below.
 
 **How phase 4 is verified.** The whole screen is a pure reducer
 (`src/lib/announce-reducer.ts`) with `announce-screen.tsx` as a thin dispatcher,
 so mic status, tier handling, banners, the confirm lifecycle and the undo window
 are all unit-tested with no DOM and no network. `speech-mock.ts` implements the
-`SpeechSource` interface a real Deepgram client will later fulfil, and a test
-stubs `fetch` and `WebSocket` to throw and asserts they are never touched — so
-mock mode cannot leak a real Deepgram call. `announce-undo.ts` and
-`announce-token.ts` take an injected `now`. On top of that, the whole PIN →
-mic → candidates → confirm path has been run against the deployed
-`deepgram-token`, `resolve-name` and `set-status` functions and the live
-seeded roster (see `HANDOFF.md`).
+`SpeechSource` interface `speech-deepgram.ts`'s `createDeepgramSpeechSource`
+also implements — `announce-screen.tsx` only ever picks which one to call,
+based on `NEXT_PUBLIC_MOCK_SPEECH` — and a test on the mock stubs `fetch` and
+`WebSocket` to throw and asserts they are never touched, so mock mode cannot
+leak a real Deepgram call. `announce-undo.ts` and `announce-token.ts` take an
+injected `now`. On top of that, the whole PIN → mic → candidates → confirm
+path has been run against the deployed `deepgram-token`, `resolve-name` and
+`set-status` functions and the live seeded roster (see `HANDOFF.md`) — with
+`NEXT_PUBLIC_MOCK_SPEECH=true`, i.e. exercising everything except the real
+speech client itself.
+
+**The real Deepgram client.** `speech-mock.ts` was, for a while, the *only*
+`SpeechSource` implementation — `announce-screen.tsx` called it
+unconditionally, ignoring `NEXT_PUBLIC_MOCK_SPEECH`, which meant `/announce`'s
+voice path had never actually transcribed real speech, in any environment,
+ever. (It also meant a real reported bug: a fresh mock instance was built on
+every press, resetting its demo script to entry #1 each time, so voice always
+"recognized" the same canned name no matter what was said or how many times
+the page was reloaded.) Both are fixed: `getSpeechSource()` in
+`announce-screen.tsx` now caches one `SpeechSource` per valid token and reuses
+it across presses — the `SpeechSource` contract was always meant to support
+repeated `start()`/`stop()` cycles on one instance, which is what makes the
+mock's own script cycling (and the real client's per-session bookkeeping)
+correct — and `createDeepgramSpeechSource` is a real implementation: mic →
+Web Audio (`ScriptProcessorNode`, chosen over `MediaRecorder` because
+Safari/iOS's MediaRecorder output isn't reliably chunk-streamable, and staff
+carry Android, iPhone, and laptops) → 16kHz mono PCM
+(`src/lib/audio-resample.ts`, pure and separately unit-tested) → a WebSocket to
+Deepgram's live-streaming endpoint, authenticated via the
+`Sec-WebSocket-Protocol` header (the browser-safe mechanism Deepgram
+documents, since custom `Authorization` headers aren't available to browser
+`WebSocket`) using the **`bearer`** subprotocol, not `token` — `token` is for
+a permanent API key used directly, while the short-lived JWT
+`deepgram-token` hands the browser (it never sends a permanent key) needs the
+`Bearer` scheme, the same distinction Deepgram's REST API makes between
+`Authorization: Token <key>` and `Authorization: Bearer <JWT>`. Confirmed
+empirically before shipping: `["token", <JWT>]` closes immediately (code
+1006, no useful error surfaced) while `["bearer", <JWT>]` opens — this was
+the one thing code review alone could never have caught, since it depends on
+Deepgram's actual server behavior, not anything visible in this repo. →
+`CloseStream` on release to force a flush → the final transcript, or a
+2-second safety timeout if Deepgram never answers.
+
+Every `start()`/`stop()` cycle is tagged with a `sessionId`, because a rapid
+double-press is reachable in real use: `handleMicPressEnd` clears its
+press-guard *before* awaiting `stop()`, so a second press can legitimately
+begin while the first is still waiting on Deepgram to finalize. `sessionId` is
+what keeps a superseded session's late timer, socket event, or in-flight
+connect attempt from ever tearing down the session that replaced it, rather
+than the mic silently staying live or a stray timer killing a different
+press's capture. Two review passes by `careful-review` found five real bugs
+in the first draft of this (a promise that could be poisoned before it was
+even assigned, a finalize timer with no session identity, an early Deepgram
+endpoint discarding what was said next, `cancel()` abandoning a pending
+`stop()` instead of resolving it, and a doomed in-flight attempt surviving a
+tap-then-press) plus a sixth I found myself on re-read (the mic and socket
+staying live for up to the connect timeout if released mid-connect) — all
+fixed, each with a regression test reproducing the original failure. A second
+review round then caught a regression the first round's own recommended fix
+introduced: resolving immediately on an already-known transcript skipped
+`CloseStream` entirely, so a self-correction ("Chen" — pause — "no, Chan")
+would have locked in the wrong half. Fixed by always letting `CloseStream`
+flush before answering; `lastFinal` is the fallback if nothing more comes
+back, never a shortcut past it.
+
+**What is proven and what isn't.** 466 tests, lint, typecheck, and build are
+all green, and the client's async/session logic is exercised against fake
+WebSocket and audio-capture implementations, including overlapping-press
+races. **The wire protocol has now also run against the real Deepgram API and
+succeeded**: `scripts/verify-deepgram-live.ts` — synthesizing a WAV locally
+with Windows SAPI (no cloud) and streaming it through the exact
+`buildDeepgramListenUrl`/`downsampleTo16kHz`/`float32ToInt16PCM` functions the
+browser client uses — minted a real token, connected, and got back
+`{"transcript":"nguyen","confidence":0.976...}` for a synthesized "Nguyen".
+
+That run is *why* this script existed: the first attempt failed with a
+same-endpoint 403 (the API key needed Member permission for `/v1/auth/grant`
+— fixed by reissuing the key with that role), and the second attempt
+connected but the socket closed immediately with no useful error (code 1006).
+Empirical testing (three quick real connection attempts, no audio, against
+the live API) found why: **`speech-deepgram.ts` had authenticated with the
+wrong `Sec-WebSocket-Protocol` scheme.** `options.token` is always a
+short-lived JWT from `/v1/auth/grant` — `deepgram-token` never sends a
+permanent API key to the browser — and Deepgram authenticates a granted JWT
+via `Bearer`, not `Token` (the same split as its REST API's `Authorization`
+header). The client shipped with `["token", jwt]`, which Deepgram silently
+rejects; `["bearer", jwt]` is what actually opens. This is exactly the kind
+of bug two rounds of code review could not have caught — it depends on
+Deepgram's real server behavior, not anything visible in this repo — which is
+the whole reason this live-verification step existed rather than calling the
+first review pass "done."
+
+Fixed and reverified: the full round trip above is with the corrected
+`bearer` scheme. `NEXT_PUBLIC_MOCK_SPEECH=true` is still what's deployed to
+Vercel production (unrelated to this fix — flipping it is still a separate,
+pending step), which is *why* the originally reported "always recognizes the
+same name" bug was live in the first place. **Still outstanding: a real
+click-and-talk test on an actual iPhone (Safari) and Android phone (Chrome).**
+Nothing above touches `MediaRecorder`, Safari, or the app's own PIN/token
+flow — it proves the wire protocol and the PCM math, not that
+`ScriptProcessorNode` capture behaves identically across real devices, which
+is the one thing that needs a human holding the hardware.
 
 Two writes exist in the whole screen, both in user-triggered handlers
 (`handleConfirm`, `handleUndo`). There is no code path from a transcript to a

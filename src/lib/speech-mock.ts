@@ -10,10 +10,11 @@
  * `setTimeout`, and hands back one of a small cycling set of canned
  * transcripts.
  *
- * `NEXT_PUBLIC_MOCK_SPEECH=true` selects this over a real implementation. The
- * real one is out of scope here for the same reason this file's tests spy on
- * `fetch`/`WebSocket` and assert they are never touched — nobody should be
- * able to add a real call to this module by accident.
+ * `NEXT_PUBLIC_MOCK_SPEECH=true` selects this over the real implementation
+ * (`createDeepgramSpeechSource` in `speech-deepgram.ts`), for the same reason
+ * this file's tests spy on `fetch`/`WebSocket` and assert they are never
+ * touched — nobody should be able to add a real call to this module by
+ * accident, and dev should never burn Deepgram credits by default.
  */
 
 import type { TranscriptAlternative } from "@/lib/api";
@@ -38,9 +39,9 @@ export interface CreateSpeechSourceOptions {
 }
 
 /**
- * The seam `announce-screen.tsx` programs against. A future real Deepgram
- * client implements this exact shape; nothing above `speech-mock.ts` needs to
- * change when it lands.
+ * The seam `announce-screen.tsx` programs against. `speech-deepgram.ts`'s
+ * `createDeepgramSpeechSource` implements this exact shape, so
+ * `announce-screen.tsx` only ever picks which factory to call.
  */
 export interface SpeechSource {
   /** Opens the mic. Resolves once actively listening. */

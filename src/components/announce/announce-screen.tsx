@@ -24,7 +24,16 @@ import { expiresAt, isFresh } from "@/lib/announce-token";
 import { formatRemaining, remainingMs } from "@/lib/announce-undo";
 import { ApiError, api } from "@/lib/api";
 import { publicEnv } from "@/lib/env";
-import { type SpeechSource, createMockSpeechSource } from "@/lib/speech-mock";
+import {
+  SpeechError,
+  createDeepgramSpeechSource,
+  isDeepgramSpeechSupported,
+} from "@/lib/speech-deepgram";
+import {
+  type SpeechSource,
+  type SpeechStatus,
+  createMockSpeechSource,
+} from "@/lib/speech-mock";
 import { usePinSession } from "@/lib/use-pin-session";
 
 /** Everything `deepgram-token` handed back, kept until it goes stale. */
@@ -54,6 +63,19 @@ export function AnnounceScreen() {
 
   const tokenCacheRef = useRef<TokenCache | null>(null);
   const micSessionRef = useRef<MicSession | null>(null);
+  /**
+   * The SpeechSource is a reusable session factory bound to one token, not a
+   * single-connection object -- start()/stop() are meant to cycle repeatedly
+   * on the same instance (that's why status resets to "idle" at the end of
+   * stop()). Recreating it on every press reset a fresh mock's internal
+   * rotation to its first entry every time, which is the literal cause of a
+   * real reported bug: voice always resolving to the same name no matter
+   * what was said. Reuse it for as long as the token is valid; only build a
+   * new one when a new token is actually minted.
+   */
+  const speechSourceRef = useRef<{ token: string; source: SpeechSource } | null>(
+    null,
+  );
   const [undoPending, setUndoPending] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -74,15 +96,17 @@ export function AnnounceScreen() {
 
   // A press that outlives the component (navigated away mid-listen) must not
   // keep a timer alive or, worse, resolve into a dispatch on an unmounted tree.
+  const unmountedRef = useRef(false);
   useEffect(() => {
     return () => {
-      micSessionRef.current?.source?.cancel();
+      unmountedRef.current = true;
+      speechSourceRef.current?.source.cancel();
     };
   }, []);
 
   function reportError(error: unknown, type: ErrorActionType) {
     const banner =
-      error instanceof ApiError
+      error instanceof ApiError || error instanceof SpeechError
         ? { tone: "error" as const, message: error.message }
         : {
             tone: "error" as const,
@@ -168,6 +192,37 @@ export function AnnounceScreen() {
     }
   }
 
+  /**
+   * Returns the one SpeechSource for this token, building it (mock or real,
+   * per NEXT_PUBLIC_MOCK_SPEECH) only when the token actually changed --
+   * never on every press. See the comment on speechSourceRef above.
+   */
+  function getSpeechSource(tokenInfo: TokenCache): SpeechSource {
+    const cached = speechSourceRef.current;
+    if (cached && cached.token === tokenInfo.token) return cached.source;
+
+    cached?.source.cancel();
+
+    const handlers = {
+      onStatusChange: (status: SpeechStatus) =>
+        dispatch({ type: "mic/status", status }),
+    };
+    const source = publicEnv.mockSpeech
+      ? createMockSpeechSource({
+          token: tokenInfo.token,
+          keyterms: tokenInfo.keyterms,
+          handlers,
+        })
+      : createDeepgramSpeechSource({
+          token: tokenInfo.token,
+          keyterms: tokenInfo.keyterms,
+          handlers,
+        });
+
+    speechSourceRef.current = { token: tokenInfo.token, source };
+    return source;
+  }
+
   async function finishMicRelease(source: SpeechSource) {
     try {
       const result = await source.stop();
@@ -190,19 +245,19 @@ export function AnnounceScreen() {
     dispatch({ type: "mic/status", status: "connecting" });
 
     const tokenInfo = await ensureToken();
+    // The component can unmount during this await (token fetch is a real
+    // network round trip). speechSourceRef is only populated by
+    // getSpeechSource() below, so before that point the unmount cleanup
+    // effect has nothing to cancel -- bail out here rather than open the mic
+    // on a component that's already gone.
+    if (unmountedRef.current) return;
     if (!tokenInfo) {
       if (micSessionRef.current === mic) micSessionRef.current = null;
       dispatch({ type: "mic/status", status: "idle" });
       return;
     }
 
-    const source = createMockSpeechSource({
-      token: tokenInfo.token,
-      keyterms: tokenInfo.keyterms,
-      handlers: {
-        onStatusChange: (status) => dispatch({ type: "mic/status", status }),
-      },
-    });
+    const source = getSpeechSource(tokenInfo);
     mic.source = source;
 
     if (mic.releaseRequested) {
@@ -303,9 +358,15 @@ export function AnnounceScreen() {
 
   const undoRemaining = state.undo ? remainingMs(state.undo, now) : 0;
   const showUndo = state.undo !== null && undoRemaining > 0;
-  const speechDisabledReason = publicEnv.mockSpeech
-    ? undefined
-    : "Voice capture is not set up on this device. Use the search above.";
+  // Mock mode needs no real capability check. Otherwise this reflects what
+  // the browser can actually do, not which speech backend is configured --
+  // a real Deepgram client now backs this, so "disabled" should mean "this
+  // device/browser can't do it" (no mic API, no WebSocket), not "voice was
+  // never wired up."
+  const speechDisabledReason =
+    publicEnv.mockSpeech || isDeepgramSpeechSupported()
+      ? undefined
+      : "Voice capture isn't available on this device or browser. Use the search above.";
 
   return (
     <main className="flex min-h-screen flex-col bg-curb-50">

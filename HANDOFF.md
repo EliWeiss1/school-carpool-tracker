@@ -414,3 +414,144 @@ confirmed URL and outcome.
   deliberate choice (no Deepgram key exists, and CLAUDE.md forbids spending
   Deepgram credits without asking first) — not a bug, but worth knowing before
   telling real staff to try the microphone expecting real transcription.
+  **Update: this combined with a real bug to look like something worse in
+  practice — see section 9.**
+
+## 9. The real Deepgram client, and the bug that got reported first
+
+The Vercel deploy went live per section 8, `NEXT_PUBLIC_MOCK_SPEECH=true` and
+all. The user then reported: `/announce` "repeatedly thinks I'm announcing
+[name] ... if that's what I said first" — even across a full page reload.
+
+**Root cause was two things, not one.** `announce-screen.tsx` called
+`createMockSpeechSource(...)` unconditionally at its one construction site —
+never gated on `NEXT_PUBLIC_MOCK_SPEECH` at all, so `/announce`'s voice path
+had never transcribed real speech in *any* environment, ever. That alone
+explains "not real speech recognition." It doesn't explain "always the same
+name." That part was a second, independent bug: a fresh `SpeechSource` was
+built on every single press instead of being reused, which reset the mock's
+internal script-rotation index to 0 every time — so the mock never even
+cycled through its four canned demo lines as designed, it returned entry #1
+("Cohen") on every press, forever, regardless of what was said.
+
+**Fixed, and the real client built**, in one pass:
+
+1. `getSpeechSource()` in `announce-screen.tsx` now caches one `SpeechSource`
+   per valid token and reuses it across presses — fixes the reported bug on
+   its own, independent of mock vs. real.
+2. `src/lib/speech-deepgram.ts` — a real `createDeepgramSpeechSource`
+   implementing the same `SpeechSource` interface the mock does: mic → Web
+   Audio (`ScriptProcessorNode`, not `MediaRecorder` — Safari/iOS's
+   MediaRecorder output isn't reliably chunk-streamable, and staff carry
+   Android, iPhone, and laptops) → 16kHz mono PCM
+   (`src/lib/audio-resample.ts`) → Deepgram's live WebSocket, authenticated
+   via the `Sec-WebSocket-Protocol` token subprotocol → `CloseStream` on
+   release → the final transcript.
+3. `announce-screen.tsx` now actually branches on `NEXT_PUBLIC_MOCK_SPEECH` to
+   pick mock vs. real, and `speechDisabledReason` reflects real browser
+   capability (`isDeepgramSpeechSupported()`) instead of the mock flag.
+
+**Two `careful-review` passes**, matching how this project already reviews
+its riskier pieces. First pass found five real bugs in the session-lifecycle
+state machine (a `stopPromise` that could be poisoned before it was even
+assigned to; a finalize timer with no notion of *which* press it belonged to,
+so a fast double-press could have one press's timer kill the mic on a
+different, live press; an early Deepgram endpoint getting silently discarded;
+`cancel()` abandoning a pending `stop()` instead of resolving it, hanging the
+caller forever; and a doomed in-flight connection attempt surviving a
+tap-then-full-press). I found a sixth myself on re-read before sending it
+back: `stop()` released during "connecting" bumped the session but didn't
+tear down the mic/socket directly, so if `getUserMedia` had already resolved
+and the WebSocket already existed, both stayed live for up to the 8-second
+connect timeout. All six fixed, each with a regression test that was
+confirmed to fail without the fix (reverted, ran, restored) rather than taken
+on faith.
+
+**Second pass caught a regression the first pass's own recommended fix
+introduced**: the fix for "an early endpoint gets discarded" added a fast
+path that resolved as soon as *any* transcript was already known — which
+skipped `CloseStream` entirely, so a self-correction mid-press ("Chen" —
+pause — "no, Chan") would have locked in the wrong half forever. Fixed by
+removing the fast path: `CloseStream` always flushes before `stop()`
+resolves; the early transcript is only the fallback if nothing further comes
+back. Two smaller findings (error messages worth showing to staff verbatim
+were being thrown as plain `Error`s and swallowed into a generic fallback; an
+8-second connect-timeout timer could survive an aborted connection attempt)
+were also fixed.
+
+**Live verification: done, and it found a bug review couldn't have.**
+
+The user got a Deepgram API key and set `DEEPGRAM_API_KEY` as a Supabase
+secret and in `.env.local`. `scripts/verify-deepgram-live.ts` — synthesizes a
+short WAV locally with Windows SAPI (no cloud), mints a real grant token,
+streams the audio through the exact `buildDeepgramListenUrl` /
+`downsampleTo16kHz` / `float32ToInt16PCM` functions the browser client uses,
+and prints the transcript — was run three times:
+
+1. **403 Forbidden** minting the token. Cause: `/v1/auth/grant` requires an
+   API key with **Member** permission or higher; the key had a lower scope.
+   Fixed by reissuing the key with Member role in the Deepgram console.
+2. **Connected, then closed immediately** (WebSocket code 1006, no usable
+   error detail — Node's native WebSocket doesn't surface handshake-rejection
+   detail as a message). Root cause found by testing three connection
+   attempts directly against real Deepgram (no audio, a few seconds total):
+   `speech-deepgram.ts` authenticated with `Sec-WebSocket-Protocol: ["token",
+   <value>]`, but `<value>` is always a short-lived JWT from `/v1/auth/grant`
+   — `deepgram-token` never sends a permanent API key to the browser — and
+   Deepgram authenticates a granted JWT via **`Bearer`**, not `Token` (the
+   same split as its REST `Authorization` header). `["token", jwt]` closes
+   with code 1006; `["bearer", jwt]` opens. **This is exactly the kind of bug
+   two rounds of `careful-review` could not have caught** — it depends on
+   Deepgram's actual server behavior, not anything visible in this repo,
+   which is the whole reason this live-verification step existed rather than
+   calling the reviewed-and-tested code "done." Fixed in `speech-deepgram.ts`,
+   the verify script, and the test asserting the subprotocol.
+3. **Full success.** Real round trip: synthesized "Nguyen" → Deepgram
+   returned `{"transcript":"nguyen","confidence":0.976...}`.
+
+**What that does and doesn't prove:** the wire protocol, the auth handshake,
+and the PCM math are now proven against the real API — not merely plausible.
+It proves *nothing* about Safari/iOS-specific `ScriptProcessorNode` behavior,
+which is the whole reason that capture approach was chosen over
+`MediaRecorder` in the first place, and it never touched the app's own PIN
+gate or the deployed Edge Functions (deliberately independent, so it doesn't
+need the staff PIN to run).
+
+**Still outstanding, in order — both mock switches need to flip together:**
+
+There are two, in two different consoles, and they're more coupled than they
+look: `announce-screen.tsx`'s `getSpeechSource()` picks mock vs. real based
+on `NEXT_PUBLIC_MOCK_SPEECH` (Vercel), but `ensureToken()` calls the real
+`deepgram-token` Edge Function *unconditionally* on every mic press regardless
+of that flag — only `deepgram-token`'s own `MOCK_SPEECH` secret (Supabase)
+decides whether that call actually mints a real Deepgram token or hands back
+the mock sentinel. (I found this out mid-session by flipping only the
+Supabase side to test the theory that both need to move together — realized
+immediately that doing so alone would make the *currently live* site, which
+still runs `NEXT_PUBLIC_MOCK_SPEECH=true`, start minting real tokens on every
+mic press even though it still uses the mock `SpeechSource` client-side. That
+would have been unprompted real Deepgram usage on a config nobody asked to
+change, so I reverted `MOCK_SPEECH` back to `true` immediately. Both secrets
+are exactly where they were before this session: `MOCK_SPEECH=true` on
+Supabase, `NEXT_PUBLIC_MOCK_SPEECH=true` on Vercel.)
+
+1. Flip **both**, together: `npx supabase secrets set MOCK_SPEECH=false`
+   against the linked project, **and** `NEXT_PUBLIC_MOCK_SPEECH` in Vercel
+   (Settings → Environment Variables → Production → delete or set `false`),
+   then redeploy (Deployments → latest → Redeploy — env vars are baked in at
+   build time, so a bare variable change alone doesn't take effect until a
+   rebuild runs). Flipping only one leaves the other half either still mocked
+   or — per the `SpeechError` guard added this session — failing with a clear
+   "still in test mode on the server" message rather than something confusing,
+   but neither is the goal.
+2. **A real click-and-talk test on an actual iPhone (Safari) and an actual
+   Android phone (Chrome), against the deployed production URL.** This is the
+   one thing only a human with the hardware can do; everything above de-risks
+   it, none of it replaces it.
+
+466 tests, lint, typecheck, and build are all green. Full diff not yet
+committed as of this entry — working tree changes: `src/lib/speech-deepgram.ts`,
+`src/lib/speech-deepgram.test.ts`, `src/lib/audio-resample.ts`,
+`src/lib/audio-resample.test.ts`, `src/components/announce/announce-screen.tsx`,
+`src/lib/speech-mock.ts` (doc comments only), `scripts/verify-deepgram-live.ts`,
+plus this file and `CLAUDE.md`.
