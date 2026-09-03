@@ -468,13 +468,30 @@ boxes.
 
 ### Phase 4 — `/announce`
 
-- [ ] PIN entry once per device session, memory only
-- [ ] Optional grade / class filter that narrows the keyterm list
-- [ ] Push-to-talk with an unmistakable listening state
-- [ ] Top 2–3 candidates as large tap targets; nothing auto-commits
-- [ ] Searchable/typeable roster fallback always available
-- [ ] Undo window (~2 minutes) after a confirm
-- [ ] Works end to end with `NEXT_PUBLIC_MOCK_SPEECH=true`
+- [x] PIN entry once per device session, memory only
+- [x] Optional grade / class filter that narrows the keyterm list
+- [x] Push-to-talk with an unmistakable listening state
+- [x] Top 2–3 candidates as large tap targets; nothing auto-commits
+- [x] Searchable/typeable roster fallback always available
+- [x] Undo window (~2 minutes) after a confirm
+- [ ] Works end to end with `NEXT_PUBLIC_MOCK_SPEECH=true` — **unverified, no
+      Supabase project on this machine.** The mock speech source, the reducer,
+      the undo timer and the token cache are all unit-tested; the screen renders
+      and degrades correctly with no backend (screenshotted). What has never
+      run is the actual `resolve-name` → tap → `set-status` round trip.
+
+**How phase 4 is verified.** The whole screen is a pure reducer
+(`src/lib/announce-reducer.ts`) with `announce-screen.tsx` as a thin dispatcher,
+so mic status, tier handling, banners, the confirm lifecycle and the undo window
+are all unit-tested with no DOM and no network. `speech-mock.ts` implements the
+`SpeechSource` interface a real Deepgram client will later fulfil, and a test
+stubs `fetch` and `WebSocket` to throw and asserts they are never touched — so
+mock mode cannot leak a real Deepgram call. `announce-undo.ts` and
+`announce-token.ts` take an injected `now`.
+
+Two writes exist in the whole screen, both in user-triggered handlers
+(`handleConfirm`, `handleUndo`). There is no code path from a transcript to a
+status change that does not pass through a tap.
 
 ### Phase 5 — `/display`
 
