@@ -12,6 +12,11 @@ notices without watching the screen.
 Small, low-traffic, single-building, no user accounts. **Optimize for
 reliability and low maintenance, not scale.**
 
+**Read `HANDOFF.md` before doing anything else in this repo.** It is the
+narrative account of everything built, deployed, verified live, and left
+open — written to be read cold. This file's status lines and checklists are
+the durable summary; `HANDOFF.md` is the detail behind them.
+
 **Status: phases 1–6 are built and merged on `master`. Phase 7 (polish,
 accessibility, deploy, staff README) has not been started.** The per-phase
 checklists below are the source of truth — keep them updated as you go.
@@ -395,7 +400,7 @@ starting the next phase.**
       project — **verified**: 36 students inserted, grouped correctly by grade.
       `npx supabase db reset` (the local Docker stack variant) is still
       unverified, since there is no Docker on this machine — `npx supabase db
-    push --linked` was used against the hosted project instead, which is the
+  push --linked` was used against the hosted project instead, which is the
       real deploy path and the one `HANDOFF.md` documents. One real bug caught
       in the process: `NEXT_PUBLIC_SUPABASE_URL` must be the bare project URL
       (`https://<ref>.supabase.co`), not the REST endpoint

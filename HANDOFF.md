@@ -13,6 +13,11 @@ reproduces the critical bug from the review. `lint`, `typecheck`, `test` (429
 tests) and `build` all still pass. Two real bugs were only found by this live
 run and are already fixed and committed — see section 5.
 
+**The repo is now also on GitHub** (`EliWeiss1/school-carpool-tracker`, public)
+and **a Vercel deploy is in progress** — connected, env vars set, build
+triggered, but **the resulting URL has not yet been checked by any Claude
+session.** That is the very next thing to do. See section 8.
+
 ## 1. What happened, in order
 
 1. **A foundation commit** locked the design system and shared plumbing before
@@ -292,21 +297,22 @@ something about where to look next time.
 
 These came out of the pre-merge review of the roster write paths, or out of
 running everything live. Each is real; none blocked the merge or the
-deployment; all are yours to decide on. **Item 1 is now live**, not
-theoretical — the PIN in `.env.local` really does authorize roster deletion on
-the real project right now.
+deployment; all are yours to decide on.
 
-1. **One shared PIN now authorizes roster deletion, and this is live.** Before
-   phase 6, the worst a leaked PIN could do was mark a child arrived — undone
-   in one tap. It can now delete students one at a time, and there is no undo
-   and no record of who did it. Every phone at the kerb holds this PIN, and
-   the deployed `roster-delete` function checks the exact same `STAFF_PIN`.
-   **Suggested fix:** a separate `ADMIN_PIN` env var for the five `roster-*`
-   endpoints. `guardRequest` already takes the PIN as a dependency, so it is
-   one line per entrypoint plus one secret (`npx supabase secrets set
-ADMIN_PIN=...`) plus a redeploy of the five roster functions. **Trade-off:**
-   one more thing for the office to manage and get wrong at deploy time. This
-   one genuinely wants a human decision.
+1. **DECIDED, for now: one shared PIN authorizing roster deletion is
+   acceptable for a first version.** Explicitly raised with the project owner
+   after deployment and deprioritized on purpose — not an oversight, not
+   forgotten, a deliberate call for v1. Before phase 6, the worst a leaked PIN
+   could do was mark a child arrived, undone in one tap; it can now delete
+   students one at a time, with no undo and no record of who did it, and the
+   deployed `roster-delete` function checks the exact same `STAFF_PIN` every
+   phone at the kerb holds. **If this ever needs revisiting:** a separate
+   `ADMIN_PIN` env var for the five `roster-*` endpoints is the fix.
+   `guardRequest` already takes the PIN as a dependency, so it is one line per
+   entrypoint plus one secret (`npx supabase secrets set ADMIN_PIN=...`) plus
+   a redeploy of the five roster functions. **Trade-off:** one more thing for
+   the office to manage and get wrong at deploy time — which is presumably why
+   it was deferred.
 
 2. **`roster-reset` can un-arrive a child confirmed moments earlier.** The reset
    is "set every arrived student to waiting", unqualified by time. A child
@@ -355,7 +361,56 @@ ADMIN_PIN=...`) plus a redeploy of the five roster functions. **Trade-off:**
   `realtime-test.mjs`, `announce-e2e.mjs`, `admin-csv-e2e.mjs`) — they are not
   part of the app and were not committed, but the commands they ran are
   reproducible from this file if you want to re-verify anything.
-- **Phase 7** (polish, accessibility, deploy to Vercel, a README for daily staff
-  use) has not been started. The backend deploy that phase 7 assumed would
-  still be pending is now done; what is left is the Vercel side and the
-  non-technical staff documentation.
+- **Phase 7** (polish, accessibility, a README for daily staff use) has not
+  been started. The backend-deploy half of what phase 7 assumed was still
+  pending is now done; see section 8 for the frontend half.
+- **GitHub**: `https://github.com/EliWeiss1/school-carpool-tracker`, public.
+  `master` plus the three phase branches are all pushed. Nothing secret is in
+  the repo — `.env.local` was never tracked, confirmed clean before the first
+  push.
+
+## 8. Frontend deploy (Vercel) — status as of this handoff
+
+**In progress, not yet confirmed working.** What has happened:
+
+1. Repo connected to Vercel via the dashboard (Import → GitHub →
+   `school-carpool-tracker`), project name `school-carpool-tracker`, team
+   "Eli Weiss' projects" (Hobby plan). Framework preset: Next.js, autodetected.
+   Root directory: `./` (correct — this is not a monorepo).
+2. Vercel auto-detected 4 env vars from `.env.example`'s names (it reads keys,
+   not values, since `.env.local` was never pushed). Three were filled with
+   real values: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `NEXT_PUBLIC_MOCK_SPEECH=true`. The fourth detected key was `MOCK_SPEECH`
+   (no `NEXT_PUBLIC_` prefix) — also filled in as `true`, but this is a
+   **no-op in Vercel**: the Next.js app never reads a bare `MOCK_SPEECH`, only
+   the Deno Edge Functions do, and that one's controlled by the Supabase
+   secret set during backend deployment (section 2, step 5), not by anything
+   in Vercel. Harmless, just redundant — leave it, no need to remove it.
+3. Deploy was triggered. **The resulting URL has not yet been given to a
+   Claude session, and nothing on the live Vercel deployment has been verified
+   yet** — only the Supabase backend and `localhost:3000` have been checked
+   end to end (section 2). A Vercel build succeeding is not the same guarantee
+   as a working app: env vars can be missing or wrong, and this specific app
+   has already shown that a misconfigured `NEXT_PUBLIC_SUPABASE_URL` fails
+   silently at the network layer rather than at build time.
+
+**What a fresh session should do first, if picking this up:** ask the user for
+the Vercel URL if not already given, then repeat the section 2 live-verification
+pass (PIN gate, RLS-appropriate checks, `/display` realtime, `/announce` mic
+flow, `/admin` CSV import) against that URL instead of `localhost:3000` — the
+ad-hoc scripts described in section 7 are gone (gitignored, never committed)
+but their approach is documented in section 2 in enough detail to rebuild them
+in a few minutes if needed. Once verified, update this section with the
+confirmed URL and outcome.
+
+**Also still true and unaddressed:**
+
+- No custom domain — the `*.vercel.app` URL is what staff would use unless one
+  is added later.
+- Vercel will auto-redeploy on every future push to `master`. No manual
+  redeploy step needed for ordinary code changes going forward.
+- Real Deepgram is not wired up anywhere. `NEXT_PUBLIC_MOCK_SPEECH=true` in
+  Vercel means `/announce` runs on mock speech in production too, which is a
+  deliberate choice (no Deepgram key exists, and CLAUDE.md forbids spending
+  Deepgram credits without asking first) — not a bug, but worth knowing before
+  telling real staff to try the microphone expecting real transcription.
