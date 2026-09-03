@@ -503,10 +503,38 @@ status change that does not pass through a tap.
 
 ### Phase 6 — `/admin`
 
-- [ ] Add / edit / remove students, including the `aliases` field
-- [ ] CSV import for initial roster setup, with a validation report
-- [ ] "Reset all to waiting" with a confirmation step
-- [ ] Optional: scheduled Edge Function doing the morning reset
+- [x] Add / edit / remove students, including the `aliases` field
+- [x] CSV import for initial roster setup, with a validation report
+- [x] "Reset all to waiting" with a confirmation step
+- [ ] Optional: scheduled Edge Function doing the morning reset — not built
+
+**Five new Edge Functions**: `roster-list`, `roster-write` (create and update,
+the way `set-status` covers both directions), `roster-delete`, `roster-import`,
+`roster-reset`. All five go through `guardRequest`, and
+`supabase/functions/pin-budget.test.ts` now asserts that across every deployed
+entrypoint — the PIN budget does not pool between isolates, so the real
+allowance is the sum, and it grew from 30 to 80 the moment five endpoints were
+added without anyone noticing. **None of the five is deployed** (see HANDOFF.md).
+
+**How phase 6 is verified.** Handler logic, the store port, the fake store,
+`csv-import.ts` and `admin-api.ts` are covered by Vitest. The five `index.ts`
+entrypoints and the `supabase-store.deno.ts` additions are **unrun** — no Deno
+and no Docker here, exactly as in phase 3 — except that `pin-budget.test.ts`
+reads the entrypoints as text and checks their limiter wiring, which is the only
+automated check those files have at all.
+
+**Reviewed before merge** by `careful-review`, which cleared mass-assignment,
+the `status`/`arrived_at` boundary, RLS, secret leakage and ReDoS, and found
+one critical bug and several real ones. Each was reproduced as a failing test
+before it was fixed. The critical one: an unterminated quotation mark made the
+CSV tokenizer swallow every subsequent row into one field while the validation
+report — the entire point of which is to catch that — reported no errors.
+
+**Known and deliberately not fixed** (see HANDOFF.md for the reasoning):
+`roster-reset` can race a `set-status` confirmed microseconds earlier; deleting
+a student nulls `student_id` on their audit rows, so the history survives but
+stops naming them; the duplicate check is check-then-write and a unique index
+is the durable fix; and one shared PIN now also authorizes roster deletion.
 
 ### Phase 7 — Polish
 
