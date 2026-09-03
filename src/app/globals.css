@@ -63,6 +63,32 @@ h3 {
   }
 
   /*
+   * /display tile type scales with the TILE, not the window.
+   *
+   * A viewport-based size cannot know how many children are on the roster, and
+   * that is what actually decides how tall a tile is: 26 students is four rows
+   * on a 1080p board, 36 is six, and the same 46px surname that fitted the
+   * first was clipped in half by the second. Sizing from the container's own
+   * height makes the board self-adjusting — a bigger roster simply sets
+   * smaller type instead of losing the ends of the names.
+   */
+  .tile-surface {
+    container-type: size;
+  }
+
+  .tile-surname {
+    font-size: clamp(1.05rem, 23cqh, 3.25rem);
+  }
+
+  .tile-given-name {
+    font-size: clamp(0.8rem, 11cqh, 1.5rem);
+  }
+
+  .tile-label {
+    font-size: clamp(0.5625rem, 6cqh, 1rem);
+  }
+
+  /*
    * One focus treatment for the whole app. Marigold reads on the light routes
    * and on the ink /display ground, which a slate ring does not.
    */

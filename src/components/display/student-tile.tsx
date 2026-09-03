@@ -28,7 +28,7 @@ export function StudentTile({
   return (
     <li
       className={cn(
-        "relative flex max-h-[20rem] min-h-[8rem] flex-col justify-between overflow-hidden rounded-2xl p-4 text-white sm:min-h-[9rem] sm:p-5",
+        "tile-surface relative flex max-h-[20rem] min-h-[8rem] flex-col justify-between overflow-hidden rounded-2xl p-3 text-white sm:min-h-[9rem] sm:p-4",
         "animate-tile-in",
         arrived
           ? "bg-arrived-screen shadow-tile-arrived"
@@ -58,7 +58,7 @@ export function StudentTile({
         )}
       />
 
-      <p className="relative truncate font-mono text-[0.6875rem] uppercase tracking-eyebrow text-white/75">
+      <p className="tile-label relative truncate font-mono uppercase tracking-eyebrow text-white/75">
         {meta || " "}
       </p>
 
@@ -67,22 +67,20 @@ export function StudentTile({
           min-content size and pushes the last row off a 1080p screen. Nobody
           scrolls a board mounted on a wall, so the tile clips instead. */}
       <div className="relative mt-1 flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden">
-        {/* The surname is the thing being read from twenty feet away, so it
-            scales with the screen rather than sitting at a fixed step off the
-            type scale. On a 1080p wall TV that is ~46px instead of ~30px; the
-            clamp floor keeps it sane on a laptop, the ceiling stops it
-            overwhelming the tile on a very wide display. */}
-        <p className="line-clamp-2 break-words font-display text-[clamp(1.5rem,2.4vw,3.25rem)] font-extrabold leading-tight tracking-display">
+        {/* Sized from the tile's own height (see .tile-surname in
+            globals.css), not the viewport: only the tile knows how much room
+            a 36-child roster actually left it. */}
+        <p className="tile-surname line-clamp-2 break-words font-display font-extrabold leading-tight tracking-display">
           {student.last_name}
         </p>
-        <p className="truncate text-[clamp(1rem,1.1vw,1.5rem)] font-medium text-white/85">
+        <p className="tile-given-name truncate font-medium leading-tight text-white/85">
           {student.first_name}
         </p>
       </div>
 
       {/* Not decoration and not redundant: it is the whole signal for anyone
           in the room who cannot separate the red from the green. */}
-      <p className="relative mt-3 font-mono text-[clamp(0.6875rem,0.7vw,1rem)] uppercase tracking-eyebrow text-white/85">
+      <p className="tile-label relative font-mono uppercase tracking-eyebrow text-white/85">
         {arrived ? "Arrived" : "Waiting"}
       </p>
     </li>
