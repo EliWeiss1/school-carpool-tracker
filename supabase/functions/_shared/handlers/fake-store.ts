@@ -12,6 +12,7 @@ import type {
   StatusEventInput,
   StudentRow,
   StudentStatus,
+  StudentWriteInput,
 } from "../ports.ts";
 
 export interface FakeStore extends RosterStore {
@@ -81,6 +82,82 @@ export function createFakeStore(initial: StudentRow[]): FakeStore {
     logEvent(event: StatusEventInput): Promise<boolean> {
       events.push(event);
       return Promise.resolve(true);
+    },
+
+    createStudent(input: StudentWriteInput): Promise<StudentRow> {
+      counter++;
+      const student: StudentRow = {
+        id: `student-${counter}`,
+        first_name: input.first_name,
+        last_name: input.last_name,
+        aliases: [...input.aliases],
+        grade: input.grade,
+        class_group: input.class_group,
+        status: "waiting",
+        arrived_at: null,
+        updated_at: "2026-09-02T12:00:00.000Z",
+      };
+      students.push(student);
+      return Promise.resolve({ ...student });
+    },
+
+    updateStudent(
+      id: string,
+      patch: Partial<StudentWriteInput>,
+    ): Promise<StudentRow | null> {
+      const found = students.find((student) => student.id === id);
+      if (!found) return Promise.resolve(null);
+
+      if (patch.first_name !== undefined) found.first_name = patch.first_name;
+      if (patch.last_name !== undefined) found.last_name = patch.last_name;
+      if (patch.aliases !== undefined) found.aliases = [...patch.aliases];
+      if (patch.grade !== undefined) found.grade = patch.grade;
+      if (patch.class_group !== undefined)
+        found.class_group = patch.class_group;
+      found.updated_at = "2026-09-02T14:30:00.000Z";
+
+      return Promise.resolve({ ...found });
+    },
+
+    removeStudent(id: string): Promise<boolean> {
+      const index = students.findIndex((student) => student.id === id);
+      if (index === -1) return Promise.resolve(false);
+      // Mirrors the FK's `on delete set null`: any events already logged for
+      // this student stay in place, just no longer joined to a roster row.
+      students.splice(index, 1);
+      return Promise.resolve(true);
+    },
+
+    bulkCreateStudents(inputs: StudentWriteInput[]): Promise<StudentRow[]> {
+      const created = inputs.map((input) => {
+        counter++;
+        const student: StudentRow = {
+          id: `student-${counter}`,
+          first_name: input.first_name,
+          last_name: input.last_name,
+          aliases: [...input.aliases],
+          grade: input.grade,
+          class_group: input.class_group,
+          status: "waiting",
+          arrived_at: null,
+          updated_at: "2026-09-02T12:00:00.000Z",
+        };
+        students.push(student);
+        return { ...student };
+      });
+      return Promise.resolve(created);
+    },
+
+    resetAllToWaiting(): Promise<StudentRow[]> {
+      const changed: StudentRow[] = [];
+      for (const student of students) {
+        if (student.status !== "arrived") continue;
+        student.status = "waiting";
+        student.arrived_at = null;
+        student.updated_at = "2026-09-02T14:30:00.000Z";
+        changed.push({ ...student });
+      }
+      return Promise.resolve(changed);
     },
   };
 }
