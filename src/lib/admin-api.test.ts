@@ -208,11 +208,9 @@ describe("error handling", () => {
 
   it("turns a 429 into a throttled ApiError carrying retry-after", async () => {
     const { client } = clientReturning(
-      jsonResponse(
-        { error: "Too many requests." },
-        429,
-        { "retry-after": "30" },
-      ),
+      jsonResponse({ error: "Too many requests." }, 429, {
+        "retry-after": "30",
+      }),
     );
 
     const failure = await client
@@ -247,7 +245,61 @@ describe("error handling", () => {
       .listRoster(CREDENTIALS)
       .catch((error: unknown) => error);
 
-    expect((failure as ApiError).message.length).toBeGreaterThan(0);
-    expect((failure as ApiError).kind).toBe("unavailable");
+    // The kind is a transport fact and is shared with api.ts. The words are
+    // not: an office screen must never be told to "type the name instead",
+    // and a 502 reaching /admin is Supabase's gateway, not the speech service.
+    expect((failure as ApiError).message).toBe(
+      "The board is not reachable right now. Try again shortly.",
+    );
+    expect((failure as ApiError).message).not.toMatch(/speech|type the name/i);
+  });
+});
+
+describe("admin-api shares the app's transport", () => {
+  // These duplicated api.ts's transport wholesale, which meant they also
+  // duplicated a bug that had already been fixed there: a missing env var
+  // surfaced as "check the wifi" instead of naming the setup problem. The
+  // office computer is exactly where an unconfigured deployment gets noticed.
+  it("reports a missing anon key as a setup fault, not a network fault", async () => {
+    const fetchImpl = vi.fn();
+    const client = createAdminApiClient({
+      baseUrl: BASE,
+      anonKey: undefined,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const error = (await client
+      .listRoster(CREDENTIALS)
+      .catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.kind).toBe("unavailable");
+    expect(error.message).toMatch(/not set up|installed/i);
+    expect(error.message).not.toMatch(/wifi/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("still maps a wrong PIN to the pin kind", async () => {
+    const { client } = clientReturning(
+      jsonResponse({ error: "That PIN was not recognised." }, 401),
+    );
+
+    const error = (await client
+      .listRoster(CREDENTIALS)
+      .catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error.kind).toBe("pin");
+  });
+
+  it("honours retry-after when the office is throttled", async () => {
+    const { client } = clientReturning(
+      jsonResponse({ error: "Too many." }, 429, { "retry-after": "30" }),
+    );
+
+    const error = (await client
+      .listRoster(CREDENTIALS)
+      .catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error.retryAfterSeconds).toBe(30);
   });
 });

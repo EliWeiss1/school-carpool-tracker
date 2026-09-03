@@ -68,7 +68,7 @@ function AdminContent() {
         eyebrow="In the office"
         title="Admin"
         action={
-          <Button variant="quiet" size="sm" onClick={session.lock}>
+          <Button variant="quiet-ink" size="sm" onClick={session.lock}>
             Lock
           </Button>
         }

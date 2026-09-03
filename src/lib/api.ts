@@ -214,15 +214,28 @@ export interface ApiClient {
   setStatus(input: SetStatusInput): Promise<SetStatusResponse>;
 }
 
+/** Shared by every client in the app, so there is one transport, not two. */
 export interface ApiClientOptions {
   /** Defaults to `functionsBaseUrl()`, read lazily so tests need no env. */
   baseUrl?: string;
   anonKey?: string;
   fetchImpl?: typeof fetch;
+  /**
+   * Overrides for the last-resort sentences used when the server sends no
+   * `error` field at all.
+   *
+   * The status-to-kind mapping is a transport fact and stays shared, but the
+   * words are not: "type the name instead" is the right remedy at the kerb and
+   * meaningless in the office, and a 502 reaching /admin is Supabase's gateway
+   * rather than anything to do with speech.
+   */
+  fallbackMessages?: Partial<Record<ApiErrorKind, string>>;
 }
 
 /** Drops undefined and null so the server sees an absent field, not a null. */
-function compact(fields: Record<string, unknown>): Record<string, unknown> {
+export function compact(
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (value !== undefined && value !== null) out[key] = value;
@@ -230,7 +243,20 @@ function compact(fields: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-export function createApiClient(options: ApiClientOptions = {}): ApiClient {
+/**
+ * The one HTTP path to an Edge Function.
+ *
+ * Extracted and exported because /admin needs the same behaviour for its own
+ * five endpoints. When it had its own copy, the copy also carried a bug that
+ * had already been fixed here -- a missing env var reported as "check the
+ * wifi" -- which is what a duplicated transport buys you.
+ */
+export function createEdgeFunctionPost(options: ApiClientOptions = {}) {
+  const fallback: Record<ApiErrorKind, string> = {
+    ...FALLBACK_MESSAGE,
+    ...options.fallbackMessages,
+  };
+
   // Resolved per call, not at construction: `publicEnv` throws when a variable
   // is missing, and a module-level throw would take down the whole page render
   // instead of showing one error banner where the call actually happens.
@@ -238,7 +264,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     (options.baseUrl ?? functionsBaseUrl()).replace(/\/+$/, "");
   const resolveAnonKey = () => options.anonKey ?? publicEnv.supabaseAnonKey;
 
-  async function post<T>(
+  return async function post<T>(
     endpoint: string,
     body: Record<string, unknown>,
     signal: AbortSignal | undefined,
@@ -279,10 +305,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         signal,
       });
     } catch (caught: unknown) {
-      // An abort is the caller's own doing — a released push-to-talk button, a
-      // navigation — and must not surface as a red banner.
+      // An abort is the caller's own doing -- a released push-to-talk button, a
+      // navigation -- and must not surface as a red banner.
       if (caught instanceof Error && caught.name === "AbortError") throw caught;
-      throw new ApiError("network", 0, FALLBACK_MESSAGE.network);
+      throw new ApiError("network", 0, fallback.network);
     }
 
     if (!response.ok) {
@@ -291,7 +317,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       throw new ApiError(
         kind,
         response.status,
-        message ?? FALLBACK_MESSAGE[kind],
+        message ?? fallback[kind],
         retryAfterFrom(response),
       );
     }
@@ -299,13 +325,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     try {
       return (await response.json()) as T;
     } catch {
-      throw new ApiError(
-        "unavailable",
-        response.status,
-        FALLBACK_MESSAGE.unavailable,
-      );
+      throw new ApiError("unavailable", response.status, fallback.unavailable);
     }
-  }
+  };
+}
+
+export function createApiClient(options: ApiClientOptions = {}): ApiClient {
+  const post = createEdgeFunctionPost(options);
 
   return {
     requestToken({ pin, deviceId, grade, classGroup, signal }) {
