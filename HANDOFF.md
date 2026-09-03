@@ -2,6 +2,17 @@
 
 Written to be read cold, over coffee, assuming you remember nothing.
 
+**Picking this up in a fresh chat? Skip straight to [section 9](#9-the-real-deepgram-client-and-the-bug-that-got-reported-first)
+— it supersedes the mock-speech assumptions everywhere else in this file.**
+Short version: the real Deepgram voice client is built, twice reviewed, and
+verified live against the real API (commit `b6c40a6`, pushed to `master`,
+Vercel auto-deployed it). Both mock switches (`MOCK_SPEECH` on Supabase,
+`NEXT_PUBLIC_MOCK_SPEECH` on Vercel) are still `true` — real voice is not live
+for staff yet. What's left is exactly two things, both spelled out at the end
+of section 9: flip both switches together and redeploy, then a real
+click-and-talk test on an actual iPhone and Android phone. Nothing else in
+this project is currently in progress.
+
 ## The one-paragraph version
 
 `/announce`, `/display` and `/admin` are all built, merged into `master`, and
@@ -445,8 +456,9 @@ cycled through its four canned demo lines as designed, it returned entry #1
    MediaRecorder output isn't reliably chunk-streamable, and staff carry
    Android, iPhone, and laptops) → 16kHz mono PCM
    (`src/lib/audio-resample.ts`) → Deepgram's live WebSocket, authenticated
-   via the `Sec-WebSocket-Protocol` token subprotocol → `CloseStream` on
-   release → the final transcript.
+   via the `Sec-WebSocket-Protocol` header → `CloseStream` on release → the
+   final transcript. (Shipped initially with the wrong subprotocol scheme —
+   see "Live verification" below for the fix.)
 3. `announce-screen.tsx` now actually branches on `NEXT_PUBLIC_MOCK_SPEECH` to
    pick mock vs. real, and `speechDisabledReason` reflects real browser
    capability (`isDeepgramSpeechSupported()`) instead of the mock flag.
