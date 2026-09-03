@@ -245,16 +245,34 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   ): Promise<T> {
     const doFetch = options.fetchImpl ?? fetch;
 
+    // Read the config OUTSIDE the fetch try/catch. `publicEnv` throws when a
+    // variable is missing, and folding that into the catch below reported an
+    // unconfigured deployment as "check the wifi" -- sending a staff member to
+    // the router over a problem only whoever installed the app can fix.
+    let url: string;
+    let anonKey: string;
+    try {
+      url = `${resolveBaseUrl()}/${endpoint}`;
+      anonKey = resolveAnonKey();
+      if (anonKey.trim() === "") throw new Error("empty anon key");
+    } catch {
+      throw new ApiError(
+        "unavailable",
+        0,
+        "This app is not set up yet: it has no address for the school's database. Ask whoever installed it.",
+      );
+    }
+
     let response: Response;
     try {
-      response = await doFetch(`${resolveBaseUrl()}/${endpoint}`, {
+      response = await doFetch(url, {
         method: "POST",
         headers: {
           // Supabase's gateway wants the anon key before it will route to the
           // function at all. It grants nothing on its own: RLS gives anon only
           // `select` on students, and the PIN is what guards the write path.
-          authorization: `Bearer ${resolveAnonKey()}`,
-          apikey: resolveAnonKey(),
+          authorization: `Bearer ${anonKey}`,
+          apikey: anonKey,
           "content-type": "application/json; charset=utf-8",
         },
         body: JSON.stringify(body),

@@ -297,6 +297,30 @@ describe("errors staff have to read", () => {
   });
 });
 
+describe("a misconfigured deployment", () => {
+  // This is the first error anyone hits on a fresh checkout, so it must not
+  // send a staff member to go and look at the wifi router.
+  it("reports a missing anon key as a setup fault, not as a network fault", async () => {
+    const fetchImpl = vi.fn();
+    const client = createApiClient({
+      baseUrl: BASE,
+      anonKey: undefined,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const error = (await client
+      .requestToken(CREDENTIALS)
+      .catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.kind).toBe("unavailable");
+    expect(error.message).toMatch(/not set up|installed/i);
+    expect(error.message).not.toMatch(/wifi/i);
+    // Nothing should have been sent: there was nothing to send it with.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
 describe("base url handling", () => {
   it("strips a trailing slash so the path never doubles up", async () => {
     const fetchImpl = vi
