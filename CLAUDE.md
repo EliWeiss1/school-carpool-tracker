@@ -25,28 +25,29 @@ per-phase checklists below are the source of truth — keep them updated as you
 go.
 
 **The carpools feature is built, tested (533 tests, all green), typechecked,
-linted and built, and verified against a screenshotted local dev server in
-mock mode — but not yet exercised against the live Supabase project**, unlike
-everything phases 1–6 list below. Both mock switches are currently `true` in
-`.env.local` (separate from the live/production values, which the user has
-already set to `false`), so local dev testing here spent no real
-Deepgram/Supabase credits. Before this is considered proven the way phases
-1–6 are: run `npx supabase db push --linked` and deploy the changed/new Edge
-Functions, then walk `/admin` (create a carpool, assign members via both the
-carpool panel and the student form's dropdown), `/announce` (a carpool
-candidate confirming every member in one tap, and the "Announce several"
-multi-select path), and a class-filtered `/display` in two tabs at once
-against the real 36-student seeded roster, per CLAUDE.md's process rule about
-not spending real credits without asking first.
+linted, built, committed and pushed (`f5ea436` on `master`), and deployed
+live**: the migration is applied to the linked Supabase project, all nine
+Edge Functions (the original eight plus the new `carpool-write`) are
+deployed, and Vercel's connected auto-deploy picked up the push. Verified
+live, not just deployed — a real carpool was created linking two seeded
+students, `resolve-name` was confirmed to collapse them into a single `clear`
+match (the actual payoff of the whole feature), `set-status` was confirmed to
+mark both in one call and to be idempotent on a repeat, and the test carpool
+and status changes were then cleaned up — the live roster is back to its
+original 36 students, 0 carpools. The user separately confirmed the deployed
+site itself works. See `HANDOFF.md` section 10 for the full account.
 
-**All eight Edge Functions are deployed to a live Supabase project, and every
-end-to-end path has been run against it**: schema pushed, roster seeded, RLS
-probed directly with the anon key, the PIN boundary checked on both a phase-3
-and a phase-6 endpoint, `/display` proven to update from a real `set-status`
-call with no reload, `/announce` walked through PIN → mic → candidates →
-confirm with mock speech, and `/admin` walked through a CSV import producing a
-validation report — including the file that reproduces the critical
-unterminated-quote bug, confirmed still rejected. Two real defects were only
+**All nine Edge Functions (the original eight, plus `carpool-write`) are
+deployed to a live Supabase project, and every end-to-end path has been run
+against it**: schema pushed, roster seeded, RLS probed directly with the anon
+key, the PIN boundary checked on both a phase-3 and a phase-6 endpoint,
+`/display` proven to update from a real `set-status` call with no reload,
+`/announce` walked through PIN → mic → candidates → confirm with mock speech,
+`/admin` walked through a CSV import producing a validation report —
+including the file that reproduces the critical unterminated-quote bug,
+confirmed still rejected — and the carpool collapse walked through live
+end-to-end (see "Carpools" below and `HANDOFF.md` section 10). Two real
+defects from phases 1–6 were only
 found by this: a font-sizing regression on `/display` that clipped names
 against the real 36-student roster (fixed, verified at both 26 and 36
 students), and a Puppeteer-only false alarm on the mic button that led to a

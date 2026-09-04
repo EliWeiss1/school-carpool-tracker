@@ -10,12 +10,14 @@ first-class, callable thing (`/admin` can create one and assign members,
 announcing any member or the carpool's own name confirms everyone in one
 tap), `/display` groups into class sections with a per-viewer filter and
 works on a phone, and `/announce` has an opt-in "Announce several" multi-select
-for ad-hoc unrelated confirms. Built, tested (533 tests), typechecked, linted,
-built, and screenshot-verified in local mock mode — **not yet run against the
-live Supabase project.** The mock-speech status from section 9 is unchanged
-by this work: both switches are still `true` in production, real voice is
-still not live for staff, and that remains the next thing to do after what
-section 10 lists.
+for ad-hoc unrelated confirms. **Built, tested (533 tests), deployed, and
+verified live** — committed and pushed (`f5ea436`), migration applied and all
+nine Edge Functions deployed to the linked Supabase project, a real carpool
+created/resolved/confirmed/cleaned-up live to prove the collapse-to-`clear`
+behavior actually works against production data, and the user confirmed the
+deployed site itself works. The mock-speech status from section 9 is
+unchanged by this work: both switches are still `true` in production, real
+voice is still not live for staff — that remains the next thing to do.
 
 ## The one-paragraph version
 
@@ -692,27 +694,58 @@ URL at 390×844 shows a clean two-column mobile layout; `?class=1-Reyes`
 resolves the URL filter correctly and (after the font-size fix above) renders
 without wrapping; `/announce` and `/admin`'s PIN gates render with no crash.
 
-**Not yet done, in order:**
+### Deployed and verified live
 
-1. **Nothing here has touched the live Supabase project.** `npx supabase db
-   push --linked` for the new migration, then `npx supabase functions deploy`
-   for every changed function (`resolve-name`, `set-status`, `roster-list`,
-   `roster-import`, `roster-write`, `deepgram-token`) plus the new
-   `carpool-write`.
-2. A live walkthrough per CLAUDE.md's process rule against real Deepgram/
-   Supabase (ask before running, since both mock switches are `false` in
-   production now): create a carpool in `/admin`, assign members two ways
-   (the carpool panel and the student form's dropdown), announce a member's
-   surname and confirm the whole carpool in one tap, watch every tile flip on
-   a class-filtered `/display` in a second tab with no reload, and try the
-   "Announce several" toggle on two unrelated candidates.
-3. CSV import's new `carpool` column (creates or matches a carpool by name)
+Committed and pushed to `master` (commit `f5ea436`), which triggered Vercel's
+connected auto-deploy the same way every previous push to this repo has.
+
+**Supabase**, done in this session: `npx supabase db push --linked` applied
+`20260903100000_carpools.sql` to the linked project
+(`yqkzspdhrtvwqngsauoo`), then all nine Edge Functions were redeployed with
+`npx supabase functions deploy <name>` — not just the ones with direct
+handler changes, but all nine, because every one bundles
+`supabase-store.deno.ts`, which changed (the new `carpool_id` field, the new
+`setStatusMany`/carpool-CRUD store methods).
+
+That deploy was then **verified live**, not just assumed to have worked, with
+read-only checks and one real write-and-cleanup cycle against the live
+database (via direct HTTP calls with `.env.local`'s real anon key and staff
+PIN, never through the browser):
+
+- `roster-list` returns the real 36-student seeded roster with a `carpools`
+  array (empty) and `carpool_id` on every student row.
+- `resolve-name` on "Cohen" reproduces the exact ambiguous
+  Cohen/Kohen/Koen three-way this repo has used as its running example since
+  phase 3 — in the new `{ students[], carpool }` candidate shape.
+- **The actual payoff feature, proven end to end**: created a real carpool
+  linking Maya Cohen and Elias Kohen, called `resolve-name` on the carpool's
+  own name and got back **tier `clear`** with both students in one candidate
+  (the whole point of the collapse — two names that would never resolve
+  together as students collapse into one trustworthy match as a carpool),
+  called `set-status` with both ids and confirmed both moved in one call
+  logging two audit rows, called it again and confirmed the repeat was a
+  no-op (`changed: []`) proving per-id idempotence survives the plural
+  endpoint.
+- **Cleaned up immediately after**: both students set back to `waiting`, the
+  test carpool deleted. Re-checked the roster afterward — 36 students, 0
+  carpools, both test students `waiting` with `carpool_id: null`. No residue
+  left in production.
+
+**The user then confirmed the deployed site itself works.**
+
+### Still not done
+
+1. CSV import's new `carpool` column (creates or matches a carpool by name)
    has unit coverage in `roster-import.test.ts` and `csv-import.test.ts` but
    has not been walked through `/admin`'s actual file-upload UI the way the
    phase 6 unterminated-quote regression was.
-4. No component-level tests were added for `candidate-list.tsx`,
+2. No component-level tests were added for `candidate-list.tsx`,
    `carpool-manager.tsx`, `class-filter.tsx`, etc. -- consistent with this
    repo's existing pattern (no component tests anywhere; logic lives in
    `src/lib/` and is tested there, components stay presentational and are
    verified by screenshot), but worth naming explicitly since this feature
    added the most UI of any phase so far.
+3. The "Announce several" multi-select path and the carpool member picker in
+   `/admin`'s student form were exercised via the API directly, not by
+   clicking through the actual UI (`candidate-list.tsx`'s checkbox rendering,
+   `student-form.tsx`'s carpool `<select>`) against live data.
