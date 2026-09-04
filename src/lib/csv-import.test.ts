@@ -16,6 +16,7 @@ describe("parseRosterCsv — header handling", () => {
         aliases: [],
         grade: "K",
         class_group: "K-Alvarez",
+        carpool: null,
       },
     ]);
   });
@@ -32,7 +33,17 @@ describe("parseRosterCsv — header handling", () => {
       aliases: ["Eng", "Ang"],
       grade: "K",
       class_group: "K-Alvarez",
+      carpool: null,
     });
+  });
+
+  it("reads a carpool column under any of its friendly names", () => {
+    const report = parseRosterCsv(
+      "first_name,last_name,carpool\nMaya,Cohen,Weiss Carpool\nElias,Kohen,\n",
+    );
+
+    expect(report.toImport[0].carpool).toBe("Weiss Carpool");
+    expect(report.toImport[1].carpool).toBeNull();
   });
 
   it("reports missing required columns and imports nothing", () => {

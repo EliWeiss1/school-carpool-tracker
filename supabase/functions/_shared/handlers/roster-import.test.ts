@@ -105,6 +105,55 @@ describe("createRosterImportHandler", () => {
   });
 });
 
+describe("createRosterImportHandler — carpools", () => {
+  it("creates a new carpool named in the file and links its members", async () => {
+    const { handle, store } = setup();
+
+    await handle(
+      imp([
+        { first_name: "Theo", last_name: "Ng", carpool: "Weiss Carpool" },
+        { first_name: "Nora", last_name: "Chen", carpool: "Weiss Carpool" },
+      ]),
+    );
+
+    const carpools = await store.listCarpools();
+    expect(carpools).toHaveLength(1);
+    expect(carpools[0].name).toBe("Weiss Carpool");
+
+    const theo = store.rows().find((s) => s.last_name === "Ng");
+    const nora = store.rows().find((s) => s.last_name === "Chen");
+    expect(theo?.carpool_id).toBe(carpools[0].id);
+    expect(nora?.carpool_id).toBe(carpools[0].id);
+  });
+
+  it("matches an existing carpool by name case-insensitively instead of duplicating it", async () => {
+    const { handle, store } = setup();
+    const existing = await store.createCarpool({
+      name: "Weiss Carpool",
+      aliases: [],
+    });
+
+    await handle(
+      imp([
+        { first_name: "Theo", last_name: "Ng", carpool: "weiss carpool" },
+      ]),
+    );
+
+    expect(await store.listCarpools()).toHaveLength(1);
+    const theo = store.rows().find((s) => s.last_name === "Ng");
+    expect(theo?.carpool_id).toBe(existing.id);
+  });
+
+  it("leaves carpool_id null for a row with no carpool column value", async () => {
+    const { handle, store } = setup();
+
+    await handle(imp([{ first_name: "Theo", last_name: "Ng" }]));
+
+    const theo = store.rows().find((s) => s.last_name === "Ng");
+    expect(theo?.carpool_id).toBeNull();
+  });
+});
+
 describe("roster-import — a repeated import must not duplicate the roster", () => {
   // A duplicated roster is not a cosmetic problem. Two identical rows score
   // identically in the resolver, so the margin between them is 0, which is

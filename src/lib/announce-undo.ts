@@ -15,10 +15,9 @@
 export const UNDO_WINDOW_MS = 2 * 60 * 1000;
 
 export interface UndoableConfirmation {
-  studentId: string;
-  /** "First Last", for the banner — never re-derived from a stale roster row. */
+  /** "First Last", or a carpool's name, for the banner — never re-derived from a stale roster row. */
   displayName: string;
-  /** `Date.now()` at the moment `set-status` reported `changed: true`. */
+  /** `Date.now()` at the moment `set-status` reported at least one changed id. */
   confirmedAt: number;
 }
 

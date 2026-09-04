@@ -7,6 +7,8 @@
  */
 
 import type {
+  CarpoolRow,
+  CarpoolWriteInput,
   RosterFilter,
   RosterStore,
   StatusEventInput,
@@ -29,9 +31,11 @@ export interface FakeStore extends RosterStore {
   events: LoggedEvent[];
   rows(): StudentRow[];
   row(id: string): StudentRow | undefined;
+  carpoolRows(): CarpoolRow[];
 }
 
 let counter = 0;
+let carpoolCounter = 0;
 
 export function makeStudent(overrides: Partial<StudentRow> = {}): StudentRow {
   counter++;
@@ -45,18 +49,36 @@ export function makeStudent(overrides: Partial<StudentRow> = {}): StudentRow {
     status: "waiting",
     arrived_at: null,
     updated_at: "2026-09-02T12:00:00.000Z",
+    carpool_id: null,
     ...overrides,
   };
 }
 
-export function createFakeStore(initial: StudentRow[]): FakeStore {
+export function makeCarpool(overrides: Partial<CarpoolRow> = {}): CarpoolRow {
+  carpoolCounter++;
+  return {
+    id: `carpool-${carpoolCounter}`,
+    name: `Carpool ${carpoolCounter}`,
+    aliases: [],
+    created_at: "2026-09-02T12:00:00.000Z",
+    updated_at: "2026-09-02T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+export function createFakeStore(
+  initial: StudentRow[],
+  initialCarpools: CarpoolRow[] = [],
+): FakeStore {
   const students = initial.map((student) => ({ ...student }));
+  const carpools = initialCarpools.map((carpool) => ({ ...carpool }));
   const events: LoggedEvent[] = [];
 
   return {
     events,
     rows: () => students.map((student) => ({ ...student })),
     row: (id) => students.find((student) => student.id === id),
+    carpoolRows: () => carpools.map((carpool) => ({ ...carpool })),
 
     list(filter: RosterFilter): Promise<StudentRow[]> {
       return Promise.resolve(
@@ -88,6 +110,23 @@ export function createFakeStore(initial: StudentRow[]): FakeStore {
       return Promise.resolve({ ...found });
     },
 
+    setStatusMany(
+      ids: string[],
+      status: StudentStatus,
+    ): Promise<StudentRow[]> {
+      const changed: StudentRow[] = [];
+      for (const id of ids) {
+        const found = students.find((student) => student.id === id);
+        if (!found || found.status === status) continue;
+        found.status = status;
+        found.arrived_at =
+          status === "arrived" ? "2026-09-02T14:30:00.000Z" : null;
+        found.updated_at = "2026-09-02T14:30:00.000Z";
+        changed.push({ ...found });
+      }
+      return Promise.resolve(changed);
+    },
+
     logEvent(event: StatusEventInput): Promise<boolean> {
       events.push(event);
       return Promise.resolve(true);
@@ -105,6 +144,7 @@ export function createFakeStore(initial: StudentRow[]): FakeStore {
         status: "waiting",
         arrived_at: null,
         updated_at: "2026-09-02T12:00:00.000Z",
+        carpool_id: input.carpool_id,
       };
       students.push(student);
       return Promise.resolve({ ...student });
@@ -123,6 +163,7 @@ export function createFakeStore(initial: StudentRow[]): FakeStore {
       if (patch.grade !== undefined) found.grade = patch.grade;
       if (patch.class_group !== undefined)
         found.class_group = patch.class_group;
+      if (patch.carpool_id !== undefined) found.carpool_id = patch.carpool_id;
       found.updated_at = "2026-09-02T14:30:00.000Z";
 
       return Promise.resolve({ ...found });
@@ -157,6 +198,7 @@ export function createFakeStore(initial: StudentRow[]): FakeStore {
           status: "waiting",
           arrived_at: null,
           updated_at: "2026-09-02T12:00:00.000Z",
+          carpool_id: input.carpool_id,
         };
         students.push(student);
         return { ...student };
@@ -174,6 +216,64 @@ export function createFakeStore(initial: StudentRow[]): FakeStore {
         changed.push({ ...student });
       }
       return Promise.resolve(changed);
+    },
+
+    listCarpools(): Promise<CarpoolRow[]> {
+      return Promise.resolve(carpools.map((carpool) => ({ ...carpool })));
+    },
+
+    createCarpool(input: CarpoolWriteInput): Promise<CarpoolRow> {
+      carpoolCounter++;
+      const carpool: CarpoolRow = {
+        id: `carpool-${carpoolCounter}`,
+        name: input.name,
+        aliases: [...input.aliases],
+        created_at: "2026-09-02T12:00:00.000Z",
+        updated_at: "2026-09-02T12:00:00.000Z",
+      };
+      carpools.push(carpool);
+      return Promise.resolve({ ...carpool });
+    },
+
+    updateCarpool(
+      id: string,
+      patch: Partial<CarpoolWriteInput>,
+    ): Promise<CarpoolRow | null> {
+      const found = carpools.find((carpool) => carpool.id === id);
+      if (!found) return Promise.resolve(null);
+
+      if (patch.name !== undefined) found.name = patch.name;
+      if (patch.aliases !== undefined) found.aliases = [...patch.aliases];
+      found.updated_at = "2026-09-02T14:30:00.000Z";
+
+      return Promise.resolve({ ...found });
+    },
+
+    removeCarpool(id: string): Promise<boolean> {
+      const index = carpools.findIndex((carpool) => carpool.id === id);
+      if (index === -1) return Promise.resolve(false);
+      carpools.splice(index, 1);
+
+      // Mirrors the FK's `on delete set null`: members survive, unlinked.
+      for (const student of students) {
+        if (student.carpool_id === id) student.carpool_id = null;
+      }
+      return Promise.resolve(true);
+    },
+
+    setCarpoolMembers(
+      carpoolId: string | null,
+      studentIds: string[],
+    ): Promise<StudentRow[]> {
+      const updated: StudentRow[] = [];
+      for (const id of studentIds) {
+        const found = students.find((student) => student.id === id);
+        if (!found) continue;
+        found.carpool_id = carpoolId;
+        found.updated_at = "2026-09-02T14:30:00.000Z";
+        updated.push({ ...found });
+      }
+      return Promise.resolve(updated);
     },
   };
 }

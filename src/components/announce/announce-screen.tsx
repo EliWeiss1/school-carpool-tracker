@@ -18,6 +18,8 @@ import {
   type AnnounceAction,
   type ResolveCandidateLike,
   announceReducer,
+  candidateKey,
+  candidateLabel,
   initialAnnounceState,
 } from "@/lib/announce-reducer";
 import { expiresAt, isFresh } from "@/lib/announce-token";
@@ -90,7 +92,7 @@ export function AnnounceScreen() {
 
   useEffect(() => {
     if (state.undo && remainingMs(state.undo, now) <= 0) {
-      dispatch({ type: "undo/expire", studentId: state.undo.studentId });
+      dispatch({ type: "undo/expire", studentIds: state.undo.studentIds });
     }
   }, [state.undo, now]);
 
@@ -296,28 +298,35 @@ export function AnnounceScreen() {
     void runResolve({ transcript }, "manual");
   }
 
-  async function handleConfirm(candidate: ResolveCandidateLike) {
+  /** The one write shared by a single-tap confirm and a multi-select confirm. */
+  async function confirmCandidates(
+    key: string,
+    studentIds: string[],
+    displayName: string,
+    carpoolId: string | null,
+    score: number | null,
+  ) {
     const creds = session.credentials();
-    if (!creds || state.confirmingId) return;
+    if (!creds || state.confirmingKey) return;
 
-    const { student, score } = candidate;
-    const displayName = `${student.first_name} ${student.last_name}`;
-    dispatch({ type: "confirm/start", studentId: student.id });
+    dispatch({ type: "confirm/start", key });
 
     try {
       const response = await api.setStatus({
         ...creds,
-        studentId: student.id,
+        studentIds,
         status: "arrived",
         source: state.results?.origin === "voice" ? "voice" : "manual",
         matchConfidence: score,
         transcript: state.results?.transcript,
+        carpoolId,
       });
       dispatch({
         type: "confirm/settled",
-        studentId: student.id,
+        studentIds,
+        changedIds: response.changed,
         displayName,
-        changed: response.changed,
+        carpoolId,
         logged: response.logged,
         confirmedAt: Date.now(),
       });
@@ -330,17 +339,53 @@ export function AnnounceScreen() {
     }
   }
 
+  function handleConfirm(candidate: ResolveCandidateLike) {
+    void confirmCandidates(
+      candidateKey(candidate),
+      candidate.students.map((student) => student.id),
+      candidateLabel(candidate),
+      candidate.carpool?.id ?? null,
+      candidate.score,
+    );
+  }
+
+  function handleConfirmSelected() {
+    if (!state.results || state.selectedKeys.length === 0) return;
+
+    const selected = state.results.candidates.filter((candidate) =>
+      state.selectedKeys.includes(candidateKey(candidate)),
+    );
+    const studentIds = selected.flatMap((candidate) =>
+      candidate.students.map((student) => student.id),
+    );
+    const displayName = selected.map(candidateLabel).join(", ");
+    // Only meaningful to attribute this confirm to a single carpool when
+    // exactly one carpool (and nothing else) was selected -- a mixed batch of
+    // several unrelated candidates has no one carpool to log against.
+    const carpoolId =
+      selected.length === 1 ? (selected[0].carpool?.id ?? null) : null;
+    const score = selected.length === 1 ? selected[0].score : null;
+
+    void confirmCandidates(
+      "multi",
+      studentIds,
+      displayName,
+      carpoolId,
+      score,
+    );
+  }
+
   async function handleUndo() {
     const creds = session.credentials();
     if (!creds || !state.undo) return;
 
-    const { studentId } = state.undo;
+    const { studentIds } = state.undo;
     dispatch({ type: "undo/start" });
     setUndoPending(true);
     try {
       await api.setStatus({
         ...creds,
-        studentId,
+        studentIds,
         status: "waiting",
         source: "manual",
       });
@@ -425,8 +470,17 @@ export function AnnounceScreen() {
             state.results.tier !== "none" && (
               <CandidateList
                 results={state.results}
-                confirmingId={state.confirmingId}
+                confirmingKey={state.confirmingKey}
+                multiSelect={state.multiSelect}
+                selectedKeys={state.selectedKeys}
                 onConfirm={handleConfirm}
+                onToggleSelect={(key) =>
+                  dispatch({ type: "candidate/toggleSelect", key })
+                }
+                onConfirmSelected={handleConfirmSelected}
+                onToggleMultiSelect={() =>
+                  dispatch({ type: "multiSelect/toggle" })
+                }
               />
             )}
 

@@ -67,6 +67,7 @@ function toStudent(seed: MockSeed): Student {
     status: seed.status,
     arrived_at: seed.status === "arrived" ? BASE_TIME : null,
     updated_at: BASE_TIME,
+    carpool_id: null,
   };
 }
 

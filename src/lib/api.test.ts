@@ -73,7 +73,12 @@ describe("request shape", () => {
 
   it("sends source on every status write, because the server requires it", async () => {
     const { client, fetchImpl } = clientReturning(
-      jsonResponse({ student: { id: "s1" }, changed: true, logged: true }),
+      jsonResponse({
+        students: [{ id: "s1" }],
+        changed: ["s1"],
+        logged: 1,
+        missing: [],
+      }),
     );
 
     await client.setStatus({
@@ -117,14 +122,17 @@ describe("successful responses", () => {
       transcript: "cohen",
       candidates: [
         {
-          student: {
-            id: "s1",
-            first_name: "Maya",
-            last_name: "Cohen",
-            grade: "3",
-            class_group: "3A",
-            status: "waiting",
-          },
+          students: [
+            {
+              id: "s1",
+              first_name: "Maya",
+              last_name: "Cohen",
+              grade: "3",
+              class_group: "3A",
+              status: "waiting",
+            },
+          ],
+          carpool: null,
           score: 0.91,
           matchedOn: "Cohen",
           matchedVia: "surname",
@@ -151,12 +159,13 @@ describe("successful responses", () => {
     expect(result.tier).toBe("none");
   });
 
-  it("surfaces changed:false for an already-arrived student", async () => {
+  it("surfaces an empty changed list for an already-arrived student", async () => {
     const { client } = clientReturning(
       jsonResponse({
-        student: { id: "s1", status: "arrived" },
-        changed: false,
-        logged: true,
+        students: [{ id: "s1", status: "arrived" }],
+        changed: [],
+        logged: 0,
+        missing: [],
       }),
     );
 
@@ -167,8 +176,8 @@ describe("successful responses", () => {
       source: "manual",
     });
 
-    expect(result.changed).toBe(false);
-    expect(result.logged).toBe(true);
+    expect(result.changed).toEqual([]);
+    expect(result.students[0].status).toBe("arrived");
   });
 });
 

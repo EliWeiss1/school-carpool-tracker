@@ -2,26 +2,57 @@ import { describe, expect, it } from "vitest";
 
 import {
   announceReducer,
+  candidateKey,
+  candidateLabel,
   initialAnnounceState,
   type ResolveCandidateLike,
 } from "./announce-reducer";
 
+const student = (id: string, overrides: Partial<ResolveCandidateLike["students"][number]> = {}) => ({
+  id,
+  first_name: "Maya",
+  last_name: "Cohen",
+  grade: "K",
+  class_group: "K-Alvarez",
+  status: "waiting" as const,
+  ...overrides,
+});
+
 const candidate = (
   id: string,
-  overrides: Partial<ResolveCandidateLike["student"]> = {},
+  overrides: Partial<ResolveCandidateLike["students"][number]> = {},
 ): ResolveCandidateLike => ({
-  student: {
-    id,
-    first_name: "Maya",
-    last_name: "Cohen",
-    grade: "K",
-    class_group: "K-Alvarez",
-    status: "waiting",
-    ...overrides,
-  },
+  students: [student(id, overrides)],
+  carpool: null,
   score: 0.93,
   matchedOn: "Cohen",
   matchedVia: "surname",
+});
+
+const carpoolCandidate = (
+  carpoolId: string,
+  name: string,
+  memberIds: string[],
+): ResolveCandidateLike => ({
+  students: memberIds.map((id) => student(id)),
+  carpool: { id: carpoolId, name },
+  score: 0.95,
+  matchedOn: name,
+  matchedVia: "surname",
+});
+
+describe("candidateKey / candidateLabel", () => {
+  it("keys and labels a lone student by their own id and name", () => {
+    const c = candidate("s1", { first_name: "Maya", last_name: "Cohen" });
+    expect(candidateKey(c)).toBe("student:s1");
+    expect(candidateLabel(c)).toBe("Maya Cohen");
+  });
+
+  it("keys and labels a carpool by its own id and name, not a member's", () => {
+    const c = carpoolCandidate("weiss", "Weiss Carpool", ["s1", "s2"]);
+    expect(candidateKey(c)).toBe("carpool:weiss");
+    expect(candidateLabel(c)).toBe("Weiss Carpool");
+  });
 });
 
 describe("initialAnnounceState", () => {
@@ -31,12 +62,14 @@ describe("initialAnnounceState", () => {
     expect(state.micStatus).toBe("idle");
     expect(state.resolving).toBe(false);
     expect(state.results).toBeNull();
-    expect(state.confirmingId).toBeNull();
+    expect(state.confirmingKey).toBeNull();
     expect(state.banner).toBeNull();
     expect(state.info).toBeNull();
     expect(state.undo).toBeNull();
     expect(state.filter).toEqual({ grade: "", classGroup: "" });
     expect(state.searchText).toBe("");
+    expect(state.multiSelect).toBe(false);
+    expect(state.selectedKeys).toEqual([]);
   });
 });
 
@@ -136,6 +169,7 @@ describe("resolving", () => {
       transcript: "Coen",
       candidates: [candidate("s1"), candidate("s2")],
     });
+    expect(state.selectedKeys).toEqual([]);
   });
 
   it("resolve/error stops resolving, clears results, and sets the banner verbatim", () => {
@@ -164,12 +198,64 @@ describe("resolving", () => {
   });
 });
 
-describe("confirming a candidate", () => {
-  it("confirm/start records which student is in flight and clears the banner", () => {
+describe("multi-select", () => {
+  it("is off by default and toggling it on/off clears any selection", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "confirm/start", studentId: "s1" });
+    state = announceReducer(state, {
+      type: "candidate/toggleSelect",
+      key: "student:s1",
+    });
+    state = announceReducer(state, { type: "multiSelect/toggle" });
 
-    expect(state.confirmingId).toBe("s1");
+    expect(state.multiSelect).toBe(true);
+    expect(state.selectedKeys).toEqual([]);
+  });
+
+  it("toggles a candidate key in and out of the selection", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, { type: "multiSelect/toggle" });
+    state = announceReducer(state, {
+      type: "candidate/toggleSelect",
+      key: "student:s1",
+    });
+    state = announceReducer(state, {
+      type: "candidate/toggleSelect",
+      key: "student:s2",
+    });
+    expect(state.selectedKeys).toEqual(["student:s1", "student:s2"]);
+
+    state = announceReducer(state, {
+      type: "candidate/toggleSelect",
+      key: "student:s1",
+    });
+    expect(state.selectedKeys).toEqual(["student:s2"]);
+  });
+
+  it("a new resolve result clears any prior selection", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, { type: "multiSelect/toggle" });
+    state = announceReducer(state, {
+      type: "candidate/toggleSelect",
+      key: "student:s1",
+    });
+    state = announceReducer(state, {
+      type: "resolve/success",
+      origin: "voice",
+      tier: "ambiguous",
+      transcript: "Cohen",
+      candidates: [candidate("s1")],
+    });
+
+    expect(state.selectedKeys).toEqual([]);
+  });
+});
+
+describe("confirming a candidate", () => {
+  it("confirm/start records which candidate key is in flight and clears the banner", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
+
+    expect(state.confirmingKey).toBe("student:s1");
     expect(state.banner).toBeNull();
   });
 
@@ -182,36 +268,39 @@ describe("confirming a candidate", () => {
       transcript: "Cohen",
       candidates: [candidate("s1")],
     });
-    state = announceReducer(state, { type: "confirm/start", studentId: "s1" });
+    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
     state = announceReducer(state, {
       type: "confirm/settled",
-      studentId: "s1",
+      studentIds: ["s1"],
+      changedIds: ["s1"],
       displayName: "Maya Cohen",
-      changed: true,
-      logged: true,
+      carpoolId: null,
+      logged: 1,
       confirmedAt: 1_000,
     });
 
-    expect(state.confirmingId).toBeNull();
+    expect(state.confirmingKey).toBeNull();
     expect(state.results).toBeNull();
     expect(state.undo).toEqual({
-      studentId: "s1",
+      studentIds: ["s1"],
       displayName: "Maya Cohen",
+      carpoolId: null,
       confirmedAt: 1_000,
     });
     expect(state.info).toMatch(/Maya Cohen/);
     expect(state.banner).toBeNull();
   });
 
-  it("changed: false is reported calmly and does not start an undo window", () => {
+  it("no changed ids is reported calmly and does not start an undo window", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "confirm/start", studentId: "s1" });
+    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
     state = announceReducer(state, {
       type: "confirm/settled",
-      studentId: "s1",
+      studentIds: ["s1"],
+      changedIds: [],
       displayName: "Maya Cohen",
-      changed: false,
-      logged: true,
+      carpoolId: null,
+      logged: 0,
       confirmedAt: 1_000,
     });
 
@@ -220,15 +309,16 @@ describe("confirming a candidate", () => {
     expect(state.info).toMatch(/already/i);
   });
 
-  it("logged: false surfaces a quiet warning but keeps the undo window (the write itself stuck)", () => {
+  it("logged fewer than changed surfaces a quiet warning but keeps the undo window", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "confirm/start", studentId: "s1" });
+    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
     state = announceReducer(state, {
       type: "confirm/settled",
-      studentId: "s1",
+      studentIds: ["s1"],
+      changedIds: ["s1"],
       displayName: "Maya Cohen",
-      changed: true,
-      logged: false,
+      carpoolId: null,
+      logged: 0,
       confirmedAt: 1_000,
     });
 
@@ -243,21 +333,63 @@ describe("confirming a candidate", () => {
     let state = initialAnnounceState();
     state = announceReducer(state, {
       type: "confirm/settled",
-      studentId: "s0",
+      studentIds: ["s0"],
+      changedIds: ["s0"],
       displayName: "Earlier Kid",
-      changed: true,
-      logged: true,
+      carpoolId: null,
+      logged: 1,
       confirmedAt: 500,
     });
-    state = announceReducer(state, { type: "confirm/start", studentId: "s1" });
+    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
     state = announceReducer(state, {
       type: "confirm/error",
       banner: { tone: "error", message: "Too many requests just now." },
     });
 
-    expect(state.confirmingId).toBeNull();
+    expect(state.confirmingKey).toBeNull();
     expect(state.banner?.message).toBe("Too many requests just now.");
-    expect(state.undo?.studentId).toBe("s0");
+    expect(state.undo?.studentIds).toEqual(["s0"]);
+  });
+
+  describe("a whole carpool confirmed in one tap", () => {
+    it("all members changed reads as one plural confirmation", () => {
+      let state = initialAnnounceState();
+      state = announceReducer(state, {
+        type: "confirm/settled",
+        studentIds: ["s1", "s2"],
+        changedIds: ["s1", "s2"],
+        displayName: "Weiss Carpool",
+        carpoolId: "weiss",
+        logged: 2,
+        confirmedAt: 1_000,
+      });
+
+      expect(state.undo).toEqual({
+        studentIds: ["s1", "s2"],
+        displayName: "Weiss Carpool",
+        carpoolId: "weiss",
+        confirmedAt: 1_000,
+      });
+      expect(state.info).toMatch(/Weiss Carpool/);
+      expect(state.info).toMatch(/are marked arrived/);
+    });
+
+    it("a partial confirmation (one member already arrived) is calm, not an error, and still opens undo for the ones that changed", () => {
+      let state = initialAnnounceState();
+      state = announceReducer(state, {
+        type: "confirm/settled",
+        studentIds: ["s1", "s2"],
+        changedIds: ["s2"],
+        displayName: "Weiss Carpool",
+        carpoolId: "weiss",
+        logged: 1,
+        confirmedAt: 1_000,
+      });
+
+      expect(state.banner).toBeNull();
+      expect(state.info).toMatch(/1 of 2/);
+      expect(state.undo?.studentIds).toEqual(["s2"]);
+    });
   });
 });
 
@@ -266,10 +398,11 @@ describe("undo", () => {
     let state = initialAnnounceState();
     state = announceReducer(state, {
       type: "confirm/settled",
-      studentId: "s1",
+      studentIds: ["s1"],
+      changedIds: ["s1"],
       displayName: "Maya Cohen",
-      changed: true,
-      logged: true,
+      carpoolId: null,
+      logged: 1,
       confirmedAt: 1_000,
     });
     return state;
@@ -296,7 +429,7 @@ describe("undo", () => {
 
   it("undo/expire silently clears an undo window whose time has run out", () => {
     let state = withUndo();
-    state = announceReducer(state, { type: "undo/expire", studentId: "s1" });
+    state = announceReducer(state, { type: "undo/expire", studentIds: ["s1"] });
 
     expect(state.undo).toBeNull();
     expect(state.banner).toBeNull();
@@ -307,15 +440,16 @@ describe("undo", () => {
     // A stale timer for s1 fires after s2 has already been confirmed.
     state = announceReducer(state, {
       type: "confirm/settled",
-      studentId: "s2",
+      studentIds: ["s2"],
+      changedIds: ["s2"],
       displayName: "Elias Kohen",
-      changed: true,
-      logged: true,
+      carpoolId: null,
+      logged: 1,
       confirmedAt: 2_000,
     });
-    state = announceReducer(state, { type: "undo/expire", studentId: "s1" });
+    state = announceReducer(state, { type: "undo/expire", studentIds: ["s1"] });
 
-    expect(state.undo?.studentId).toBe("s2");
+    expect(state.undo?.studentIds).toEqual(["s2"]);
   });
 });
 

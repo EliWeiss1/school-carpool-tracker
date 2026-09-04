@@ -40,7 +40,10 @@ export interface CandidateStudent {
 }
 
 export interface ResolveCandidate {
-  student: CandidateStudent;
+  /** The one student, or every member of the carpool. Never empty. */
+  students: CandidateStudent[];
+  /** Present only when this candidate is a whole carpool. */
+  carpool: { id: string; name: string } | null;
   /** 0-1. Passed straight back to set-status so it lands in the audit row. */
   score: number;
   /** The spelling that matched, as written on the roster. */
@@ -69,11 +72,14 @@ export interface ResolveResponse {
 }
 
 export interface SetStatusResponse {
-  student: Student;
-  /** False when the student was already in this status. No flash, no log row. */
-  changed: boolean;
-  /** False when the status stuck but its audit row did not. Never undo on this. */
-  logged: boolean;
+  /** Final state of every id that exists on the roster, changed or not. */
+  students: Student[];
+  /** Ids that actually moved. Absent here but present in `students` means "already there". */
+  changed: string[];
+  /** Audit rows written -- one per id in `changed`, at most. */
+  logged: number;
+  /** Ids that were not found on the roster at all. */
+  missing: string[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -197,7 +203,9 @@ export type ResolveInput = Credentials &
 
 export type SetStatusInput = Credentials &
   RequestOptions & {
-    studentId: string;
+    /** Exactly one of these two -- a single confirm, or a whole carpool at once. */
+    studentId?: string;
+    studentIds?: string[];
     status: StudentStatus;
     /**
      * Required, never defaulted. A voice confirmation logged as `manual` drops
@@ -206,6 +214,8 @@ export type SetStatusInput = Credentials &
     source: StatusEventSource;
     matchConfidence?: number | null;
     transcript?: string | null;
+    /** Set when confirming a whole carpool, so every audit row carries it. */
+    carpoolId?: string | null;
   };
 
 export interface ApiClient {
@@ -370,10 +380,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       pin,
       deviceId,
       studentId,
+      studentIds,
       status,
       source,
       matchConfidence,
       transcript,
+      carpoolId,
       signal,
     }) {
       return post<SetStatusResponse>(
@@ -382,12 +394,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
           pin,
           deviceId,
           studentId,
+          studentIds,
           status,
           source,
           // Only meaningful on a voice confirmation; the server ignores both
           // for any other source, but sending them would still be misleading.
           matchConfidence: source === "voice" ? matchConfidence : undefined,
           transcript: source === "voice" ? transcript : undefined,
+          carpoolId,
         }),
         signal,
       );

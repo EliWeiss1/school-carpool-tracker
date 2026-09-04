@@ -57,9 +57,8 @@ describe("buildKeyterms", () => {
   it("honours a caller's tighter limit", () => {
     const terms = buildKeyterms(
       [student("Cohen"), student("Nguyen"), student("Patel")],
-      {
-        limit: 2,
-      },
+      [],
+      { limit: 2 },
     );
 
     expect(terms).toEqual(["Cohen", "Nguyen"]);
@@ -73,5 +72,35 @@ describe("buildKeyterms", () => {
 
   it("returns nothing for an empty roster", () => {
     expect(buildKeyterms([])).toEqual([]);
+  });
+
+  it("puts carpool names after waiting surnames but before arrived ones", () => {
+    const terms = buildKeyterms(
+      [
+        student("Nguyen", { status: "waiting" }),
+        student("Marsh", { status: "arrived" }),
+      ],
+      [{ name: "Weiss Carpool", aliases: [] }],
+    );
+
+    expect(terms).toEqual(["Nguyen", "Weiss Carpool", "Marsh"]);
+  });
+
+  it("adds carpool aliases in the same trailing tier as student aliases", () => {
+    const terms = buildKeyterms(
+      [student("Nguyen", { aliases: ["Win"] })],
+      [{ name: "Weiss Carpool", aliases: ["The Van"] }],
+    );
+
+    expect(terms).toEqual(["Nguyen", "Weiss Carpool", "Win", "The Van"]);
+  });
+
+  it("offers every carpool regardless of the roster passed in", () => {
+    // Carpools are not narrowed by the announce screen's grade/class filter --
+    // a carpool can span grades -- so this only proves carpools with no
+    // matching students still make the list.
+    const terms = buildKeyterms([], [{ name: "Weiss Carpool", aliases: [] }]);
+
+    expect(terms).toEqual(["Weiss Carpool"]);
   });
 });

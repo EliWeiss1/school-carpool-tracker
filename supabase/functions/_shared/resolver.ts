@@ -51,6 +51,28 @@ export interface Candidate<T extends ResolverStudent> {
   matchedVia: MatchedVia;
 }
 
+/**
+ * A ranked candidate, still carrying the two facts `tierFor` needs but a
+ * caller never does: whether the score depended on the phonetic floor, and
+ * whether the name was long enough (or an exact hit) for an inexact match to
+ * be trusted. `resolveName` strips both before returning; a caller that wants
+ * to re-rank a collapsed list (see resolve.ts's carpool grouping) needs them
+ * kept through that step, which is why `rankCandidates` is exported
+ * separately from the combined `resolveName`.
+ */
+export interface RankedCandidate<T extends ResolverStudent>
+  extends Candidate<T> {
+  viaPhonetic: boolean;
+  clearEligible: boolean;
+}
+
+export interface RankResult<T extends ResolverStudent> {
+  /** Ranked best first, already capped to maxCandidates. */
+  candidates: RankedCandidate<T>[];
+  /** The alternative the top candidate came from, unfolded, for the audit log. */
+  transcript: string;
+}
+
 export interface ResolveResult<T extends ResolverStudent> {
   tier: MatchTier;
   /** Ranked best first. Empty when the tier is "none". */
@@ -251,17 +273,27 @@ function toAlternatives(
   return typeof input === "string" ? [{ transcript: input }] : input;
 }
 
-export function resolveName<T extends ResolverStudent>(
+/**
+ * Ranks the roster against a transcript, with no tier decision attached.
+ *
+ * Split out of `resolveName` so a caller that needs to regroup candidates
+ * before applying the tier policy -- collapsing several students into one
+ * carpool candidate, in resolve.ts -- can do so on ranked-but-untiered
+ * output. `resolveName` itself is exactly `tierFor(rankCandidates(...))`; see
+ * that function for why the four-condition tier check has to run on the
+ * caller's final list, not this one.
+ */
+export function rankCandidates<T extends ResolverStudent>(
   input: string | TranscriptAlternative[],
   roster: T[],
   options: { maxCandidates?: number } = {},
-): ResolveResult<T> {
+): RankResult<T> {
   const alternatives = toAlternatives(input);
   const maxCandidates = options.maxCandidates ?? MATCH_POLICY.maxCandidates;
   const fallbackTranscript = alternatives[0]?.transcript ?? "";
 
   if (roster.length === 0 || alternatives.length === 0) {
-    return { tier: "none", candidates: [], transcript: fallbackTranscript };
+    return { candidates: [], transcript: fallbackTranscript };
   }
 
   // Phrases and their phonetic codes are computed once and reused across the
@@ -350,34 +382,68 @@ export function resolveName<T extends ResolverStudent>(
     .slice(0, maxCandidates);
 
   if (ranked.length === 0) {
-    return { tier: "none", candidates: [], transcript: fallbackTranscript };
+    return { candidates: [], transcript: fallbackTranscript };
   }
 
-  const [top, runnerUp] = ranked;
+  return {
+    candidates: ranked.map(({ transcript: _fromAlternative, ...candidate }) => candidate),
+    transcript: ranked[0].transcript,
+  };
+}
+
+/**
+ * Everything the tier policy actually looks at. Deliberately not
+ * `RankedCandidate<T>` itself: a caller that regroups ranked candidates
+ * before tiering them (resolve.ts collapses several into one carpool) is not
+ * regrouping students, so it has no single `T` to parameterise over -- only
+ * these three fields survive the regroup, and they are all `tierFor` needs.
+ */
+export interface Tierable {
+  score: number;
+  viaPhonetic: boolean;
+  clearEligible: boolean;
+}
+
+/**
+ * The tier policy, applied to a caller's final ranked list.
+ *
+ * Four independent reasons to withhold a pre-highlight: not similar enough,
+ * too close to the runner-up, similar only in sound, or too short a name for
+ * an inexact match to mean anything. Cruz does not become Garza; Lim does not
+ * become Li. Any of them still leaves the top candidate on screen as a tap
+ * target -- withholding "clear" only costs one extra tap, never a match.
+ */
+export function tierFor(candidates: Tierable[]): MatchTier {
+  const [top, runnerUp] = candidates;
+  if (!top) return "none";
+
   const margin = top.score - (runnerUp?.score ?? 0);
 
-  // Four independent reasons to withhold a pre-highlight: not similar enough,
-  // too close to the runner-up, similar only in sound, or too short a name for
-  // an inexact match to mean anything. Cruz does not become Garza; Lim does not
-  // become Li. Any of them still leaves the child on screen as a tap target.
-  const tier: MatchTier =
-    top.score >= MATCH_POLICY.clearScore &&
+  return top.score >= MATCH_POLICY.clearScore &&
     margin >= MATCH_POLICY.clearMargin &&
     !top.viaPhonetic &&
     top.clearEligible
-      ? "clear"
-      : "ambiguous";
+    ? "clear"
+    : "ambiguous";
+}
+
+export function resolveName<T extends ResolverStudent>(
+  input: string | TranscriptAlternative[],
+  roster: T[],
+  options: { maxCandidates?: number } = {},
+): ResolveResult<T> {
+  const { candidates, transcript } = rankCandidates(input, roster, options);
+
+  if (candidates.length === 0) {
+    return { tier: "none", candidates: [], transcript };
+  }
 
   return {
-    tier,
-    candidates: ranked.map(
-      ({
-        transcript: _fromAlternative,
-        viaPhonetic: _viaPhonetic,
-        clearEligible: _clearEligible,
-        ...candidate
-      }) => candidate,
+    tier: tierFor(candidates),
+    candidates: candidates.map(
+      ({ viaPhonetic: _viaPhonetic, clearEligible: _clearEligible, ...candidate }) =>
+        candidate,
     ),
-    transcript: top.transcript,
+    transcript,
   };
 }

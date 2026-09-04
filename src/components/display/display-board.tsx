@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 import { BoardGrid } from "@/components/display/board-grid";
+import { ClassFilter } from "@/components/display/class-filter";
 import { SoundToggle } from "@/components/display/sound-toggle";
 import {
   EmptyState,
@@ -12,6 +13,7 @@ import {
   PageHeader,
 } from "@/components/ui";
 import { createChimeCoalescer, createChimePlayer } from "@/lib/display-chime";
+import { groupIntoSections } from "@/lib/display-sections";
 import { mockArrivalOrder, mockRoster } from "@/lib/display-mock-roster";
 import {
   applySnapshot,
@@ -21,6 +23,28 @@ import {
 } from "@/lib/realtime-reconcile";
 import { getBrowserClient } from "@/lib/supabase/browser";
 import type { Student } from "@/types/db";
+
+/** Remembers the last class a viewer picked, per browser tab's origin -- a
+ *  per-device convenience, not shared or synced state (see CLAUDE.md's
+ *  storage rule, which is specifically about the staff PIN, not this). */
+const FILTER_STORAGE_KEY = "display-section-filter";
+
+function readStoredFilter(): string | null {
+  try {
+    return window.localStorage.getItem(FILTER_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredFilter(sectionKey: string): void {
+  try {
+    window.localStorage.setItem(FILTER_STORAGE_KEY, sectionKey);
+  } catch {
+    // Private browsing or a full quota -- the filter just won't be
+    // remembered next visit, which is not worth surfacing to the viewer.
+  }
+}
 
 /**
  * The realtime status grid. Public, unauthenticated, read-only -- the anon
@@ -83,6 +107,8 @@ export function DisplayBoard({
   mockMode = false,
   mockEmpty = false,
   flashPreview = false,
+  initialClassParam = null,
+  initialGradeParam = null,
 }: {
   /** Dev-only: seeds synthetic data instead of calling Supabase. Gated in src/app/display/page.tsx so it can never activate in production. */
   mockMode?: boolean;
@@ -90,12 +116,18 @@ export function DisplayBoard({
   mockEmpty?: boolean;
   /** Dev-only: walks a few mock students from waiting to arrived shortly after load, so the flash + chime can actually be screenshotted with no live backend. */
   flashPreview?: boolean;
+  /** From `?class=`, read server-side. Resolved to a section key once the roster loads. */
+  initialClassParam?: string | null;
+  /** From `?grade=`, read server-side. Only used when it resolves to exactly one section. */
+  initialGradeParam?: string | null;
 }) {
   const [roster, setRoster] = useState<DisplayRoster>({});
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [configError, setConfigError] = useState<string | null>(null);
   const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
   const [soundBlocked, setSoundBlocked] = useState(false);
+  const [sectionKey, setSectionKey] = useState("");
+  const urlFilterResolvedRef = useRef(false);
 
   const coalescerRef = useRef(
     createChimeCoalescer({ windowMs: CHIME_COALESCE_WINDOW_MS }),
@@ -104,6 +136,60 @@ export function DisplayBoard({
   const flashTimeoutsRef = useRef(
     new Map<string, ReturnType<typeof setTimeout>>(),
   );
+
+  const students = useMemo(() => Object.values(roster), [roster]);
+  const grouped = useMemo(
+    () => groupIntoSections(students, { sectionKey }),
+    [students, sectionKey],
+  );
+
+  // A ref updated on every render (not in an effect) so the realtime
+  // subscription's callback -- set up once and never re-run -- always reads
+  // the FILTER that is current at the moment an arrival lands, not the one
+  // that was current when the subscription was opened. This is what scopes a
+  // chime/flash to the viewer's own filtered class, and lets changing the
+  // filter mid-session never retroactively flash anything.
+  const visibleIdsRef = useRef(grouped.visibleIds);
+  visibleIdsRef.current = grouped.visibleIds;
+
+  // Restore a remembered filter on first mount, once: a bookmarked ?class= is
+  // resolved against the roster below and takes priority the moment it can
+  // be resolved, but until the roster has loaded there is nothing to resolve
+  // it against, so the stored choice is what the board opens to meanwhile.
+  useEffect(() => {
+    const stored = readStoredFilter();
+    if (stored !== null) setSectionKey(stored);
+  }, []);
+
+  // Resolve ?class=/?grade= against the loaded sections, exactly once. A
+  // bookmarked or embedded URL should win over whatever was remembered from
+  // last time this browser opened the board.
+  useEffect(() => {
+    if (urlFilterResolvedRef.current) return;
+    if (grouped.allSections.length === 0) return;
+    if (!initialClassParam && !initialGradeParam) {
+      urlFilterResolvedRef.current = true;
+      return;
+    }
+
+    const match = grouped.allSections.find((section) => {
+      if (initialClassParam) {
+        return (
+          section.classGroup?.toLowerCase() ===
+          initialClassParam.toLowerCase()
+        );
+      }
+      return section.grade?.toLowerCase() === initialGradeParam!.toLowerCase();
+    });
+
+    if (match) setSectionKey(match.key);
+    urlFilterResolvedRef.current = true;
+  }, [grouped.allSections, initialClassParam, initialGradeParam]);
+
+  function handleFilterChange(nextKey: string) {
+    setSectionKey(nextKey);
+    writeStoredFilter(nextKey);
+  }
 
   /**
    * Flashes the given tiles and fires at most one chime for the whole batch.
@@ -172,7 +258,11 @@ export function DisplayBoard({
               old: current,
             };
             const result = reconcile(prev, payload);
-            handleArrivals(result.arrivals);
+            handleArrivals(
+              result.arrivals.filter((arrivalId) =>
+                visibleIdsRef.current.has(arrivalId),
+              ),
+            );
             return result.roster;
           });
         },
@@ -237,7 +327,9 @@ export function DisplayBoard({
           if (!changePayload) return;
           setRoster((prev) => {
             const result = reconcile(prev, changePayload);
-            handleArrivals(result.arrivals);
+            handleArrivals(
+              result.arrivals.filter((id) => visibleIdsRef.current.has(id)),
+            );
             return result.roster;
           });
         },
@@ -264,32 +356,21 @@ export function DisplayBoard({
     };
   }, []);
 
-  const students = useMemo(
-    () =>
-      Object.values(roster).sort((a, b) => {
-        const byLastName = a.last_name.localeCompare(b.last_name);
-        return byLastName !== 0
-          ? byLastName
-          : a.first_name.localeCompare(b.first_name);
-      }),
-    [roster],
-  );
-
-  const waitingCount = students.filter((s) => s.status === "waiting").length;
-  const arrivedCount = students.length - waitingCount;
-
   function enableSound() {
     void playerRef.current.play().then((played) => setSoundBlocked(!played));
   }
 
+  const rosterIsEmpty = students.length === 0;
+  const filterHidesEveryone = !rosterIsEmpty && grouped.sections.length === 0;
+
   return (
-    // h-screen, not min-h-screen: a board screwed to a wall is exactly one
-    // screen tall and nobody is going to scroll it. A definite height is also
-    // what lets the grid's `1fr` rows divide the space instead of resolving to
-    // their content -- with min-h-screen the last row simply fell off a 1080p
-    // display. If a roster is long enough that the rows hit their legibility
-    // floor, the grid itself scrolls; the header stays put.
-    <main className="flex h-screen flex-col overflow-hidden bg-ink">
+    // h-screen from sm up: a board screwed to a wall is exactly one screen
+    // tall and nobody is going to scroll it, and a definite height is what
+    // lets the grid's `1fr` rows divide the space instead of resolving to
+    // their content. Below sm this is a phone, not a wall -- min-h-screen and
+    // a normally scrolling page fit checking the board from a hallway far
+    // better than a viewport-locked layout does.
+    <main className="flex min-h-screen flex-col bg-ink sm:h-screen sm:overflow-hidden">
       <PageHeader
         eyebrow="Pickup line · live"
         title="Display"
@@ -299,17 +380,27 @@ export function DisplayBoard({
             {!configError && (
               <p className="whitespace-nowrap font-mono text-xs">
                 <span className="text-waiting-screen">
-                  {waitingCount} waiting
+                  {grouped.totals.waiting} waiting
                 </span>
                 <span className="text-white/40"> · </span>
                 <span className="text-arrived-screen">
-                  {arrivedCount} arrived
+                  {grouped.totals.arrived} arrived
                 </span>
               </p>
             )}
           </div>
         }
       />
+
+      {!configError && grouped.options.length > 1 && (
+        <div className="pt-3">
+          <ClassFilter
+            options={grouped.options}
+            value={sectionKey}
+            onChange={handleFilterChange}
+          />
+        </div>
+      )}
 
       {/* aria-live region for arrivals: /display is a wall-mounted TV, not a
           screen reader stop, but a stray screen reader user should still be
@@ -348,7 +439,7 @@ export function DisplayBoard({
         </div>
       )}
 
-      {!configError && connection === "live" && students.length === 0 && (
+      {!configError && connection === "live" && rosterIsEmpty && (
         <div className="p-4 sm:p-6">
           <EmptyState
             title="No students yet"
@@ -357,8 +448,17 @@ export function DisplayBoard({
         </div>
       )}
 
-      {!configError && students.length > 0 && (
-        <BoardGrid students={students} flashingIds={flashingIds} />
+      {!configError && connection === "live" && filterHidesEveryone && (
+        <div className="p-4 sm:p-6">
+          <EmptyState
+            title="Nobody in this class yet"
+            hint="Choose a different class above, or select All classes."
+          />
+        </div>
+      )}
+
+      {!configError && grouped.sections.length > 0 && (
+        <BoardGrid sections={grouped.sections} flashingIds={flashingIds} />
       )}
     </main>
   );

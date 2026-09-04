@@ -8,8 +8,9 @@ import { PinGate } from "@/components/ui/pin-gate";
 import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
 import { usePinSession } from "@/lib/use-pin-session";
-import type { Student } from "@/types/db";
+import type { Carpool, Student } from "@/types/db";
 
+import { CarpoolManager } from "./carpool-manager";
 import { CsvImportPanel } from "./csv-import-panel";
 import { ResetPanel } from "./reset-panel";
 import { RosterManager } from "./roster-manager";
@@ -26,6 +27,7 @@ import { RosterManager } from "./roster-manager";
 function AdminContent() {
   const session = usePinSession();
   const [students, setStudents] = useState<Student[] | null>(null);
+  const [carpools, setCarpools] = useState<Carpool[]>([]);
   const [listError, setListError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -37,13 +39,17 @@ function AdminContent() {
 
     setListError(null);
     try {
-      const { students: rows } = await adminApi.listRoster(credentials);
+      const { students: rows, carpools: rosterCarpools } =
+        await adminApi.listRoster(credentials);
       setStudents(
         [...rows].sort((a, b) =>
           `${a.last_name} ${a.first_name}`.localeCompare(
             `${b.last_name} ${b.first_name}`,
           ),
         ),
+      );
+      setCarpools(
+        [...rosterCarpools].sort((a, b) => a.name.localeCompare(b.name)),
       );
     } catch (error: unknown) {
       setListError(
@@ -78,7 +84,14 @@ function AdminContent() {
         <RosterManager
           session={session}
           students={students}
+          carpools={carpools}
           listError={listError}
+          refresh={refresh}
+        />
+        <CarpoolManager
+          session={session}
+          carpools={carpools}
+          students={students ?? []}
           refresh={refresh}
         />
         <CsvImportPanel session={session} onImported={refresh} />

@@ -18,7 +18,8 @@ import {
   compact,
   createEdgeFunctionPost,
 } from "@/lib/api";
-import type { Student } from "@/types/db";
+import type { Carpool, Student } from "@/types/db";
+import type { CsvImportStudent } from "@/lib/csv-import";
 
 /* -------------------------------------------------------------------------- */
 /* Shared shapes                                                              */
@@ -47,6 +48,7 @@ export interface StudentFields {
   aliases?: string[];
   grade?: string | null;
   class_group?: string | null;
+  carpool_id?: string | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -57,6 +59,7 @@ export type RosterListInput = Credentials & RosterScope & RequestOptions;
 
 export interface RosterListResponse {
   students: Student[];
+  carpools: Carpool[];
 }
 
 export type RosterCreateInput = Credentials & RequestOptions & StudentFields;
@@ -83,8 +86,14 @@ export interface RosterDeleteResponse {
 
 export type RosterImportInput = Credentials &
   RequestOptions & {
-    /** Already validated by `csv-import.ts` and confirmed by a person. */
-    students: StudentFields[];
+    /**
+     * Already validated by `csv-import.ts` and confirmed by a person. Carries
+     * `carpool` (a name, not an id) rather than `StudentFields`' `carpool_id`
+     * -- the server resolves each name to a carpool, creating one if it does
+     * not already exist, since the file is the only place these names exist
+     * before the import runs.
+     */
+    students: CsvImportStudent[];
   };
 
 export interface RosterImportResponse {
@@ -102,6 +111,41 @@ export interface RosterResetResponse {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Carpools                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export type CarpoolCreateInput = Credentials &
+  RequestOptions & {
+    name: string;
+    aliases?: string[];
+    memberIds?: string[];
+  };
+
+export type CarpoolUpdateInput = Credentials &
+  RequestOptions & {
+    carpoolId: string;
+    name?: string;
+    aliases?: string[];
+    /** The WHOLE desired membership when sent -- omit to leave membership untouched. */
+    memberIds?: string[];
+  };
+
+export type CarpoolDeleteInput = Credentials &
+  RequestOptions & {
+    carpoolId: string;
+  };
+
+export interface CarpoolWriteResponse {
+  carpool: Carpool;
+  members: Student[];
+  created: boolean;
+}
+
+export interface CarpoolDeleteResponse {
+  deleted: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Client                                                                      */
 /* -------------------------------------------------------------------------- */
 
@@ -112,6 +156,9 @@ export interface AdminApiClient {
   deleteStudent(input: RosterDeleteInput): Promise<RosterDeleteResponse>;
   importRoster(input: RosterImportInput): Promise<RosterImportResponse>;
   resetAllToWaiting(input: RosterResetInput): Promise<RosterResetResponse>;
+  createCarpool(input: CarpoolCreateInput): Promise<CarpoolWriteResponse>;
+  updateCarpool(input: CarpoolUpdateInput): Promise<CarpoolWriteResponse>;
+  deleteCarpool(input: CarpoolDeleteInput): Promise<CarpoolDeleteResponse>;
 }
 
 /**
@@ -156,6 +203,7 @@ export function createAdminApiClient(
       aliases,
       grade,
       class_group,
+      carpool_id,
       signal,
     }) {
       return post<RosterWriteResponse>(
@@ -168,6 +216,7 @@ export function createAdminApiClient(
           aliases,
           grade,
           class_group,
+          carpool_id,
         }),
         signal,
       );
@@ -182,6 +231,7 @@ export function createAdminApiClient(
       aliases,
       grade,
       class_group,
+      carpool_id,
       signal,
     }) {
       // Not `compact()` here: that helper drops `null` along with
@@ -196,6 +246,7 @@ export function createAdminApiClient(
       if (aliases !== undefined) body.aliases = aliases;
       if (grade !== undefined) body.grade = grade;
       if (class_group !== undefined) body.class_group = class_group;
+      if (carpool_id !== undefined) body.carpool_id = carpool_id;
 
       return post<RosterWriteResponse>("roster-write", body, signal);
     },
@@ -220,6 +271,50 @@ export function createAdminApiClient(
       return post<RosterResetResponse>(
         "roster-reset",
         compact({ pin, deviceId }),
+        signal,
+      );
+    },
+
+    createCarpool({ pin, deviceId, name, aliases, memberIds, signal }) {
+      return post<CarpoolWriteResponse>(
+        "carpool-write",
+        compact({ pin, deviceId, action: "create", name, aliases, memberIds }),
+        signal,
+      );
+    },
+
+    updateCarpool({
+      pin,
+      deviceId,
+      carpoolId,
+      name,
+      aliases,
+      memberIds,
+      signal,
+    }) {
+      // Not `compact()` for the same reason as updateStudent: `memberIds: []`
+      // (clear every member) has to survive, and compact() would drop it as
+      // falsy-looking only if it dropped empty arrays too -- it does not, but
+      // `name`/`aliases` still need the "field present vs. absent" distinction
+      // roster-write.ts's pattern relies on, so this stays explicit rather
+      // than reaching for compact() out of habit.
+      const body: Record<string, unknown> = {
+        pin,
+        deviceId,
+        action: "update",
+        carpoolId,
+      };
+      if (name !== undefined) body.name = name;
+      if (aliases !== undefined) body.aliases = aliases;
+      if (memberIds !== undefined) body.memberIds = memberIds;
+
+      return post<CarpoolWriteResponse>("carpool-write", body, signal);
+    },
+
+    deleteCarpool({ pin, deviceId, carpoolId, signal }) {
+      return post<CarpoolDeleteResponse>(
+        "carpool-write",
+        compact({ pin, deviceId, action: "delete", carpoolId }),
         signal,
       );
     },

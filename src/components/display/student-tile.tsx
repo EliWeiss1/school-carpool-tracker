@@ -28,7 +28,7 @@ export function StudentTile({
   return (
     <li
       className={cn(
-        "tile-surface relative flex max-h-[20rem] min-h-[8rem] flex-col justify-between overflow-hidden rounded-2xl p-3 text-white sm:min-h-[9rem] sm:p-4",
+        "tile-surface relative flex max-h-[20rem] min-h-[6rem] flex-col justify-between overflow-hidden rounded-2xl p-2.5 text-white sm:min-h-[9rem] sm:p-4",
         "animate-tile-in",
         arrived
           ? "bg-arrived-screen shadow-tile-arrived"

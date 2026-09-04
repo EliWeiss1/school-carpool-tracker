@@ -21,19 +21,26 @@ import { type GuardDeps, guardRequest } from "./guard.ts";
 import { nameKey, nameTooLong, readAliases } from "./roster-input.ts";
 
 export interface RosterImportHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "bulkCreateStudents" | "list">;
+  store: Pick<
+    RosterStore,
+    "bulkCreateStudents" | "list" | "listCarpools" | "createCarpool"
+  >;
 }
 
 /** Comfortably above any real school roster; a stop against a malformed body. */
 const MAX_IMPORT_ROWS = 1000;
 
-function readStudentsInput(
-  body: Record<string, unknown>,
-): StudentWriteInput[] | null {
+/** A row from the client, before its carpool name is resolved to an id. */
+interface ImportRow extends Omit<StudentWriteInput, "carpool_id"> {
+  /** The carpool name as typed in the file, or null for no carpool. */
+  carpool: string | null;
+}
+
+function readStudentsInput(body: Record<string, unknown>): ImportRow[] | null {
   const raw = body.students;
   if (!Array.isArray(raw)) return null;
 
-  const out: StudentWriteInput[] = [];
+  const out: ImportRow[] = [];
   for (const entry of raw) {
     if (typeof entry !== "object" || entry === null) return null;
     const row = entry as Record<string, unknown>;
@@ -57,9 +64,44 @@ function readStudentsInput(
       aliases: readAliases(row),
       grade: readString(row, "grade"),
       class_group: readString(row, "class_group"),
+      carpool: readString(row, "carpool"),
     });
   }
   return out;
+}
+
+/**
+ * Resolves each row's typed carpool name to an id, creating any carpool that
+ * does not already exist -- by name, case-insensitively, matching the unique
+ * index on `carpools.name`. Two rows naming the same new carpool share one
+ * new row rather than each creating their own.
+ */
+async function resolveCarpools(
+  store: RosterImportHandlerDeps["store"],
+  rows: ImportRow[],
+): Promise<StudentWriteInput[]> {
+  const existing = await store.listCarpools();
+  const byName = new Map(
+    existing.map((carpool) => [carpool.name.toLowerCase(), carpool.id]),
+  );
+
+  const resolved: StudentWriteInput[] = [];
+  for (const { carpool, ...rest } of rows) {
+    if (carpool === null) {
+      resolved.push({ ...rest, carpool_id: null });
+      continue;
+    }
+
+    const key = carpool.toLowerCase();
+    let carpoolId = byName.get(key);
+    if (carpoolId === undefined) {
+      const created = await store.createCarpool({ name: carpool, aliases: [] });
+      carpoolId = created.id;
+      byName.set(key, carpoolId);
+    }
+    resolved.push({ ...rest, carpool_id: carpoolId });
+  }
+  return resolved;
 }
 
 export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
@@ -117,7 +159,12 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
         );
       }
 
-      const created = await deps.store.bulkCreateStudents(students);
+      // Carpools named in the file are created (or matched by name) before
+      // any student row is written, so every row that names one lands with
+      // its carpool_id already set rather than needing a second pass.
+      const withCarpools = await resolveCarpools(deps.store, students);
+
+      const created = await deps.store.bulkCreateStudents(withCarpools);
       return jsonResponse({ created: created.length, students: created });
     });
   };

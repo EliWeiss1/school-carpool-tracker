@@ -2,16 +2,20 @@
 
 Written to be read cold, over coffee, assuming you remember nothing.
 
-**Picking this up in a fresh chat? Skip straight to [section 9](#9-the-real-deepgram-client-and-the-bug-that-got-reported-first)
-— it supersedes the mock-speech assumptions everywhere else in this file.**
-Short version: the real Deepgram voice client is built, twice reviewed, and
-verified live against the real API (commit `b6c40a6`, pushed to `master`,
-Vercel auto-deployed it). Both mock switches (`MOCK_SPEECH` on Supabase,
-`NEXT_PUBLIC_MOCK_SPEECH` on Vercel) are still `true` — real voice is not live
-for staff yet. What's left is exactly two things, both spelled out at the end
-of section 9: flip both switches together and redeploy, then a real
-click-and-talk test on an actual iPhone and Android phone. Nothing else in
-this project is currently in progress.
+**Picking this up in a fresh chat? Skip straight to [section 10](#10-carpools-class-filtered-display-and-multi-select-announce)
+— it's the most recent work and supersedes the single-student assumptions
+baked into sections 1–9's description of `/announce`, `/display` and the
+`resolve-name`/`set-status` wire shapes.** Short version: carpools are now a
+first-class, callable thing (`/admin` can create one and assign members,
+announcing any member or the carpool's own name confirms everyone in one
+tap), `/display` groups into class sections with a per-viewer filter and
+works on a phone, and `/announce` has an opt-in "Announce several" multi-select
+for ad-hoc unrelated confirms. Built, tested (533 tests), typechecked, linted,
+built, and screenshot-verified in local mock mode — **not yet run against the
+live Supabase project.** The mock-speech status from section 9 is unchanged
+by this work: both switches are still `true` in production, real voice is
+still not live for staff, and that remains the next thing to do after what
+section 10 lists.
 
 ## The one-paragraph version
 
@@ -567,3 +571,148 @@ Supabase, `NEXT_PUBLIC_MOCK_SPEECH=true` on Vercel.)
 the reuse-across-presses fix (real even in mock mode) and the real client's
 code; it does not yet turn real voice on for staff. That's still the two
 switches above.
+
+## 10. Carpools, class-filtered display, and multi-select announce
+
+The user flipped both mock switches to `false` (Supabase's `MOCK_SPEECH` and
+Vercel's `NEXT_PUBLIC_MOCK_SPEECH`) and used the live site for real. That
+surfaced three gaps, all requested in one message: siblings and shared rides
+get announced one at a time; `/display` is one flat alphabetical grid built
+for a single wall TV, with no way for a teacher to watch just their own class
+and no real mobile layout; and announcing several unrelated children takes
+several full passes. This section is everything built in response, in one
+brainstorming → plan → implementation pass (the plan file, if you want the
+full design reasoning and the questions asked to reach it, was
+`i-flipped-both-mock-golden-wren.md`).
+
+### What a carpool is
+
+A new `public.carpools` table (`name`, `aliases`, `updated_at` trigger),
+**not** a text tag on `students`. `students.carpool_id` links a child to at
+most one carpool; both that FK and `status_events.carpool_id` (added so a
+carpool-driven confirm's audit trail says so) are `on delete set null` —
+deleting a carpool never touches the roster or its history, the same pattern
+`status_events.student_id` already used for a deleted student. RLS on
+`carpools` has no policy and no grants at all, tighter than `students`:
+`/display` never needs a carpool's name, only `/announce` and `/admin` do,
+and both reach it only through Edge Functions holding the service-role key.
+`schema.test.ts` proves all of this by execution against PGlite, the same way
+every other RLS boundary in this repo is proven, not just documented.
+
+### The resolver: collapse, don't special-case
+
+The riskiest part of this whole feature is the matcher, so it got the
+most conservative treatment: `resolver.ts`'s `resolveName` was split into
+`rankCandidates` (scoring, unchanged) and `tierFor` (the four-condition tier
+policy, unchanged) with **zero behavior change** — proven by running all 63
+pre-existing `resolver.test.ts` cases against the split and watching them
+pass verbatim before writing one line of carpool logic. Carpools then fold
+into `resolve.ts` (the handler, not the resolver) as one more
+`ResolverStudent` per carpool — an empty first name so it folds onto the
+surname key the same way a real student does — ranked exactly like every
+student, then candidates sharing a `carpool_id` are collapsed into one group
+(keeping the best-scoring member's score and match metadata) before `tierFor`
+runs on the collapsed list. That collapse is the actual payoff: two siblings
+who each score a perfect 1.00 on their own surname have a margin of zero
+between them uncollapsed, which is exactly what `MATCH_POLICY.clearMargin`
+exists to withhold a pre-highlight over — collapsed into one carpool
+candidate, the margin is measured against the next different family, and the
+tier can be `clear` again. One tap, every member.
+
+### The three screens
+
+- **`/announce`**: a candidate is now `{ students[], carpool, score,
+  matchedOn, matchedVia }` instead of `{ student, ... }` — a lone match is
+  simply the one-student case. `candidate-list.tsx` renders a carpool
+  candidate with its own name leading, members listed beneath, and a button
+  that states the count ("Confirm all 3 arrived") rather than implying one
+  name. Multi-select ("Announce several") is a separate, off-by-default
+  toggle for unrelated candidates: on, tapping checks a candidate instead of
+  confirming it, and one "Confirm N arrived" button fires a single
+  `set-status` call. It's deliberately not automatic — two high-scoring
+  candidates can mean "both are right" or "I can't tell which," and only the
+  person standing there knows.
+- **`/display`**: `display-sections.ts` (pure, unit-tested like
+  `realtime-reconcile.ts`) groups the roster into grade+class sections and
+  applies a **per-viewer, client-side-only** filter — several teachers can
+  each watch their own class off the one public realtime subscription, no
+  server state, no extra query. The filter is remembered in `localStorage`
+  (a per-device convenience; CLAUDE.md's storage rule is specifically about
+  the staff PIN) and overridable via `?class=`/`?grade=` for a bookmarked
+  classroom tablet. Flash and chime are scoped to the filter
+  (`visibleIds`), so a grade-3 teacher's tab is never chimed for a grade-5
+  arrival. Below `sm` the board is `min-h-screen` and scrolls normally
+  instead of the fixed `h-screen` phase 5 chose — a deliberate, called-out
+  departure, since a phone genuinely isn't a wall.
+- **`/admin`**: a new `carpool-manager.tsx` panel (create, rename, edit
+  aliases, assign members via a checklist, delete with confirmation), plus a
+  carpool dropdown on `student-form.tsx` for a one-off mid-year change.
+  `roster-list` now returns `{ students, carpools }` in one call rather than
+  adding a second entrypoint — the deliberate reason is in the endpoint
+  table's `pin-budget.test.ts` note: every new entrypoint costs another slice
+  of the shared PIN-guessing budget, so `carpool-write` is the **one** new
+  function, doing create/update/delete via an `action` field the way
+  `roster-write` already covers both create and update.
+
+### A real bug the class filter caught
+
+Same lesson phase 5 already learned once, from a different angle. The tile
+surname's font-size was `clamp(1.05rem, 23cqh, 3.25rem)` — sized from the
+container's **height** alone. A filtered view can leave a handful of tiles on
+screen, so the grid's `1fr` row grows to fill nearly the whole viewport
+height while the tile stays only a couple of columns wide: a tall, narrow
+tile that `cqh` alone read as "plenty of room," so it picked a surname size
+that no longer fit the *width* — "Garcia" wrapped into "Garc"/"ia", caught by
+screenshotting `/display?mock=1&class=1-Reyes` and looking at it. Fixed by
+taking `min(...cqh, ...cqi)` for every tile font size, so the smaller of the
+height- and width-based size wins. The general lesson from phase 5 — "size
+from the tile, not the viewport" — turned out to only have been applied to
+one axis; this is that fix extended to both.
+
+### Verification and what's left
+
+`npm run lint && npm run typecheck && npx vitest run && npm run build` are
+all green — 533 tests (up from 466), zero lint/type errors, a clean
+production build. New pure-logic test coverage: `display-sections.test.ts`
+(grouping, ordering, filtering, totals), the carpool collapse in
+`resolve.test.ts` (including that two *different* carpools that both
+plausibly match do not collapse into each other), batch confirm/idempotence
+in `status.test.ts`, `carpool-write.test.ts` (create/update/delete, and that
+an update's `memberIds` is a full replace — a member omitted from the new
+list gets unlinked, not left dangling), and new RLS/FK assertions in
+`schema.test.ts`. `pin-budget.test.ts` still passes with `carpool-write`
+added: the total PIN-guessing budget went from 45 to 48, under the ceiling of
+50, with no need to lower any existing endpoint's limit.
+
+Screenshot-verified against the dev server in local mock mode (`.env.local`
+still has both mock switches `true`, separate from the live/production
+values, so this spent no real credits): `/display?mock=1` at 1920×1080 shows
+four class sections with headings and per-section waiting counts; the same
+URL at 390×844 shows a clean two-column mobile layout; `?class=1-Reyes`
+resolves the URL filter correctly and (after the font-size fix above) renders
+without wrapping; `/announce` and `/admin`'s PIN gates render with no crash.
+
+**Not yet done, in order:**
+
+1. **Nothing here has touched the live Supabase project.** `npx supabase db
+   push --linked` for the new migration, then `npx supabase functions deploy`
+   for every changed function (`resolve-name`, `set-status`, `roster-list`,
+   `roster-import`, `roster-write`, `deepgram-token`) plus the new
+   `carpool-write`.
+2. A live walkthrough per CLAUDE.md's process rule against real Deepgram/
+   Supabase (ask before running, since both mock switches are `false` in
+   production now): create a carpool in `/admin`, assign members two ways
+   (the carpool panel and the student form's dropdown), announce a member's
+   surname and confirm the whole carpool in one tap, watch every tile flip on
+   a class-filtered `/display` in a second tab with no reload, and try the
+   "Announce several" toggle on two unrelated candidates.
+3. CSV import's new `carpool` column (creates or matches a carpool by name)
+   has unit coverage in `roster-import.test.ts` and `csv-import.test.ts` but
+   has not been walked through `/admin`'s actual file-upload UI the way the
+   phase 6 unterminated-quote regression was.
+4. No component-level tests were added for `candidate-list.tsx`,
+   `carpool-manager.tsx`, `class-filter.tsx`, etc. -- consistent with this
+   repo's existing pattern (no component tests anywhere; logic lives in
+   `src/lib/` and is tested there, components stay presentational and are
+   verified by screenshot), but worth naming explicitly since this feature
+   added the most UI of any phase so far.

@@ -5,6 +5,11 @@
  * these are separate HTTP calls, and the browser between them is not part of the
  * trust boundary. It also re-reads nothing from the resolver — the caller sends
  * a student id that a human tapped, and the score comes along only to be logged.
+ *
+ * Accepts either a single `studentId` or a `studentIds` array, so confirming a
+ * whole carpool in one tap is the same endpoint and the same one-tap-confirms
+ * rule as confirming one child: the response is always the plural shape below,
+ * with a single confirm simply being the one-element case of it.
  */
 
 import {
@@ -17,6 +22,7 @@ import {
 import type {
   RosterStore,
   StatusEventSource,
+  StudentRow,
   StudentStatus,
 } from "../ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
@@ -27,6 +33,9 @@ export interface StatusHandlerDeps extends GuardDeps {
 
 const STATUSES: StudentStatus[] = ["waiting", "arrived"];
 const SOURCES: StatusEventSource[] = ["voice", "manual", "admin"];
+
+/** A carpool is a car, not a bus -- this is a stop against a malformed body. */
+const MAX_STUDENT_IDS = 20;
 
 function readStatus(value: unknown): StudentStatus | null {
   return typeof value === "string" && (STATUSES as string[]).includes(value)
@@ -55,6 +64,22 @@ function readConfidence(value: unknown): number | null {
     : null;
 }
 
+/** Accepts either a single `studentId` or a `studentIds` array; never both mixed. */
+function readStudentIds(body: Record<string, unknown>): string[] | null {
+  if (Array.isArray(body.studentIds)) {
+    const ids = body.studentIds.filter(
+      (id): id is string => typeof id === "string" && id.trim() !== "",
+    );
+    return ids.length === 0 ? null : ids.slice(0, MAX_STUDENT_IDS);
+  }
+  const single = readString(body, "studentId");
+  return single === null ? null : [single];
+}
+
+function readCarpoolId(body: Record<string, unknown>): string | null {
+  return readString(body, "carpoolId");
+}
+
 export function createStatusHandler(deps: StatusHandlerDeps) {
   return async function handle(request: Request): Promise<Response> {
     const options = preflight(request);
@@ -63,8 +88,8 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
     const guard = await guardRequest(request, deps);
     if (!guard.ok) return guard.response;
 
-    const studentId = readString(guard.body, "studentId");
-    if (studentId === null) {
+    const studentIds = readStudentIds(guard.body);
+    if (studentIds === null) {
       return errorResponse(400, "No student was chosen.");
     }
 
@@ -84,42 +109,62 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
       );
     }
 
+    const carpoolId = readCarpoolId(guard.body);
+
     return await withStoreErrors(async () => {
       // arrived_at is never read off the request: a database trigger derives it
       // from the transition, so a stale phone cannot rewrite a pickup time.
-      const updated = await deps.store.setStatus(studentId, status);
+      const changedRows = await deps.store.setStatusMany(studentIds, status);
+      const changedIds = new Set(changedRows.map((row) => row.id));
 
-      if (updated === null) {
-        const existing = await deps.store.get(studentId);
+      // A student absent from `changedRows` is either already in the
+      // requested status (somebody else got there first -- report the
+      // settled state, no second flash, no second audit row) or not on the
+      // roster at all (only worth naming as `missing`, never a 404: a
+      // carpool confirm where two of three members exist should still
+      // confirm those two).
+      const settled: StudentRow[] = [...changedRows];
+      const missing: string[] = [];
+      for (const id of studentIds) {
+        if (changedIds.has(id)) continue;
+        const existing = await deps.store.get(id);
         if (existing === null) {
-          return errorResponse(404, "That student is not on the roster.");
+          missing.push(id);
+        } else {
+          settled.push(existing);
         }
-        // Already in the requested status: somebody else got there first.
-        // Report the settled state without logging a second event or flashing
-        // the board.
-        return jsonResponse({
-          student: existing,
-          changed: false,
-          logged: true,
-        });
+      }
+
+      if (settled.length === 0) {
+        return errorResponse(404, "That student is not on the roster.");
       }
 
       // The status change stands whatever happens here -- the display has
       // already flashed, and undoing it would be worse than a gap in the log --
       // but the caller is told, so a persistent failure is visible to someone.
-      const logged = await deps.store.logEvent({
-        studentId,
-        changedTo: status,
-        source,
-        matchConfidence:
-          source === "voice"
-            ? readConfidence(guard.body.matchConfidence)
-            : null,
-        rawTranscript:
-          source === "voice" ? readString(guard.body, "transcript") : null,
-      });
+      let logged = 0;
+      for (const row of changedRows) {
+        const ok = await deps.store.logEvent({
+          studentId: row.id,
+          changedTo: status,
+          source,
+          matchConfidence:
+            source === "voice"
+              ? readConfidence(guard.body.matchConfidence)
+              : null,
+          rawTranscript:
+            source === "voice" ? readString(guard.body, "transcript") : null,
+          carpoolId,
+        });
+        if (ok) logged++;
+      }
 
-      return jsonResponse({ student: updated, changed: true, logged });
+      return jsonResponse({
+        students: settled,
+        changed: changedRows.map((row) => row.id),
+        logged,
+        missing,
+      });
     });
   };
 }

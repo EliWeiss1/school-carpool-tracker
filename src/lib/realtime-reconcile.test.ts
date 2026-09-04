@@ -14,6 +14,7 @@ function student(overrides: Partial<Student> & Pick<Student, "id">): Student {
     status: "waiting",
     arrived_at: null,
     updated_at: "2026-09-02T12:00:00.000Z",
+    carpool_id: null,
     ...overrides,
   };
 }

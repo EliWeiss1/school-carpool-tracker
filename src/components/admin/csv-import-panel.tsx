@@ -97,7 +97,9 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
         </h2>
         <p className="mt-1 text-curb-600">
           Columns can be in any order. Required: first name, last name.
-          Optional: aliases (comma or semicolon separated), grade, class.
+          Optional: aliases (comma or semicolon separated), grade, class,
+          carpool. A new carpool name is created automatically; an existing
+          one (matched by name) gets this student added to it.
         </p>
       </div>
 
@@ -203,6 +205,7 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
                         <th className="px-3 py-2 font-semibold">Aliases</th>
                         <th className="px-3 py-2 font-semibold">Grade</th>
                         <th className="px-3 py-2 font-semibold">Class</th>
+                        <th className="px-3 py-2 font-semibold">Carpool</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -222,6 +225,9 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
                           </td>
                           <td className="px-3 py-2 font-mono text-curb-700">
                             {row.class_group ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-curb-700">
+                            {row.carpool ?? "—"}
                           </td>
                         </tr>
                       ))}

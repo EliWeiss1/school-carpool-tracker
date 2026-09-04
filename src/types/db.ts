@@ -17,6 +17,16 @@ export type Student = {
   /** Derived by a trigger from the status transition — never set by a caller. */
   arrived_at: string | null;
   updated_at: string;
+  /** Nulled, not cascaded, when the carpool is deleted. Never set through roster-write. */
+  carpool_id: string | null;
+};
+
+export type Carpool = {
+  id: string;
+  name: string;
+  aliases: string[];
+  created_at: string;
+  updated_at: string;
 };
 
 export type StatusEvent = {
@@ -28,10 +38,15 @@ export type StatusEvent = {
   match_confidence: number | null;
   raw_transcript: string | null;
   created_at: string;
+  /** Set when this change came from confirming a whole carpool at once. */
+  carpool_id: string | null;
 };
 
 export type StudentInsert = Pick<Student, "first_name" | "last_name"> &
   Partial<Omit<Student, "first_name" | "last_name">>;
+
+export type CarpoolInsert = Pick<Carpool, "name"> &
+  Partial<Omit<Carpool, "name">>;
 
 export type StatusEventInsert = Pick<StatusEvent, "changed_to" | "source"> &
   Partial<Omit<StatusEvent, "changed_to" | "source">>;
@@ -49,6 +64,12 @@ export type Database = {
         Row: StatusEvent;
         Insert: StatusEventInsert;
         Update: Partial<StatusEvent>;
+        Relationships: [];
+      };
+      carpools: {
+        Row: Carpool;
+        Insert: CarpoolInsert;
+        Update: Partial<Carpool>;
         Relationships: [];
       };
     };

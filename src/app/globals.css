@@ -71,21 +71,31 @@ h3 {
    * first was clipped in half by the second. Sizing from the container's own
    * height makes the board self-adjusting — a bigger roster simply sets
    * smaller type instead of losing the ends of the names.
+   *
+   * `min(...cqh, ...cqi)` rather than `...cqh` alone: the class filter (see
+   * display-sections.ts) can put just a handful of tiles on screen, and with
+   * only one sparse row the grid's `1fr` row height grows to fill nearly the
+   * whole viewport while the tile stays only a few columns wide -- cqh alone
+   * read that tall-and-narrow tile as "plenty of room" and sized a surname
+   * that no longer fit the width, wrapping "Garcia" into "Garc"/"ia". Taking
+   * the smaller of the height-based and width-based (cqi) size is what keeps
+   * the tile self-adjusting on both axes, not just the one the original
+   * always-many-rows board happened to vary on.
    */
   .tile-surface {
     container-type: size;
   }
 
   .tile-surname {
-    font-size: clamp(1.05rem, 23cqh, 3.25rem);
+    font-size: clamp(1.05rem, min(23cqh, 15cqi), 3.25rem);
   }
 
   .tile-given-name {
-    font-size: clamp(0.8rem, 11cqh, 1.5rem);
+    font-size: clamp(0.8rem, min(11cqh, 7cqi), 1.5rem);
   }
 
   .tile-label {
-    font-size: clamp(0.5625rem, 6cqh, 1rem);
+    font-size: clamp(0.5625rem, min(6cqh, 4cqi), 1rem);
   }
 
   /*

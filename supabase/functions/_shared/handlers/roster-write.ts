@@ -58,6 +58,7 @@ async function create(
 
   const grade = readString(body, "grade");
   const classGroup = readString(body, "class_group");
+  const carpoolId = readString(body, "carpool_id");
   if (nameTooLong(firstName, lastName, grade, classGroup)) {
     return errorResponse(
       400,
@@ -88,6 +89,7 @@ async function create(
     aliases: readAliases(body),
     grade,
     class_group: classGroup,
+    carpool_id: carpoolId,
   };
 
   const student = await deps.store.createStudent(input);
@@ -124,6 +126,7 @@ async function update(
   if ("grade" in body) patch.grade = readString(body, "grade");
   if ("class_group" in body)
     patch.class_group = readString(body, "class_group");
+  if ("carpool_id" in body) patch.carpool_id = readString(body, "carpool_id");
 
   if (
     nameTooLong(

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import type { StudentFields } from "@/lib/admin-api";
 import { cn } from "@/lib/cn";
-import type { Student } from "@/types/db";
+import type { Carpool, Student } from "@/types/db";
 
 const INPUT_CLASS =
   "focus-ring min-h-tap w-full rounded-xl border border-curb-300 bg-curb-50 px-3.5 text-curb-900 transition-colors duration-150 placeholder:text-curb-400 hover:border-curb-400";
@@ -24,11 +24,15 @@ function parseAliasesInput(value: string): string[] {
 export interface StudentFormProps {
   /** Omitted for "add a student"; a row for "edit this one". */
   student?: Student;
+  /** For the carpool picker. Empty is fine -- the field just has one option, "None". */
+  carpools: Carpool[];
   onCancel: () => void;
   onSubmit: (fields: StudentFields) => Promise<void>;
   submitting: boolean;
   error: string | null;
 }
+
+const NO_CARPOOL = "";
 
 /**
  * The one form that both adds and edits a student. It never renders a status
@@ -37,6 +41,7 @@ export interface StudentFormProps {
  */
 export function StudentForm({
   student,
+  carpools,
   onCancel,
   onSubmit,
   submitting,
@@ -49,6 +54,7 @@ export function StudentForm({
   );
   const [grade, setGrade] = useState(student?.grade ?? "");
   const [classGroup, setClassGroup] = useState(student?.class_group ?? "");
+  const [carpoolId, setCarpoolId] = useState(student?.carpool_id ?? NO_CARPOOL);
   const formId = useId();
 
   async function submit(event: FormEvent) {
@@ -59,6 +65,7 @@ export function StudentForm({
       aliases: parseAliasesInput(aliasesText),
       grade: grade.trim() === "" ? null : grade.trim(),
       class_group: classGroup.trim() === "" ? null : classGroup.trim(),
+      carpool_id: carpoolId === NO_CARPOOL ? null : carpoolId,
     });
   }
 
@@ -139,6 +146,29 @@ export function StudentForm({
             onChange={(event) => setClassGroup(event.target.value)}
             placeholder="K-Alvarez"
           />
+        </div>
+
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <label className={LABEL_CLASS} htmlFor={`${formId}-carpool`}>
+            Carpool
+          </label>
+          <select
+            id={`${formId}-carpool`}
+            className={INPUT_CLASS}
+            value={carpoolId}
+            onChange={(event) => setCarpoolId(event.target.value)}
+          >
+            <option value={NO_CARPOOL}>None</option>
+            {carpools.map((carpool) => (
+              <option key={carpool.id} value={carpool.id}>
+                {carpool.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-curb-500">
+            Announcing this carpool, or any of its other members, marks this
+            child arrived too. Set up carpools below.
+          </p>
         </div>
       </div>
 

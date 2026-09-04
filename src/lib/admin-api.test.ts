@@ -162,12 +162,18 @@ describe("importRoster", () => {
       jsonResponse({ created: 2, students: [] }),
     );
 
+    const row = (first_name: string, last_name: string) => ({
+      first_name,
+      last_name,
+      aliases: [],
+      grade: null,
+      class_group: null,
+      carpool: null,
+    });
+
     await client.importRoster({
       ...CREDENTIALS,
-      students: [
-        { first_name: "Theo", last_name: "Ng" },
-        { first_name: "Nora", last_name: "Chen" },
-      ],
+      students: [row("Theo", "Ng"), row("Nora", "Chen")],
     });
     const sent = firstRequest(fetchImpl);
 
@@ -188,6 +194,85 @@ describe("resetAllToWaiting", () => {
     expect(sent.url).toBe(BASE + "/roster-reset");
     expect(sent.body).toEqual(CREDENTIALS);
     expect(result).toEqual({ reset: 3, logged: 3 });
+  });
+});
+
+describe("carpools", () => {
+  it("creates a carpool with the create action and optional members", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({
+        carpool: { id: "weiss", name: "Weiss Carpool" },
+        members: [],
+        created: true,
+      }),
+    );
+
+    await client.createCarpool({
+      ...CREDENTIALS,
+      name: "Weiss Carpool",
+      memberIds: ["s1", "s2"],
+    });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.url).toBe(BASE + "/carpool-write");
+    expect(sent.body).toMatchObject({
+      action: "create",
+      name: "Weiss Carpool",
+      memberIds: ["s1", "s2"],
+    });
+  });
+
+  it("sends an empty memberIds array on update, to clear membership, distinct from omitting it", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({
+        carpool: { id: "weiss", name: "Weiss Carpool" },
+        members: [],
+        created: false,
+      }),
+    );
+
+    await client.updateCarpool({
+      ...CREDENTIALS,
+      carpoolId: "weiss",
+      memberIds: [],
+    });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.body.action).toBe("update");
+    expect(sent.body.memberIds).toEqual([]);
+  });
+
+  it("omits memberIds entirely when the caller does not pass it", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({
+        carpool: { id: "weiss", name: "Renamed" },
+        members: [],
+        created: false,
+      }),
+    );
+
+    await client.updateCarpool({
+      ...CREDENTIALS,
+      carpoolId: "weiss",
+      name: "Renamed",
+    });
+
+    expect(firstRequest(fetchImpl).body).not.toHaveProperty("memberIds");
+  });
+
+  it("deletes a carpool with the delete action", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ deleted: true }),
+    );
+
+    const result = await client.deleteCarpool({
+      ...CREDENTIALS,
+      carpoolId: "weiss",
+    });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.body).toMatchObject({ action: "delete", carpoolId: "weiss" });
+    expect(result.deleted).toBe(true);
   });
 });
 

@@ -256,6 +256,119 @@ describe("RLS boundary", () => {
   });
 });
 
+describe("carpools", () => {
+  async function insertCarpool(name: string): Promise<string> {
+    const res = await db.query<{ id: string }>(
+      "insert into public.carpools (name) values ($1) returning id",
+      [name],
+    );
+    return res.rows[0].id;
+  }
+
+  it("hides carpools from anon entirely, read and write", async () => {
+    await insertCarpool("Readable Carpool");
+    expect(
+      await asRole("anon", () => isDenied("select * from public.carpools")),
+    ).toBe(true);
+    expect(
+      await asRole("anon", () =>
+        isDenied("insert into public.carpools (name) values ('Mal Actor')"),
+      ),
+    ).toBe(true);
+  });
+
+  it("hides carpools from authenticated too", async () => {
+    expect(
+      await asRole("authenticated", () =>
+        isDenied("select * from public.carpools"),
+      ),
+    ).toBe(true);
+  });
+
+  it("still lets the service role manage carpools", async () => {
+    await asRole("service_role", async () => {
+      const res = await db.query<{ id: string }>(
+        "insert into public.carpools (name) values ('Service Carpool') returning id",
+      );
+      expect(res.rows[0].id).toBeTruthy();
+    });
+  });
+
+  it("rejects two carpools with the same name, case-insensitively", async () => {
+    await insertCarpool("Weiss Carpool");
+    expect(
+      await isDenied(
+        "insert into public.carpools (name) values ('weiss carpool')",
+      ),
+    ).toBe(true);
+  });
+
+  it("nulls a student's carpool_id when the carpool is deleted, without deleting the student", async () => {
+    const carpoolId = await insertCarpool("Vanishing Carpool");
+    const studentId = await insertStudent("Rider");
+    await db.query("update public.students set carpool_id = $1 where id = $2", [
+      carpoolId,
+      studentId,
+    ]);
+
+    await db.query("delete from public.carpools where id = $1", [carpoolId]);
+
+    const res = await db.query<{ carpool_id: string | null }>(
+      "select carpool_id from public.students where id = $1",
+      [studentId],
+    );
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0].carpool_id).toBeNull();
+  });
+
+  it("nulls a status_events row's carpool_id when the carpool is deleted", async () => {
+    const carpoolId = await insertCarpool("Audited Carpool");
+    const studentId = await insertStudent("Logged");
+    await db.query(
+      "insert into public.status_events (student_id, carpool_id, changed_to, source) values ($1, $2, 'arrived', 'voice')",
+      [studentId, carpoolId],
+    );
+
+    await db.query("delete from public.carpools where id = $1", [carpoolId]);
+
+    const res = await db.query<{ carpool_id: string | null }>(
+      "select carpool_id from public.status_events where student_id = $1",
+      [studentId],
+    );
+    expect(res.rows[0].carpool_id).toBeNull();
+  });
+
+  it("touches updated_at when a carpool is edited", async () => {
+    const carpoolId = await insertCarpool("Renaming Carpool");
+    const before = await db.query<{ updated_at: Date }>(
+      "select updated_at from public.carpools where id = $1",
+      [carpoolId],
+    );
+    await db.query("update public.carpools set name = 'Renamed Carpool' where id = $1", [
+      carpoolId,
+    ]);
+    const after = await db.query<{ updated_at: Date }>(
+      "select updated_at from public.carpools where id = $1",
+      [carpoolId],
+    );
+    expect(after.rows[0].updated_at.getTime()).toBeGreaterThanOrEqual(
+      before.rows[0].updated_at.getTime(),
+    );
+  });
+
+  it("has RLS enabled with no policy at all", async () => {
+    const res = await db.query<{ relrowsecurity: boolean }>(
+      "select relrowsecurity from pg_class where relname = 'carpools'",
+    );
+    expect(res.rows[0].relrowsecurity).toBe(true);
+
+    const policies = await db.query(
+      "select 1 from pg_policies where schemaname = 'public' and tablename = 'carpools'",
+    );
+    expect(policies.rows).toHaveLength(0);
+  });
+});
+
 describe("realtime wiring", () => {
   it("publishes students and not status_events", async () => {
     const res = await db.query<{ tablename: string }>(

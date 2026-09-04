@@ -15,6 +15,18 @@ function setup() {
       last_name: "Marsh",
       status: "arrived",
     }),
+    makeStudent({
+      id: "weiss",
+      first_name: "Sara",
+      last_name: "Weiss",
+      carpool_id: "weiss-carpool",
+    }),
+    makeStudent({
+      id: "weiss-jr",
+      first_name: "Leo",
+      last_name: "Weiss",
+      carpool_id: "weiss-carpool",
+    }),
   ]);
   const handle = createStatusHandler({
     staffPin: STAFF_PIN,
@@ -58,11 +70,13 @@ const confirm = (overrides: Record<string, unknown> = {}) =>
   });
 
 interface StatusBody {
-  changed: boolean;
-  student: { id: string; status: string; arrived_at: string | null };
+  changed: string[];
+  logged: number;
+  missing: string[];
+  students: Array<{ id: string; status: string; arrived_at: string | null }>;
 }
 
-describe("createStatusHandler", () => {
+describe("createStatusHandler — a single student", () => {
   it("marks a waiting student as arrived", async () => {
     const { handle, store } = setup();
 
@@ -70,8 +84,8 @@ describe("createStatusHandler", () => {
     const body = (await response.json()) as StatusBody;
 
     expect(response.status).toBe(200);
-    expect(body.changed).toBe(true);
-    expect(body.student.status).toBe("arrived");
+    expect(body.changed).toEqual(["cohen"]);
+    expect(body.students[0].status).toBe("arrived");
     expect(store.row("cohen")?.status).toBe("arrived");
   });
 
@@ -87,6 +101,7 @@ describe("createStatusHandler", () => {
         source: "voice",
         matchConfidence: 0.97,
         rawTranscript: "Cohen",
+        carpoolId: null,
       },
     ]);
   });
@@ -101,8 +116,8 @@ describe("createStatusHandler", () => {
     const body = (await response.json()) as StatusBody;
 
     expect(response.status).toBe(200);
-    expect(body.changed).toBe(false);
-    expect(body.student.status).toBe("arrived");
+    expect(body.changed).toEqual([]);
+    expect(body.students[0].status).toBe("arrived");
     expect(store.events).toHaveLength(1);
   });
 
@@ -119,9 +134,9 @@ describe("createStatusHandler", () => {
     );
     const body = (await response.json()) as StatusBody;
 
-    expect(body.changed).toBe(true);
-    expect(body.student.status).toBe("waiting");
-    expect(body.student.arrived_at).toBeNull();
+    expect(body.changed).toEqual(["marsh"]);
+    expect(body.students[0].status).toBe("waiting");
+    expect(body.students[0].arrived_at).toBeNull();
     expect(store.events[0]).toMatchObject({
       changedTo: "waiting",
       source: "manual",
@@ -137,7 +152,7 @@ describe("createStatusHandler", () => {
       await handle(confirm({ arrived_at: "1999-01-01T00:00:00.000Z" }))
     ).json()) as StatusBody;
 
-    expect(body.student.arrived_at).not.toBe("1999-01-01T00:00:00.000Z");
+    expect(body.students[0].arrived_at).not.toBe("1999-01-01T00:00:00.000Z");
   });
 
   it("says so when the student is not on the roster", async () => {
@@ -207,12 +222,10 @@ describe("createStatusHandler", () => {
       logEvent: () => Promise.resolve(false),
     });
 
-    const body = (await (await handle(confirm())).json()) as StatusBody & {
-      logged: boolean;
-    };
+    const body = (await (await handle(confirm())).json()) as StatusBody;
 
-    expect(body.changed).toBe(true);
-    expect(body.logged).toBe(false);
+    expect(body.changed).toEqual(["cohen"]);
+    expect(body.logged).toBe(0);
     expect(store.row("cohen")?.status).toBe("arrived");
   });
 
@@ -221,7 +234,7 @@ describe("createStatusHandler", () => {
     // no CORS headers -- so the browser reports a CORS failure and the person
     // outside sees nothing useful at all.
     const { handle } = setupWith({
-      setStatus: () =>
+      setStatusMany: () =>
         Promise.reject(new Error("Could not update that student: down")),
     });
 
@@ -241,5 +254,84 @@ describe("createStatusHandler", () => {
 
     expect(response.status).toBe(401);
     expect(store.row("cohen")?.status).toBe("waiting");
+  });
+});
+
+describe("createStatusHandler — a carpool confirmed in one tap", () => {
+  const confirmCarpool = (overrides: Record<string, unknown> = {}) =>
+    post({
+      pin: STAFF_PIN,
+      deviceId: "phone-1",
+      studentIds: ["weiss", "weiss-jr"],
+      status: "arrived",
+      source: "voice",
+      matchConfidence: 0.95,
+      transcript: "Weiss Carpool",
+      carpoolId: "weiss-carpool",
+      ...overrides,
+    });
+
+  it("marks every member arrived in one call", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(confirmCarpool());
+    const body = (await response.json()) as StatusBody;
+
+    expect(response.status).toBe(200);
+    expect(body.changed.sort()).toEqual(["weiss", "weiss-jr"]);
+    expect(store.row("weiss")?.status).toBe("arrived");
+    expect(store.row("weiss-jr")?.status).toBe("arrived");
+  });
+
+  it("logs one audit row per member, each carrying the carpool id", async () => {
+    const { handle, store } = setup();
+
+    await handle(confirmCarpool());
+
+    expect(store.events).toHaveLength(2);
+    for (const event of store.events) {
+      expect(event.carpoolId).toBe("weiss-carpool");
+      expect(event.source).toBe("voice");
+    }
+  });
+
+  it("is idempotent per member: one already arrived is absent from changed and logs nothing extra", async () => {
+    const { handle, store } = setup();
+    await handle(post({ pin: STAFF_PIN, deviceId: "d", studentId: "weiss", status: "arrived", source: "manual" }));
+
+    const response = await handle(confirmCarpool());
+    const body = (await response.json()) as StatusBody;
+
+    expect(body.changed).toEqual(["weiss-jr"]);
+    // One event from the setup call above, one more from this carpool
+    // confirm -- never two for the child who was already arrived.
+    expect(store.events).toHaveLength(2);
+  });
+
+  it("confirms the members that exist even when one id is missing, and names the missing one", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      confirmCarpool({ studentIds: ["weiss", "nobody"] }),
+    );
+    const body = (await response.json()) as StatusBody;
+
+    expect(response.status).toBe(200);
+    expect(body.changed).toEqual(["weiss"]);
+    expect(body.missing).toEqual(["nobody"]);
+    expect(store.row("weiss")?.status).toBe("arrived");
+  });
+
+  it("caps how many students one call can confirm", async () => {
+    const { handle } = setup();
+    // One real id, so the request settles rather than 404ing outright, plus
+    // enough fake ones to prove the cap actually truncates the list.
+    const many = ["weiss", ...Array.from({ length: 25 }, (_, i) => `id-${i}`)];
+
+    const response = await handle(confirmCarpool({ studentIds: many }));
+    const body = (await response.json()) as StatusBody;
+
+    expect(response.status).toBe(200);
+    expect(body.missing.length).toBeLessThanOrEqual(19);
   });
 });

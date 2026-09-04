@@ -43,6 +43,7 @@ export function createRosterResetHandler(deps: RosterResetHandlerDeps) {
           source: "admin",
           matchConfidence: null,
           rawTranscript: null,
+          carpoolId: null,
         });
         if (ok) logged++;
       }

@@ -20,6 +20,7 @@ describe("fake store fidelity to the real schema", () => {
       source: "voice",
       matchConfidence: 0.9,
       rawTranscript: "Cohen",
+      carpoolId: null,
     });
 
     await store.removeStudent("cohen");
@@ -36,6 +37,7 @@ describe("fake store fidelity to the real schema", () => {
       source: "voice",
       matchConfidence: 0.9,
       rawTranscript: "Cohen",
+      carpoolId: null,
     });
 
     await store.removeStudent("cohen");
@@ -58,6 +60,7 @@ describe("fake store fidelity to the real schema", () => {
       source: "manual",
       matchConfidence: null,
       rawTranscript: null,
+      carpoolId: null,
     });
 
     await store.removeStudent("cohen");

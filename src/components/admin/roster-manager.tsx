@@ -9,7 +9,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { ApiError } from "@/lib/api";
 import { adminApi, type StudentFields } from "@/lib/admin-api";
 import type { UsePinSession } from "@/lib/use-pin-session";
-import type { Student } from "@/types/db";
+import type { Carpool, Student } from "@/types/db";
 
 import { RosterTable } from "./roster-table";
 import { StudentForm } from "./student-form";
@@ -33,6 +33,8 @@ export interface RosterManagerProps {
   session: UsePinSession;
   /** null while the first load is in flight. */
   students: Student[] | null;
+  /** For the carpool column and the student form's carpool picker. */
+  carpools: Carpool[];
   listError: string | null;
   /** Re-fetches the roster. Shared with the import and reset panels so all
    *  three sections of /admin always agree on the current state. */
@@ -48,6 +50,7 @@ export interface RosterManagerProps {
 export function RosterManager({
   session,
   students,
+  carpools,
   listError,
   refresh,
 }: RosterManagerProps) {
@@ -138,6 +141,7 @@ export function RosterManager({
       {editor !== null && (
         <StudentForm
           student={editor.mode === "edit" ? editor.student : undefined}
+          carpools={carpools}
           onCancel={() => setEditor(null)}
           onSubmit={handleSubmit}
           submitting={submitting}
@@ -168,6 +172,7 @@ export function RosterManager({
       {students !== null && students.length > 0 && (
         <RosterTable
           students={students}
+          carpools={carpools}
           onEdit={(student) => {
             setFormError(null);
             setEditor({ mode: "edit", student });

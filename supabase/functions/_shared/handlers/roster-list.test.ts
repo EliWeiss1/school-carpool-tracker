@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { createFakeStore, makeStudent } from "./fake-store.ts";
+import { createFakeStore, makeCarpool, makeStudent } from "./fake-store.ts";
 import { createRosterListHandler } from "./roster-list.ts";
 
 const STAFF_PIN = "4821";
@@ -72,6 +72,28 @@ describe("createRosterListHandler", () => {
     const response = await handle(list({ pin: "0000" }));
 
     expect(response.status).toBe(401);
+  });
+
+  it("returns every carpool alongside the roster", async () => {
+    const store = createFakeStore(
+      [makeStudent({ id: "cohen", first_name: "Maya", last_name: "Cohen" })],
+      [makeCarpool({ id: "weiss", name: "Weiss Carpool" })],
+    );
+    const handle = createRosterListHandler({
+      staffPin: STAFF_PIN,
+      rateLimiter: createRateLimiter({ limit: 60, windowMs: 60_000 }),
+      pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
+      store,
+    });
+
+    const response = await handle(list());
+    const body = (await response.json()) as {
+      carpools: Array<{ id: string; name: string }>;
+    };
+
+    expect(body.carpools).toEqual([
+      expect.objectContaining({ id: "weiss", name: "Weiss Carpool" }),
+    ]);
   });
 
   it("shows a readable message when the database is unreachable", async () => {

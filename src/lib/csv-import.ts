@@ -13,7 +13,7 @@
  */
 
 export type CsvField =
-  "first_name" | "last_name" | "aliases" | "grade" | "class_group";
+  "first_name" | "last_name" | "aliases" | "grade" | "class_group" | "carpool";
 
 export interface CsvImportStudent {
   first_name: string;
@@ -21,6 +21,8 @@ export interface CsvImportStudent {
   aliases: string[];
   grade: string | null;
   class_group: string | null;
+  /** The carpool name as typed in the file. Resolved to an id server-side. */
+  carpool: string | null;
 }
 
 export interface CsvImportError {
@@ -59,6 +61,7 @@ const HEADER_ALIASES: Record<CsvField, string[]> = {
   ],
   grade: ["grade", "grade level"],
   class_group: ["class_group", "class", "classroom", "class group", "homeroom"],
+  carpool: ["carpool", "carpool name", "car pool", "ride group", "ride"],
 };
 
 const REQUIRED_FIELDS: CsvField[] = ["first_name", "last_name"];
@@ -333,6 +336,10 @@ export function parseRosterCsv(text: string): CsvImportReport {
       class_group:
         columnIndex.class_group !== undefined
           ? nullableTrim(padded[columnIndex.class_group])
+          : null,
+      carpool:
+        columnIndex.carpool !== undefined
+          ? nullableTrim(padded[columnIndex.carpool])
           : null,
     });
   });

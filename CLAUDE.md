@@ -17,9 +17,27 @@ narrative account of everything built, deployed, verified live, and left
 open — written to be read cold. This file's status lines and checklists are
 the durable summary; `HANDOFF.md` is the detail behind them.
 
-**Status: phases 1–6 are built and merged on `master`. Phase 7 (polish,
-accessibility, deploy, staff README) has not been started.** The per-phase
-checklists below are the source of truth — keep them updated as you go.
+**Status: phases 1–6 are built and merged on `master`, plus a post-phase-6
+carpools + class-filtered-display + multi-select-announce feature (see
+"Carpools" below the endpoint table) covering all three screens. Phase 7
+(polish, accessibility, deploy, staff README) has not been started.** The
+per-phase checklists below are the source of truth — keep them updated as you
+go.
+
+**The carpools feature is built, tested (533 tests, all green), typechecked,
+linted and built, and verified against a screenshotted local dev server in
+mock mode — but not yet exercised against the live Supabase project**, unlike
+everything phases 1–6 list below. Both mock switches are currently `true` in
+`.env.local` (separate from the live/production values, which the user has
+already set to `false`), so local dev testing here spent no real
+Deepgram/Supabase credits. Before this is considered proven the way phases
+1–6 are: run `npx supabase db push --linked` and deploy the changed/new Edge
+Functions, then walk `/admin` (create a carpool, assign members via both the
+carpool panel and the student form's dropdown), `/announce` (a carpool
+candidate confirming every member in one tap, and the "Announce several"
+multi-select path), and a class-filtered `/display` in two tabs at once
+against the real 36-student seeded roster, per CLAUDE.md's process rule about
+not spending real credits without asking first.
 
 **All eight Edge Functions are deployed to a live Supabase project, and every
 end-to-end path has been run against it**: schema pushed, roster seeded, RLS
@@ -96,10 +114,22 @@ src/
   components/
     ui/                 the shared kit: Button, PageHeader, HazardRule, PinGate,
                         ErrorBanner, EmptyState, LoadingState
-    announce/ display/ admin/   route-specific presentational components
+    announce/           candidate-list.tsx renders both a lone student and a
+                        whole carpool; multi-select is a toggle in this list
+    display/            class-filter.tsx + section-heading.tsx group the board
+                        by grade/class, on top of the flat grid + tile pieces
+    admin/              carpool-manager.tsx (create/edit/delete a carpool,
+                        assign members) alongside the roster CRUD pieces
   lib/
     env.ts              single place env vars are read and validated
-    api.ts              typed client for the three Edge Functions + ApiError
+    api.ts              typed client for the three announce/display Edge
+                        Functions + ApiError (resolve/set-status carry
+                        carpools and plural student ids -- see below)
+    admin-api.ts        typed client for the five roster + carpool-write
+                        Edge Functions /admin calls
+    announce-reducer.ts /announce's state machine: candidates carry
+                        `students[]` + `carpool`, multi-select is opt-in
+    display-sections.ts pure grouping + per-viewer class filter for /display
     pin-session.ts      the PIN store: memory only, no React
     use-pin-session.ts  the React hook over it
     device-id.ts        per-tab id for the rate-limit bucket
@@ -108,6 +138,7 @@ src/
       browser.ts        memoised anon client for client components
       server.ts         anon client for server components (never service-role)
   types/db.ts           row types + a Database type for supabase-js generics
+                        (Student.carpool_id, the Carpool type)
 supabase/
   config.toml           local stack config
   migrations/           SQL schema + RLS policies
@@ -117,18 +148,21 @@ supabase/
       normalize.ts      case-folding, diacritics, comparison keys, phrases
       phonetic.ts       surname-tuned sound coder (the C/K/Q fold lives here)
       similarity.ts     Jaro-Winkler
-      resolver.ts       the matcher + MATCH_POLICY thresholds
-      keyterms.ts       roster -> Deepgram keyterm list, waiting students first
+      resolver.ts       rankCandidates + tierFor (see below) + MATCH_POLICY
+      keyterms.ts       roster + carpool names -> Deepgram keyterm list
       deepgram.ts       short-lived token minting (fetch injected, mockable)
       pin.ts            constant-time staff PIN check, fails closed
       rate-limit.ts     per-device fixed window, injectable clock
       http.ts           JSON/CORS/error shapes
       ports.ts          RosterStore interface — the seam the handlers depend on
       handlers/         one request handler per endpoint, no Deno APIs
+        carpool-write.ts  create/update/delete a carpool + replace its members
       *.deno.ts         Deno-only wiring (env, supabase-js store)
     deepgram-token/     entrypoint: mint a session token + keyterms
-    resolve-name/       entrypoint: transcript -> ranked candidates (read-only)
-    set-status/         entrypoint: the only write path
+    resolve-name/       entrypoint: transcript -> ranked candidates, collapsed
+                        by carpool (read-only)
+    set-status/         entrypoint: the only write path — one or many students
+    carpool-write/      entrypoint: create/update/delete a carpool
   seed/roster.ts        sample dev roster, deliberately full of confusable surnames
 scripts/seed.ts         loads the sample roster (refuses non-local without --allow-remote)
 scripts/screenshot.mjs  Puppeteer: URL + viewport -> PNG (npm run screenshot)
@@ -159,11 +193,12 @@ preflight, and returns errors as `{ "error": "one sentence a staff member can
 act on" }`. Base URL is `NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL` or
 `<supabase-url>/functions/v1`.
 
-| Endpoint         | Body (beyond pin/deviceId)                                                       | Returns                              |
-| ---------------- | -------------------------------------------------------------------------------- | ------------------------------------ |
-| `deepgram-token` | `grade?`, `classGroup?`                                                          | `{ token, expiresIn, keyterms[] }`   |
-| `resolve-name`   | `alternatives[{transcript,confidence}]` or `transcript`, `grade?`, `classGroup?` | `{ tier, transcript, candidates[] }` |
-| `set-status`     | `studentId`, `status`, `source`, `matchConfidence?`, `transcript?`               | `{ student, changed, logged }`       |
+| Endpoint         | Body (beyond pin/deviceId)                                                       | Returns                                          |
+| ---------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `deepgram-token` | `grade?`, `classGroup?`                                                          | `{ token, expiresIn, keyterms[] }`               |
+| `resolve-name`   | `alternatives[{transcript,confidence}]` or `transcript`, `grade?`, `classGroup?` | `{ tier, transcript, candidates[] }`             |
+| `set-status`     | `studentId` **or** `studentIds[]`, `status`, `source`, `matchConfidence?`, `transcript?`, `carpoolId?` | `{ students[], changed[], logged, missing[] }` |
+| `carpool-write`  | `action: "create"\|"update"\|"delete"`, `carpoolId?`, `name?`, `aliases?`, `memberIds?` | `{ carpool, members[], created }` or `{ deleted }` |
 
 Notes phase 4 will need:
 
@@ -173,27 +208,113 @@ Notes phase 4 will need:
   would look like a fault to someone standing outside in the rain.
 - `resolve-name` never writes. Only `set-status` does, and it re-checks the PIN
   itself rather than trusting that `resolve-name` already did.
-- `set-status` is idempotent: confirming an already-arrived student returns
-  `changed: false`, logs no second audit row, and fires no second flash.
+- `resolve-name`'s candidates carry `students[]` (one or more) and `carpool`
+  (null, or the group they were collapsed into) rather than a single
+  `student` — see "Carpools" below for how and why they're grouped before the
+  tier policy runs.
+- `set-status` accepts one student or several (a whole carpool, or a
+  multi-select confirm from `/announce`) through the same endpoint, and always
+  answers with the plural shape: `changed` names only the ids that actually
+  moved, `missing` names ids not on the roster at all, and `logged` counts
+  audit rows written (never a reason to retry). A single-student confirm is
+  simply the one-element case of this — nothing distinguishes it at the wire
+  level any more.
+- `set-status` is idempotent per id: a student already in the requested status
+  is absent from `changed`, logs no second audit row, and fires no second
+  flash — true individually, so confirming a 3-member carpool where one
+  already arrived still moves and logs the other two.
 - `arrived_at` is ignored if a client sends it; a database trigger derives it.
-- Undo is just `set-status` with `status: "waiting"`. The ~2-minute window is a
-  client-side affordance — the server does not enforce it (see judgment calls).
+- Undo is just `set-status` with `status: "waiting"` and the same id(s). The
+  ~2-minute window is a client-side affordance — the server does not enforce
+  it (see judgment calls).
 - `source` is **required** (`voice` | `manual` | `admin`). It is not defaulted:
   a client that omitted it used to log a voice confirmation as hand-picked,
   dropping the transcript and score that `status_events` exists to collect.
-- `logged: false` means the status change stuck but its audit row did not. Worth
-  surfacing quietly; it is never a reason to undo the change.
+- `logged` less than `changed.length` means the status change(s) stuck but not
+  every audit row did. Worth surfacing quietly; it is never a reason to undo.
 - Two rate limits, doing different jobs:
   - **Spam**, keyed on the self-reported `deviceId`: 20/min token, 40/min
-    resolve, 30/min status. Per isolate, so best-effort. Not a security control.
-  - **PIN guessing**, keyed on client IP and spent only on a _wrong_ PIN: 10 per
-    10 minutes, answered with 429. This one is a security control — `deviceId`
-    comes out of the request body, so keying the PIN budget on it meant there
-    was no budget at all.
+    resolve, 30/min status, 30/min carpool-write. Per isolate, so
+    best-effort. Not a security control.
+  - **PIN guessing**, keyed on client IP and spent only on a _wrong_ PIN: 10
+    per 10 minutes on the announce/status endpoints, 3 per 10 minutes on every
+    roster/carpool endpoint (see `pin-budget.test.ts`, which sums this across
+    every deployed function and fails the build if the total creeps past 50).
+    This one is a security control — `deviceId` comes out of the request
+    body, so keying the PIN budget on it meant there was no budget at all.
 - Error statuses the UI must handle: `401` wrong PIN, `429` throttled
   (`retry-after` header), `503` database unreachable **or** `STAFF_PIN` unset on
   the server (the message distinguishes them), `502` speech service down — all
   of which fall back to the typed search.
+
+## Carpools
+
+A carpool is its own row (`public.carpools`: `name`, `aliases`) with a
+callable identity of its own, not a text tag on a student. `students.carpool_id`
+links a child to at most one carpool (`on delete set null`, so deleting a
+carpool never touches the roster), and `status_events.carpool_id` records
+when a status change came from confirming a whole carpool at once — both
+nulled rather than cascaded, the same pattern `student_id`'s FK already used.
+RLS on `carpools` has **no policy and no grants at all**: `/display` never
+needs a carpool's name, so anon/authenticated can neither read nor write it,
+matching `status_events`' boundary rather than `students`' public-read one.
+
+**How a spoken carpool name resolves.** `resolve.ts` folds every carpool into
+the same ranking pass as students — a carpool becomes one more
+`ResolverStudent` with its name standing in for a surname (an empty first
+name, so it folds onto the surname key the same way a real student's does) —
+then **collapses** candidates that share a `carpool_id` into one group,
+keeping the best-scoring member's score and match metadata, before the tier
+policy (`tierFor`) runs on the collapsed list. The collapse is the reason two
+siblings who each score 1.00 on their own surname resolve to one **clear**
+candidate instead of two **ambiguous** ones: uncollapsed, their margin over
+each other is zero, which `MATCH_POLICY.clearMargin` is built to withhold a
+pre-highlight over; collapsed, the margin is measured against the next
+different family, which is the comparison that actually matters for "should
+this one tap be trusted." `resolver.ts` itself is unchanged in every other
+respect — `rankCandidates` + `tierFor` is a behavior-preserving split of the
+old `resolveName` (all 63 pre-existing resolver tests pass unchanged), and
+`resolveName` still exists as `tierFor(rankCandidates(...))` for any caller
+that doesn't need to regroup first.
+
+**Confirming a carpool is one tap, no per-member checkboxes** — the
+announcer's decision was already made by tapping the carpool candidate;
+asking again per child would be the friction carpools exist to remove. Ad-hoc
+multi-student announcing (unrelated candidates, not a carpool) is a separate,
+opt-in "Announce several" toggle on `/announce`'s candidate list: off by
+default, in which case a tap confirms immediately exactly as it always has.
+On, a tap checks a candidate instead, and one "Confirm N arrived" button
+sends a single `set-status` call for the whole batch. It is deliberately a
+second, explicit action rather than automatic, because two high-scoring
+candidates can mean "both are right" or "I'm not sure which," and only a
+person standing there can tell those apart.
+
+**`/display` groups the board into class sections with a per-viewer filter**
+(`display-sections.ts`, pure and unit-tested, the same treatment
+`realtime-reconcile.ts` gets). The filter is entirely client-side — several
+teachers can each filter to their own class at the same time off the one
+public realtime subscription, with no server state and no extra query — and
+is remembered per-browser in `localStorage` (a per-device convenience, not
+the staff PIN CLAUDE.md's storage rule is about) plus overridable via
+`?class=`/`?grade=` for a bookmarked classroom tablet. The chime and flash
+are scoped to the filter (`visibleIds`) so a grade-3 teacher's screen is never
+chimed for a grade-5 arrival, and changing the filter never retroactively
+flashes anything. Below `sm`, `/display` becomes `min-h-screen` and scrolls
+normally rather than staying viewport-locked — the one deliberate departure
+from the phase 5 `h-screen` decision, on the grounds that a phone is not a
+wall.
+
+**A real bug the class filter caught, the same lesson phase 5 already
+learned once:** the tile surname's font-size (`.tile-surname` in
+`globals.css`) was sized from the container's height alone (`cqh`). A
+filtered view can leave just a handful of tiles on screen, so the grid's
+`1fr` row grows to fill nearly the whole viewport height while the tile stays
+only a few columns wide — a tall, narrow tile that `cqh` alone read as "plenty
+of room," sizing a surname that no longer fit the width and wrapping "Garcia"
+into "Garc"/"ia". Fixed by taking `min(...cqh, ...cqi)` — the smaller of the
+height- and width-based size — for every tile font size, extending the
+existing "size from the tile, not the viewport" rule to both axes instead of
+just the one the original always-many-rows board happened to vary on.
 
 ## Coding conventions
 

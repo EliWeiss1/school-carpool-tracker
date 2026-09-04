@@ -4,12 +4,14 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import type { Student } from "@/types/db";
+import type { Carpool, Student } from "@/types/db";
 
 import { StatusPill } from "./status-pill";
 
 export interface RosterTableProps {
   students: Student[];
+  /** For rendering a student's carpool by name rather than by id. */
+  carpools: Carpool[];
   onEdit: (student: Student) => void;
   onDelete: (student: Student) => Promise<void>;
   /** The row currently mid-delete, so its button can say "Removing…". */
@@ -27,21 +29,26 @@ export interface RosterTableProps {
  */
 export function RosterTable({
   students,
+  carpools,
   onEdit,
   onDelete,
   deletingId,
 }: RosterTableProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const carpoolNameById = new Map(
+    carpools.map((carpool) => [carpool.id, carpool.name]),
+  );
 
   return (
     <div className="overflow-x-auto rounded-2xl border border-curb-200 bg-white shadow-card">
-      <table className="w-full min-w-[640px] border-collapse text-left">
+      <table className="w-full min-w-[720px] border-collapse text-left">
         <thead>
           <tr className="border-b border-curb-200 bg-curb-50 text-xs uppercase tracking-eyebrow text-curb-500">
             <th className="px-4 py-3 font-semibold">Name</th>
             <th className="px-4 py-3 font-semibold">Aliases</th>
             <th className="px-4 py-3 font-semibold">Grade</th>
             <th className="px-4 py-3 font-semibold">Class</th>
+            <th className="px-4 py-3 font-semibold">Carpool</th>
             <th className="px-4 py-3 font-semibold">Status</th>
             <th className="px-4 py-3 font-semibold">
               <span className="sr-only">Actions</span>
@@ -75,6 +82,15 @@ export function RosterTable({
                 </td>
                 <td className="px-4 py-3 font-mono text-sm text-curb-700">
                   {student.class_group ?? (
+                    <span className="text-curb-400">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-curb-700">
+                  {student.carpool_id ? (
+                    carpoolNameById.get(student.carpool_id) ?? (
+                      <span className="text-curb-400">—</span>
+                    )
+                  ) : (
                     <span className="text-curb-400">—</span>
                   )}
                 </td>

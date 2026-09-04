@@ -10,6 +10,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 import type { FunctionEnv } from "./env.deno.ts";
 import type {
+  CarpoolRow,
+  CarpoolWriteInput,
   RosterFilter,
   RosterStore,
   StatusEventInput,
@@ -73,6 +75,7 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
         source: event.source,
         match_confidence: event.matchConfidence,
         raw_transcript: event.rawTranscript,
+        carpool_id: event.carpoolId,
       };
 
       // A failed audit row must not undo a status change the display has
@@ -103,6 +106,7 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
           aliases: input.aliases,
           grade: input.grade,
           class_group: input.class_group,
+          carpool_id: input.carpool_id,
         })
         .select()
         .single();
@@ -126,6 +130,28 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       if (error)
         throw new Error(`Could not update that student: ${error.message}`);
       return (data as StudentRow | null) ?? null;
+    },
+
+    async setStatusMany(
+      ids: string[],
+      status: StudentStatus,
+    ): Promise<StudentRow[]> {
+      if (ids.length === 0) return [];
+
+      // Same compare-and-set as setStatus, applied to every id at once: a
+      // row already in `status` matches `neq` and is simply absent from the
+      // result, whether it got there from an earlier tap or a race with this
+      // very request.
+      const { data, error } = await client
+        .from("students")
+        .update({ status })
+        .in("id", ids)
+        .neq("status", status)
+        .select();
+
+      if (error)
+        throw new Error(`Could not update those students: ${error.message}`);
+      return (data ?? []) as StudentRow[];
     },
 
     async removeStudent(id: string): Promise<boolean> {
@@ -156,6 +182,7 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
             aliases: input.aliases,
             grade: input.grade,
             class_group: input.class_group,
+            carpool_id: input.carpool_id,
           })),
         )
         .select();
@@ -178,6 +205,79 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
 
       if (error)
         throw new Error(`Could not reset the roster: ${error.message}`);
+      return (data ?? []) as StudentRow[];
+    },
+
+    async listCarpools(): Promise<CarpoolRow[]> {
+      const { data, error } = await client
+        .from("carpools")
+        .select("*")
+        .order("name");
+      if (error)
+        throw new Error(`Could not read the carpools: ${error.message}`);
+      return (data ?? []) as CarpoolRow[];
+    },
+
+    async createCarpool(input: CarpoolWriteInput): Promise<CarpoolRow> {
+      const { data, error } = await client
+        .from("carpools")
+        .insert({ name: input.name, aliases: input.aliases })
+        .select()
+        .single();
+
+      if (error)
+        throw new Error(`Could not add that carpool: ${error.message}`);
+      return data as CarpoolRow;
+    },
+
+    async updateCarpool(
+      id: string,
+      patch: Partial<CarpoolWriteInput>,
+    ): Promise<CarpoolRow | null> {
+      const { data, error } = await client
+        .from("carpools")
+        .update(patch)
+        .eq("id", id)
+        .select()
+        .maybeSingle();
+
+      if (error)
+        throw new Error(`Could not update that carpool: ${error.message}`);
+      return (data as CarpoolRow | null) ?? null;
+    },
+
+    async removeCarpool(id: string): Promise<boolean> {
+      // The FK on students.carpool_id is `on delete set null`, not cascade,
+      // so this delete cannot remove a member from the roster -- Postgres
+      // unlinks them for us, nothing here has to.
+      const { data, error } = await client
+        .from("carpools")
+        .delete()
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
+
+      if (error)
+        throw new Error(`Could not remove that carpool: ${error.message}`);
+      return data !== null;
+    },
+
+    async setCarpoolMembers(
+      carpoolId: string | null,
+      studentIds: string[],
+    ): Promise<StudentRow[]> {
+      if (studentIds.length === 0) return [];
+
+      const { data, error } = await client
+        .from("students")
+        .update({ carpool_id: carpoolId })
+        .in("id", studentIds)
+        .select();
+
+      if (error)
+        throw new Error(
+          `Could not update carpool membership: ${error.message}`,
+        );
       return (data ?? []) as StudentRow[];
     },
   };

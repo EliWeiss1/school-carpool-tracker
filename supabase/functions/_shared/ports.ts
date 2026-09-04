@@ -21,6 +21,17 @@ export interface StudentRow {
   status: StudentStatus;
   arrived_at: string | null;
   updated_at: string;
+  /** Nulled, not cascaded, when the carpool is deleted. */
+  carpool_id: string | null;
+}
+
+/** A carpool row as the handlers see it. Mirrors public.carpools. */
+export interface CarpoolRow {
+  id: string;
+  name: string;
+  aliases: string[];
+  created_at: string;
+  updated_at: string;
 }
 
 /** Narrows the roster to one class, keeping the keyterm list small. */
@@ -42,6 +53,7 @@ export interface StudentWriteInput {
   aliases: string[];
   grade: string | null;
   class_group: string | null;
+  carpool_id: string | null;
 }
 
 export interface StatusEventInput {
@@ -52,6 +64,14 @@ export interface StatusEventInput {
   matchConfidence: number | null;
   /** What Deepgram heard. Never the audio itself. */
   rawTranscript: string | null;
+  /** Set when this change came from confirming a whole carpool at once. */
+  carpoolId: string | null;
+}
+
+/** The fields /admin is allowed to set on a carpool. */
+export interface CarpoolWriteInput {
+  name: string;
+  aliases: string[];
 }
 
 export interface RosterStore {
@@ -67,6 +87,16 @@ export interface RosterStore {
    * on the display.
    */
   setStatus(id: string, status: StudentStatus): Promise<StudentRow | null>;
+  /**
+   * The same conditional-update contract as `setStatus`, for a carpool
+   * confirmed in one tap: only ids not already in `status` come back, so a
+   * member who arrived moments earlier is silently absent from the result --
+   * no second flash, no second audit row, no fabricated history.
+   */
+  setStatusMany(
+    ids: string[],
+    status: StudentStatus,
+  ): Promise<StudentRow[]>;
   /** Resolves false when the audit row could not be written. Never throws. */
   logEvent(event: StatusEventInput): Promise<boolean>;
 
@@ -98,4 +128,24 @@ export interface RosterStore {
    * row would fabricate audit history without changing anything a person can see.
    */
   resetAllToWaiting(): Promise<StudentRow[]>;
+
+  listCarpools(): Promise<CarpoolRow[]>;
+  createCarpool(input: CarpoolWriteInput): Promise<CarpoolRow>;
+  updateCarpool(
+    id: string,
+    patch: Partial<CarpoolWriteInput>,
+  ): Promise<CarpoolRow | null>;
+  /** Members are not deleted -- their `carpool_id` is nulled by the FK. */
+  removeCarpool(id: string): Promise<boolean>;
+  /**
+   * Replaces a carpool's membership outright: every id in `studentIds` gets
+   * this `carpoolId` (or null, to remove a member from any carpool), and no
+   * other student's `carpool_id` is touched. `carpoolId` is passed alongside
+   * the member ids, rather than assumed from a prior `createCarpool` call, so
+   * the admin UI can add and remove members in one request.
+   */
+  setCarpoolMembers(
+    carpoolId: string | null,
+    studentIds: string[],
+  ): Promise<StudentRow[]>;
 }
