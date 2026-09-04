@@ -18,7 +18,7 @@ import { DisplayBoard } from "@/components/display/display-board";
 export default function DisplayPage({
   searchParams,
 }: {
-  searchParams: { mock?: string; flash?: string; class?: string; grade?: string };
+  searchParams: { mock?: string; flash?: string; class?: string };
 }) {
   const devPreviewAllowed = process.env.NODE_ENV !== "production";
   const mockMode = devPreviewAllowed && (searchParams.mock === "1" || searchParams.mock === "empty");
@@ -36,7 +36,6 @@ export default function DisplayPage({
       // very first client render already knows the intended class, rather
       // than flashing "all classes" for a frame first.
       initialClassParam={searchParams.class ?? null}
-      initialGradeParam={searchParams.grade ?? null}
     />
   );
 }

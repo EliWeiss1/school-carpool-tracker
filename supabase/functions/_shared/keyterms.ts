@@ -12,9 +12,9 @@
  *   3. Surnames of students already picked up -- for a correction or an undo.
  *   4. Alternate spellings, if there is room left.
  *
- * The list is meant to be narrowed further by the grade/class filter on the
+ * The list is meant to be narrowed further by the class filter on the
  * announce page; the caller passes an already-filtered roster. Carpools are
- * not filtered the same way (a carpool can span grades), so every carpool
+ * not filtered the same way (a carpool can span classes), so every carpool
  * name is offered regardless of the roster filter.
  */
 

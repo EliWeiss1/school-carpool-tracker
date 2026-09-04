@@ -45,7 +45,7 @@ describe("request shape", () => {
       jsonResponse({ token: "t", expiresIn: 30, keyterms: ["Cohen"] }),
     );
 
-    await client.requestToken({ ...CREDENTIALS, grade: "3" });
+    await client.requestToken({ ...CREDENTIALS, classGroup: "3rd" });
     const sent = firstRequest(fetchImpl);
 
     expect(sent.url).toBe(BASE + "/deepgram-token");
@@ -56,7 +56,7 @@ describe("request shape", () => {
     expect(sent.body).toMatchObject({
       pin: "123456",
       deviceId: "device-a",
-      grade: "3",
+      classGroup: "3rd",
     });
   });
 
@@ -67,7 +67,6 @@ describe("request shape", () => {
 
     await client.requestToken(CREDENTIALS);
 
-    expect(firstRequest(fetchImpl).body).not.toHaveProperty("grade");
     expect(firstRequest(fetchImpl).body).not.toHaveProperty("classGroup");
   });
 
@@ -127,8 +126,7 @@ describe("successful responses", () => {
               id: "s1",
               first_name: "Maya",
               last_name: "Cohen",
-              grade: "3",
-              class_group: "3A",
+              class_group: "3rd",
               status: "waiting",
             },
           ],

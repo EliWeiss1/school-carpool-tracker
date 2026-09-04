@@ -121,9 +121,10 @@ describe("arrived_at is derived from the status transition", () => {
   it("does not move arrived_at when an unrelated column is edited", async () => {
     const id = await insertStudent("Renamed", "arrived");
     const before = (await readStudent(id)).arrived_at;
-    await db.query("update public.students set grade = '4' where id = $1", [
-      id,
-    ]);
+    await db.query(
+      "update public.students set class_group = '4th' where id = $1",
+      [id],
+    );
     expect((await readStudent(id)).arrived_at?.getTime()).toBe(
       before?.getTime(),
     );
@@ -169,6 +170,15 @@ describe("constraints", () => {
     );
     expect(res.rows).toHaveLength(1);
     expect(res.rows[0].student_id).toBeNull();
+  });
+});
+
+describe("grade removed", () => {
+  it("has no grade column on students", async () => {
+    const res = await db.query<{ column_name: string }>(
+      "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'students' and column_name = 'grade'",
+    );
+    expect(res.rows).toHaveLength(0);
   });
 });
 

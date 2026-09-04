@@ -1,3 +1,4 @@
+import { CLASS_GROUPS } from "@/lib/classes";
 import type { Student } from "@/types/db";
 
 /**
@@ -11,50 +12,58 @@ import type { Student } from "@/types/db";
  * "production"` in addition to the query param, so it can never activate on a
  * real deployment even if someone guesses the URL).
  *
- * Names echo the flavour of `supabase/seed/roster.ts` (confusable-surname
- * clusters) without importing it -- that file lives under `supabase/` for a
- * Deno-and-Vitest audience, not the browser bundle.
+ * 105 students (7 classes x 15), matching the real seeded roster's scale --
+ * the dense "all classes" view and its tile-size floor were tuned against
+ * this count, not the old 26-student mock. Names echo the flavour of
+ * `supabase/seed/roster.ts` (Jewish names, confusable-surname clusters, a mix
+ * of long and very short surnames) without importing it -- that file lives
+ * under `supabase/` for a Deno-and-Vitest audience, not the browser bundle.
  */
 
 const BASE_TIME = "2026-09-02T15:00:00.000Z";
+
+/** One cycle of 15 name pairs, varied in length (short "Oz"/"Tal" through long "Steinberg"/"Rosenthal") so every class gets the same spread of tile widths to render. */
+const NAME_POOL: Array<[string, string]> = [
+  ["Maya", "Cohen"],
+  ["Ari", "Kohen"],
+  ["Noa", "Koen"],
+  ["Eitan", "Levi"],
+  ["Shira", "Levy"],
+  ["Mira", "Stein"],
+  ["Talia", "Klein"],
+  ["Ezra", "Shapiro"],
+  ["Liora", "Rosen"],
+  ["Dov", "Rosenberg"],
+  ["Naomi", "Weiss"],
+  ["Judah", "Berg"],
+  ["Rivka", "Steinberg"],
+  ["Miriam", "Rosenthal"],
+  ["Rebekah", "Tal"],
+];
 
 interface MockSeed {
   id: string;
   first_name: string;
   last_name: string;
-  grade: string;
   class_group: string;
   status: Student["status"];
 }
 
-const SEEDS: MockSeed[] = [
-  { id: "m01", first_name: "Maya", last_name: "Cohen", grade: "K", class_group: "K-Alvarez", status: "waiting" },
-  { id: "m02", first_name: "Elias", last_name: "Kohen", grade: "K", class_group: "K-Alvarez", status: "arrived" },
-  { id: "m03", first_name: "Nora", last_name: "Chen", grade: "K", class_group: "K-Alvarez", status: "waiting" },
-  { id: "m04", first_name: "Theo", last_name: "Ng", grade: "K", class_group: "K-Alvarez", status: "waiting" },
-  { id: "m05", first_name: "Amira", last_name: "Al-Rashid", grade: "K", class_group: "K-Alvarez", status: "arrived" },
-  { id: "m06", first_name: "Jonah", last_name: "Smith", grade: "K", class_group: "K-Alvarez", status: "waiting" },
-  { id: "m07", first_name: "Priya", last_name: "Patel", grade: "1", class_group: "1-Reyes", status: "waiting" },
-  { id: "m08", first_name: "Arjun", last_name: "Patil", grade: "1", class_group: "1-Reyes", status: "waiting" },
-  { id: "m09", first_name: "Sofia", last_name: "Reyes", grade: "1", class_group: "1-Reyes", status: "arrived" },
-  { id: "m10", first_name: "Mateo", last_name: "Rios", grade: "1", class_group: "1-Reyes", status: "waiting" },
-  { id: "m11", first_name: "Lucas", last_name: "Garcia", grade: "1", class_group: "1-Reyes", status: "waiting" },
-  { id: "m12", first_name: "Elena", last_name: "Garza", grade: "1", class_group: "1-Reyes", status: "arrived" },
-  { id: "m13", first_name: "Wei", last_name: "Lee", grade: "2", class_group: "2-Marsh", status: "waiting" },
-  { id: "m14", first_name: "Hannah", last_name: "Li", grade: "2", class_group: "2-Marsh", status: "waiting" },
-  { id: "m15", first_name: "Olivia", last_name: "Leigh", grade: "2", class_group: "2-Marsh", status: "arrived" },
-  { id: "m16", first_name: "Daniel", last_name: "Marsh", grade: "2", class_group: "2-Marsh", status: "waiting" },
-  { id: "m17", first_name: "Gianna", last_name: "Marchetti", grade: "2", class_group: "2-Marsh", status: "waiting" },
-  { id: "m18", first_name: "Owen", last_name: "Brooks", grade: "2", class_group: "2-Marsh", status: "arrived" },
-  { id: "m19", first_name: "Ivy", last_name: "Brook", grade: "3", class_group: "3-Nunez", status: "waiting" },
-  { id: "m20", first_name: "An", last_name: "Nguyen", grade: "3", class_group: "3-Nunez", status: "waiting" },
-  { id: "m21", first_name: "Bao", last_name: "Nguyen", grade: "3", class_group: "3-Nunez", status: "arrived" },
-  { id: "m22", first_name: "Carlos", last_name: "Nunez", grade: "3", class_group: "3-Nunez", status: "waiting" },
-  { id: "m23", first_name: "Isabela", last_name: "Nunes", grade: "3", class_group: "3-Nunez", status: "waiting" },
-  { id: "m24", first_name: "Freya", last_name: "van der Berg", grade: "3", class_group: "3-Nunez", status: "arrived" },
-  { id: "m25", first_name: "Liam", last_name: "O'Brien", grade: "3", class_group: "3-Nunez", status: "waiting" },
-  { id: "m26", first_name: "Rosa", last_name: "D'Angelo", grade: "3", class_group: "3-Nunez", status: "waiting" },
-];
+const SEEDS: MockSeed[] = CLASS_GROUPS.flatMap((classGroup, classIndex) =>
+  NAME_POOL.map(([firstName, lastName], nameIndex) => {
+    const seq = classIndex * NAME_POOL.length + nameIndex;
+    return {
+      id: `m${String(seq + 1).padStart(3, "0")}`,
+      first_name: firstName,
+      last_name: lastName,
+      class_group: classGroup,
+      // Roughly a third arrived, spread across the roster rather than
+      // clustered in one class, so the flash/chime preview and the
+      // red/green mix both look realistic.
+      status: seq % 3 === 0 ? "arrived" : "waiting",
+    };
+  }),
+);
 
 function toStudent(seed: MockSeed): Student {
   return {
@@ -62,7 +71,6 @@ function toStudent(seed: MockSeed): Student {
     first_name: seed.first_name,
     last_name: seed.last_name,
     aliases: [],
-    grade: seed.grade,
     class_group: seed.class_group,
     status: seed.status,
     arrived_at: seed.status === "arrived" ? BASE_TIME : null,

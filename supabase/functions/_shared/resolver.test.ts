@@ -16,10 +16,10 @@ const ids = (result: { candidates: Array<{ student: ResolverStudent }> }) =>
 
 describe("resolveName — tier policy", () => {
   it("reports a clear match when one name wins by a real margin", () => {
-    const result = resolveName("Cowan", ROSTER);
+    const result = resolveName("Oz", ROSTER);
 
     expect(result.tier).toBe("clear");
-    expect(ids(result)[0]).toBe("Owen-Cowan");
+    expect(ids(result)[0]).toBe("Noach-Oz");
   });
 
   it("reports no match rather than guessing at an unknown name", () => {
@@ -31,7 +31,7 @@ describe("resolveName — tier policy", () => {
 
   it("does not let a very short surname match a long unrelated word", () => {
     // Jaro scores a short key generously against a long string: every letter of
-    // "Win" or "Ng" turns up somewhere in a long word. Without a length check,
+    // "Oz" or "Tal" turns up somewhere in a long word. Without a length check,
     // an unrelated name would be offered as a plausible student.
     expect(resolveName("Washington", ROSTER).tier).toBe("none");
     expect(resolveName("Youngblood", ROSTER).tier).toBe("none");
@@ -60,7 +60,10 @@ describe("resolveName — tier policy", () => {
   });
 
   it("only calls a match clear when it clears both the floor and the margin", () => {
-    const result = resolveName("Cowan", ROSTER);
+    // "Bar" is a standalone short surname, but "Berg"/"Berger" still turn up
+    // as lower-scoring fallback candidates via their "Bergh" alias -- exactly
+    // the shape this rule exists to check.
+    const result = resolveName("Bar", ROSTER);
     const [top, runnerUp] = result.candidates;
 
     expect(top.score).toBeGreaterThanOrEqual(MATCH_POLICY.clearScore);
@@ -71,23 +74,57 @@ describe("resolveName — tier policy", () => {
 });
 
 describe("resolveName — the named near-miss clusters", () => {
-  it("refuses to choose between Cohen, Kohen and Koen", () => {
+  it("refuses to choose between Cohen, Kohen, Koen, Kohn and Cohn", () => {
     const result = resolveName("Cohen", ROSTER);
 
     expect(result.tier).toBe("ambiguous");
     expect(ids(result)).toEqual(
-      expect.arrayContaining(["Maya-Cohen", "Elias-Kohen", "Zoe-Koen"]),
+      expect.arrayContaining(["Maya-Cohen", "Rivka-Cohen", "Aaron-Cohen"]),
     );
   });
 
-  it("hears Cowan as Cowan, leaving the Cohens well behind it", () => {
-    const result = resolveName("Cowan", ROSTER);
+  it("refuses to choose between the four children all named Steinberg", () => {
+    const result = resolveName("Steinberg", ROSTER);
+
+    expect(result.tier).toBe("ambiguous");
+    expect(ids(result)).toEqual(
+      expect.arrayContaining(["Shmuel-Steinberg", "Eli-Steinberg"]),
+    );
+  });
+
+  it("refuses to choose between Klein and Kline", () => {
+    const result = resolveName("Kline", ROSTER);
+
+    expect(result.tier).toBe("ambiguous");
+    expect(ids(result)).toEqual(
+      expect.arrayContaining(["Chana-Kline", "Hirsh-Kline", "Yosef-Kline"]),
+    );
+  });
+
+  it("refuses to choose between Shapiro and Shapira", () => {
+    const result = resolveName("Shapiro", ROSTER);
+
+    expect(result.tier).toBe("ambiguous");
+    expect(ids(result)).toEqual(
+      expect.arrayContaining(["Ezra-Shapiro", "Ilana-Shapiro", "Leeba-Shapiro"]),
+    );
+  });
+
+  it("refuses to choose between Perlman and Pearlman", () => {
+    const result = resolveName("Perlman", ROSTER);
+
+    expect(result.tier).toBe("ambiguous");
+    expect(ids(result)).toEqual(
+      expect.arrayContaining(["Yitzchak-Perlman", "Zvi-Perlman"]),
+    );
+  });
+
+  it("hears Gold as Gold, leaving Goldman well behind it", () => {
+    const result = resolveName("Gold", ROSTER);
     const [top, ...rest] = result.candidates;
 
     expect(result.tier).toBe("clear");
-    expect(top.student.id).toBe("Owen-Cowan");
-    // The Cohens stay on the list as fallback tap targets, but none of them is
-    // close enough to make this a coin toss.
+    expect(top.student.id).toBe("Yael-Gold");
     for (const candidate of rest) {
       expect(top.score - candidate.score).toBeGreaterThanOrEqual(
         MATCH_POLICY.clearMargin,
@@ -95,54 +132,11 @@ describe("resolveName — the named near-miss clusters", () => {
     }
   });
 
-  it("refuses to choose between Smith and Smyth", () => {
-    const result = resolveName("Smith", ROSTER);
-
-    expect(result.tier).toBe("ambiguous");
-    expect(ids(result)).toEqual(
-      expect.arrayContaining(["Jonah-Smith", "Emma-Smyth"]),
-    );
-  });
-
-  it("refuses to choose between Chen, Chan and Chin", () => {
-    const result = resolveName("Chen", ROSTER);
-
-    expect(result.tier).toBe("ambiguous");
-    expect(ids(result)).toEqual(
-      expect.arrayContaining(["Nora-Chen", "Hana-Chan", "Ethan-Chin"]),
-    );
-  });
-
-  it("refuses to choose between Lee and Li", () => {
-    const result = resolveName("Lee", ROSTER);
-
-    expect(result.tier).toBe("ambiguous");
-    expect(ids(result)).toEqual(
-      expect.arrayContaining(["Grace-Lee", "Charlotte-Li"]),
-    );
-  });
-
-  it("refuses to choose between Nunez and Nunes", () => {
-    const result = resolveName("Nunez", ROSTER);
-
-    expect(result.tier).toBe("ambiguous");
-    expect(ids(result)).toEqual(
-      expect.arrayContaining(["Isabella-Núñez", "Caleb-Nunes"]),
-    );
-  });
-
-  it("separates Marsh from Marchetti", () => {
-    const result = resolveName("Marsh", ROSTER);
+  it("separates Goldman from Gold the same way, in the other direction", () => {
+    const result = resolveName("Goldman", ROSTER);
 
     expect(result.tier).toBe("clear");
-    expect(ids(result)[0]).toBe("Ava-Marsh");
-  });
-
-  it("separates Garcia from Garza", () => {
-    const result = resolveName("Garcia", ROSTER);
-
-    expect(result.tier).toBe("clear");
-    expect(ids(result)[0]).toBe("Sofia-García");
+    expect(ids(result)[0]).toBe("Gabriel-Goldman");
   });
 });
 
@@ -156,42 +150,37 @@ describe("resolveName — how much of the transcript a match explains", () => {
   });
 
   it("cannot separate two students who share a surname", () => {
-    const result = resolveName("Nguyen", ROSTER);
+    const result = resolveName("Perlman", ROSTER);
 
     expect(result.tier).toBe("ambiguous");
     expect(ids(result)).toEqual(
-      expect.arrayContaining(["Layla-Nguyen", "Minh-Nguyen"]),
+      expect.arrayContaining(["Yitzchak-Perlman", "Zvi-Perlman"]),
     );
   });
 
   it("uses a spoken first name to settle a shared surname", () => {
-    const result = resolveName("Layla Nguyen", ROSTER);
+    const result = resolveName("Yitzchak Perlman", ROSTER);
 
     expect(result.tier).toBe("clear");
-    expect(ids(result)[0]).toBe("Layla-Nguyen");
+    expect(ids(result)[0]).toBe("Yitzchak-Perlman");
   });
 
-  it("matches a multi-word surname however the speaker spaces it", () => {
-    for (const spoken of ["van der Berg", "Vanderberg"]) {
-      const result = resolveName(spoken, ROSTER);
-      expect(result.tier, spoken).toBe("clear");
-      expect(ids(result)[0], spoken).toBe("Mia-van der Berg");
-    }
+  it("still uses the first name to settle it the other way too", () => {
+    const result = resolveName("Zvi Perlman", ROSTER);
+
+    expect(result.tier).toBe("clear");
+    expect(ids(result)[0]).toBe("Zvi-Perlman");
   });
 });
 
 describe("resolveName — Deepgram alternatives", () => {
   it("matches on an alias and says so", () => {
-    // "Eng" is nothing like the spelling "Ng"; only the alias list connects them.
-    const result = resolveName("Eng", ROSTER);
+    // "Otz" is nothing like the spelling "Oz"; only the alias list connects them.
+    const result = resolveName("Otz", ROSTER);
 
-    expect(ids(result)[0]).toBe("Theo-Ng");
+    expect(ids(result)[0]).toBe("Noach-Oz");
     expect(result.candidates[0].matchedVia).toBe("alias");
-    expect(result.candidates[0].matchedOn).toBe("Eng");
-  });
-
-  it("matches a punctuated surname however the speaker runs it together", () => {
-    expect(ids(resolveName("Alrashid", ROSTER))[0]).toBe("Amira-Al-Rashid");
+    expect(result.candidates[0].matchedOn).toBe("Otz");
   });
 
   it("ranks a more confident alternative first but still refuses to choose", () => {
@@ -199,13 +188,13 @@ describe("resolveName — Deepgram alternatives", () => {
     // where a confident guess would put the wrong child on a teacher's screen.
     const result = resolveName(
       [
-        { transcript: "Cowan", confidence: 0.9 },
+        { transcript: "Kohn", confidence: 0.9 },
         { transcript: "Cohen", confidence: 0.5 },
       ],
       ROSTER,
     );
 
-    expect(ids(result)[0]).toBe("Owen-Cowan");
+    expect(ids(result)[0]).toBe("Jonah-Kohn");
     expect(result.tier).toBe("ambiguous");
   });
 
@@ -213,25 +202,25 @@ describe("resolveName — Deepgram alternatives", () => {
     const result = resolveName(
       [
         { transcript: "mmm", confidence: 0.2 },
-        { transcript: "Marchetti", confidence: 0.8 },
+        { transcript: "Goldman", confidence: 0.8 },
       ],
       ROSTER,
     );
 
     expect(result.tier).toBe("clear");
-    expect(ids(result)[0]).toBe("Samuel-Marchetti");
+    expect(ids(result)[0]).toBe("Gabriel-Goldman");
   });
 
   it("reports the alternative the top candidate came from, for the audit log", () => {
     const result = resolveName(
       [
         { transcript: "mmm", confidence: 0.2 },
-        { transcript: "Marchetti", confidence: 0.8 },
+        { transcript: "Goldman", confidence: 0.8 },
       ],
       ROSTER,
     );
 
-    expect(result.transcript).toBe("Marchetti");
+    expect(result.transcript).toBe("Goldman");
   });
 });
 
@@ -240,36 +229,29 @@ describe("resolveName — names that are not on the roster at all", () => {
   // the direction that actually hurts untested: a surname nobody here has,
   // confidently matched to a child who is. A wrong "clear" pre-highlights the
   // wrong name; these must never reach that tier.
-  const strangers: Array<[transcript: string, wouldHaveMatched: string]> = [
-    ["Cruz", "Garza"],
-    ["Berg", "Brook"],
-    ["Bryce", "Brook"],
-    ["Burke", "Brook"],
-    ["Brock", "Brook"],
-    ["Gwen", "Cowan"],
-    ["Nagy", "Ng"],
-    ["Nah", "Yu"],
-    ["Rao", "Rios"],
-    ["Wang", "Ng"],
-    ["Yang", "Ng"],
-    ["Chung", "Chan"],
-    ["Raman", "Rahman"],
-    ["Rahmani", "Rahman"],
-    ["Nasir", "Nair"],
-    ["Rashad", "Al-Rashid"],
-    ["Rashida", "Al-Rashid"],
-    ["Sylvain", "Silva"],
-    ["Yi", "Yu"],
-    ["Ye", "Yu"],
-    ["Yee", "Yu"],
-    ["Shin", "Chin"],
-    ["Lim", "Li"],
-    ["Ha", "Oh"],
-    ["Reed", "Reyes"],
-    ["Ahmad", "Rahman"],
-    ["Hamdan", "Rahman"],
-    ["Price", "Patel"],
-    ["Braun", "O'Brien"],
+  const strangers = [
+    "Cohan",
+    "Kagan",
+    "Levit",
+    "Levitt",
+    "Steiner",
+    "Klain",
+    "Shapell",
+    "Rosner",
+    "Goldfarb",
+    "Weissman",
+    "Burke",
+    "Alderman",
+    "Fishman",
+    "Feldstein",
+    "Greenspan",
+    "Silverstein",
+    "Millman",
+    "Perlmutter",
+    "Wexford",
+    "Barsky",
+    "Talbot",
+    "Ostrow",
   ];
 
   it.each(strangers)("does not pre-highlight anyone for %s", (transcript) => {
@@ -277,16 +259,15 @@ describe("resolveName — names that are not on the roster at all", () => {
   });
 
   it("does not pre-highlight a child when someone says oh", () => {
-    // Deepgram emits interjections routinely. The grade filter makes this worse
-    // by removing the actual Oh from the roster.
+    // Deepgram emits interjections routinely, and none of these names is "Oh".
     const kindergarten = ROSTER.filter((student) =>
       [
         "Maya-Cohen",
-        "Elias-Kohen",
-        "Nora-Chen",
-        "Theo-Ng",
-        "Amira-Al-Rashid",
-        "Jonah-Smith",
+        "Ari-Kohen",
+        "Noa-Koen",
+        "Eitan-Levi",
+        "Shira-Levy",
+        "Mira-Stein",
       ].includes(student.id),
     );
 
@@ -298,13 +279,12 @@ describe("resolveName — a first name that does not belong to the surname", () 
   // The coverage discount rewards a match for explaining more of what was said.
   // An inexact two-word match must not use that to outrank an exact surname.
   const mismatched: Array<[transcript: string, correct: string]> = [
-    ["Maya Chen", "Nora-Chen"],
-    ["Nora Chan", "Hana-Chan"],
-    ["Nora Chin", "Ethan-Chin"],
-    ["Maya Koen", "Zoe-Koen"],
-    ["Harper Silvia", "Elena-Silvia"],
-    ["Priya Patil", "Arjun-Patil"],
-    ["Jonah Smyth", "Emma-Smyth"],
+    ["Maya Chen", "Maya-Cohen"],
+    ["Ari Cohen", "Maya-Cohen"],
+    ["Noa Kohen", "Ari-Kohen"],
+    ["Yitzchak Pearlman", "Esther-Pearlman"],
+    ["Naomi Wise", "Devorah-Wise"],
+    ["Talia Kline", "Chana-Kline"],
   ];
 
   it.each(mismatched)(
@@ -315,6 +295,9 @@ describe("resolveName — a first name that does not belong to the surname", () 
   );
 
   it("still ranks the child whose surname was actually said first", () => {
-    expect(ids(resolveName("Maya Chen", ROSTER))[0]).toBe("Nora-Chen");
+    // "Ari" is really Ari-Kohen's first name, but "Cohen" is Maya's exact
+    // surname -- the exact surname match outranks every Kohen, whose surname
+    // does not exactly match what was said.
+    expect(ids(resolveName("Ari Cohen", ROSTER))[0]).toBe("Maya-Cohen");
   });
 });

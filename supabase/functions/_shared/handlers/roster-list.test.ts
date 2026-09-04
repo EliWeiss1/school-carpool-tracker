@@ -12,15 +12,13 @@ function setup() {
       id: "cohen",
       first_name: "Maya",
       last_name: "Cohen",
-      grade: "K",
-      class_group: "K-Alvarez",
+      class_group: "K1",
     }),
     makeStudent({
       id: "marsh",
       first_name: "Ava",
       last_name: "Marsh",
-      grade: "1",
-      class_group: "1-Diaz",
+      class_group: "1st",
       status: "arrived",
     }),
   ]);
@@ -55,10 +53,10 @@ describe("createRosterListHandler", () => {
     expect(body.students.map((s) => s.id).sort()).toEqual(["cohen", "marsh"]);
   });
 
-  it("narrows to one grade when asked", async () => {
+  it("narrows to one class when asked", async () => {
     const { handle } = setup();
 
-    const response = await handle(list({ grade: "1" }));
+    const response = await handle(list({ classGroup: "1st" }));
     const body = (await response.json()) as {
       students: Array<{ id: string }>;
     };

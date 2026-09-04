@@ -48,7 +48,6 @@ function candidateStudent(student: StudentRow) {
     id: student.id,
     first_name: student.first_name,
     last_name: student.last_name,
-    grade: student.grade,
     class_group: student.class_group,
     status: student.status,
   };

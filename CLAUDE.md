@@ -37,6 +37,22 @@ and status changes were then cleaned up — the live roster is back to its
 original 36 students, 0 carpools. The user separately confirmed the deployed
 site itself works. See `HANDOFF.md` section 10 for the full account.
 
+**Grade has since been removed as a separate concept.** Classification is
+now a single field, `class_group`, with a fixed set of values (`K1`, `K2`,
+`1st`, `2nd`, `3rd`, `4th`, `5th`, in `src/lib/classes.ts`) backing dropdowns
+on `/admin` and `/announce` in place of the old two free-text fields. The
+sample seed roster (`supabase/seed/roster.ts`) was rewritten to 105 Jewish-
+named students (15 per class), keeping the file's adversarial confusable-
+surname-cluster design. `/display`'s board is now visibly denser at that
+scale — see "Carpools" below for the class-filter dropdown and the
+per-section grid layout fix that made it possible. **Built, tested (527
+tests, all green), typechecked, linted and built locally; not yet pushed to
+the live Supabase project or reseeded there** — that migration
+(`20260903120000_drop_grade.sql`) and the new roster still need a live push
+and a fresh end-to-end verification pass, the same way every other schema
+change in this repo has gotten one, before this status line can say
+"deployed" the way the carpools paragraph above does.
+
 **All nine Edge Functions (the original eight, plus `carpool-write`) are
 deployed to a live Supabase project, and every end-to-end path has been run
 against it**: schema pushed, roster seeded, RLS probed directly with the anon
@@ -118,7 +134,7 @@ src/
     announce/           candidate-list.tsx renders both a lone student and a
                         whole carpool; multi-select is a toggle in this list
     display/            class-filter.tsx + section-heading.tsx group the board
-                        by grade/class, on top of the flat grid + tile pieces
+                        by class, on top of the per-section grid + tile pieces
     admin/              carpool-manager.tsx (create/edit/delete a carpool,
                         assign members) alongside the roster CRUD pieces
   lib/
@@ -196,8 +212,8 @@ act on" }`. Base URL is `NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL` or
 
 | Endpoint         | Body (beyond pin/deviceId)                                                       | Returns                                          |
 | ---------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `deepgram-token` | `grade?`, `classGroup?`                                                          | `{ token, expiresIn, keyterms[] }`               |
-| `resolve-name`   | `alternatives[{transcript,confidence}]` or `transcript`, `grade?`, `classGroup?` | `{ tier, transcript, candidates[] }`             |
+| `deepgram-token` | `classGroup?`                                                          | `{ token, expiresIn, keyterms[] }`               |
+| `resolve-name`   | `alternatives[{transcript,confidence}]` or `transcript`, `classGroup?` | `{ tier, transcript, candidates[] }`             |
 | `set-status`     | `studentId` **or** `studentIds[]`, `status`, `source`, `matchConfidence?`, `transcript?`, `carpoolId?` | `{ students[], changed[], logged, missing[] }` |
 | `carpool-write`  | `action: "create"\|"update"\|"delete"`, `carpoolId?`, `name?`, `aliases?`, `memberIds?` | `{ carpool, members[], created }` or `{ deleted }` |
 
@@ -297,13 +313,23 @@ teachers can each filter to their own class at the same time off the one
 public realtime subscription, with no server state and no extra query — and
 is remembered per-browser in `localStorage` (a per-device convenience, not
 the staff PIN CLAUDE.md's storage rule is about) plus overridable via
-`?class=`/`?grade=` for a bookmarked classroom tablet. The chime and flash
-are scoped to the filter (`visibleIds`) so a grade-3 teacher's screen is never
-chimed for a grade-5 arrival, and changing the filter never retroactively
-flashes anything. Below `sm`, `/display` becomes `min-h-screen` and scrolls
-normally rather than staying viewport-locked — the one deliberate departure
-from the phase 5 `h-screen` decision, on the grounds that a phone is not a
-wall.
+`?class=` for a bookmarked classroom tablet. The chime and flash
+are scoped to the filter (`visibleIds`) so a 3rd-class teacher's screen is
+never chimed for a 5th-class arrival, and changing the filter never
+retroactively flashes anything. Below `sm`, `/display` becomes `min-h-screen`
+and scrolls normally rather than staying viewport-locked — the one
+deliberate departure from the phase 5 `h-screen` decision, on the grounds
+that a phone is not a wall.
+
+The class filter itself is a `<select>` dropdown (`class-filter.tsx`), not
+the chip row phase 5 originally built — a deliberate trade made when the
+roster grew to 7 classes: a chip row of 8 options (7 classes + "All") eats
+real header space on a screen that has none to spare, and a dropdown is more
+compact. This does give up the chip row's original rationale (documented in
+its own comment: a chip reads identically on a touchscreen and a wall-mounted
+TV in a way a dropdown, which needs a click-to-open, does not) — a real
+trade-off, not a free improvement, made because 8 options no longer fit the
+original design.
 
 **A real bug the class filter caught, the same lesson phase 5 already
 learned once:** the tile surname's font-size (`.tile-surname` in
@@ -316,6 +342,26 @@ into "Garc"/"ia". Fixed by taking `min(...cqh, ...cqi)` — the smaller of the
 height- and width-based size — for every tile font size, extending the
 existing "size from the tile, not the viewport" rule to both axes instead of
 just the one the original always-many-rows board happened to vary on.
+
+**A second board bug, found tuning the grid for 105 students:** `BoardGrid`
+used to be one flat CSS grid spanning every section, with a heading
+(`col-span-full`) sharing the same `grid-auto-rows` track as the tile rows
+below it — so a heading's row was stretched to the same `minmax(7rem, 1fr)`
+height as a row of tiles, several inches of near-empty space per class
+section that was invisible at the old ~36-student, few-section scale and
+glaring at 105 students across 7. Fixed by giving every section its own tile
+grid (`board-grid.tsx`) rather than one grid shared across sections, so a
+heading is a normal block-height element and each section's rows are sized
+only by its own tiles. The one place rows still stretch to fill the whole
+board is the common single-filtered-class view, kept via `flex-1` on that
+one section. The tile floor also moved down, from `minmax(150px, 1fr)`
+columns / `minmax(7rem, 1fr)` rows to `minmax(112px, 1fr)` / `minmax(4.5rem,
+1fr)` — chosen by screenshotting the real 105-student mock roster
+(`display-mock-roster.ts`, itself rewritten to 105 entries for this reason)
+until 5 of 7 classes fit one 1080p screen at once with no mid-word wrapping
+on all but the very longest surnames (a rare `line-clamp-2` wrap on
+"Rosenberg" is an accepted trade, not a bug — see the tile's own container-
+query font sizing above).
 
 ## Coding conventions
 
@@ -393,7 +439,7 @@ Three faces, wired up in `layout.tsx` via `next/font`, reached through Tailwind:
 | -------------- | ------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `font-display` | Archivo 600/700/800       | Every heading, every button label, every name on `/display`                                             |
 | `font-sans`    | IBM Plex Sans 400/500/600 | All body copy and form fields. The default on `body`                                                    |
-| `font-mono`    | IBM Plex Mono 400/500     | Only things that line up in columns: grades, class groups, times, device ids, CSV row numbers, eyebrows |
+| `font-mono`    | IBM Plex Mono 400/500     | Only things that line up in columns: classes, times, device ids, CSV row numbers, eyebrows |
 
 - Anything `text-4xl` or larger takes `tracking-display` (`-0.03em`).
 - Body copy runs at `line-height: 1.7`, set once on `body`. Headings are `1.1`.
@@ -620,7 +666,7 @@ boxes.
 ### Phase 4 — `/announce`
 
 - [x] PIN entry once per device session, memory only
-- [x] Optional grade / class filter that narrows the keyterm list
+- [x] Optional class filter that narrows the keyterm list
 - [x] Push-to-talk with an unmistakable listening state
 - [x] Top 2–3 candidates as large tap targets; nothing auto-commits
 - [x] Searchable/typeable roster fallback always available

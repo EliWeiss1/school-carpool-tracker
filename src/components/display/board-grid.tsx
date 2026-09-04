@@ -1,5 +1,3 @@
-import { Fragment } from "react";
-
 import { SectionHeading } from "@/components/display/section-heading";
 import { StudentTile } from "@/components/display/student-tile";
 import type { DisplaySection } from "@/lib/display-sections";
@@ -10,9 +8,18 @@ import type { DisplaySection } from "@/lib/display-sections";
  * flip in place, not a reshuffle that makes the person a teacher just called
  * for jump somewhere else on the screen mid-glance.
  *
- * Section headings only render when more than one section is on screen: a
- * teacher who has filtered down to their own class needs no heading
- * repeating what the filter chip above already says.
+ * Each section owns its own tile grid rather than sharing one flat grid with
+ * every other section. A single flat grid forced every implicit row --
+ * including a section heading's -- to the same `grid-auto-rows` height as a
+ * tile row, which stretched each heading into several inches of near-empty
+ * space at 105 students. Splitting per section fixes that and, as a side
+ * effect, is what makes the "all classes" view dense: seven sections stack at
+ * their own natural height instead of every row being forced equally tall.
+ *
+ * The one place rows still stretch to fill the screen is the common case of a
+ * single visible section (the class filter's whole point) -- `flex-1` there
+ * keeps the pre-carpools behaviour of a filtered class's tiles growing to use
+ * the full board rather than clumping at the top.
  */
 export function BoardGrid({
   sections,
@@ -22,39 +29,40 @@ export function BoardGrid({
   flashingIds: ReadonlySet<string>;
 }) {
   const showHeadings = sections.length > 1;
+  const singleSection = sections.length === 1;
 
   return (
-    <ul
-      className="grid flex-1 gap-3 overflow-y-auto p-4 sm:gap-4 sm:p-6"
-      style={{
-        gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-        // Rows stretch to fill the board rather than stacking at the top.
-        //
-        // This screen is a wall-mounted TV read from across a room, so unused
-        // vertical space is not neutral -- it is height the names could have
-        // been using. With fixed-height rows a 26-child roster left roughly
-        // 40% of a 1080p screen as empty black while the surnames sat at 30px.
-        // The 7rem floor keeps tiles legible when a roster is long enough to
-        // scroll, where `1fr` would otherwise crush them.
-        gridAutoRows: "minmax(7rem, 1fr)",
-      }}
-    >
+    <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4 sm:gap-4 sm:p-6">
       {sections.map((section) => (
-        <Fragment key={section.key}>
-          {showHeadings && (
-            <li className="contents">
-              <SectionHeading section={section} />
-            </li>
-          )}
-          {section.students.map((student) => (
-            <StudentTile
-              key={student.id}
-              student={student}
-              flashing={flashingIds.has(student.id)}
-            />
-          ))}
-        </Fragment>
+        <section
+          key={section.key}
+          className={singleSection ? "flex flex-1 flex-col" : undefined}
+        >
+          {showHeadings && <SectionHeading section={section} />}
+          <ul
+            className={
+              singleSection
+                ? "grid flex-1 gap-2 sm:gap-3"
+                : "grid gap-2 sm:gap-3"
+            }
+            style={{
+              gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))",
+              // A floor, not a fixed size: with 105 students on screen at
+              // once, rows stay legible but small; a single filtered class
+              // still grows to fill the board via the section's own flex-1.
+              gridAutoRows: "minmax(4.5rem, 1fr)",
+            }}
+          >
+            {section.students.map((student) => (
+              <StudentTile
+                key={student.id}
+                student={student}
+                flashing={flashingIds.has(student.id)}
+              />
+            ))}
+          </ul>
+        </section>
       ))}
-    </ul>
+    </div>
   );
 }

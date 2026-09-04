@@ -2,14 +2,14 @@ import { cn } from "@/lib/cn";
 import type { FilterOption } from "@/lib/display-sections";
 
 /**
- * The per-viewer class filter: a horizontally scrollable row of chips, each
- * carrying its own waiting count. It is entirely local to this browser tab --
- * several teachers can each filter to their own class at the same time, off
- * the one public realtime subscription, with no server state at all (see
- * `display-sections.ts`).
+ * The per-viewer class filter: one compact dropdown rather than a row of
+ * chips. With seven classes plus "All classes" a chip row would eat most of
+ * the header on a wall-mounted screen; a single control reads the same at a
+ * glance and leaves the rest of the header for the waiting/arrived count.
  *
- * Doubles as section navigation on the unfiltered board and reads identically
- * on a touchscreen and a wall-mounted TV, which a dropdown would not.
+ * Entirely local to this browser tab -- several teachers can each filter to
+ * their own class at the same time, off the one public realtime subscription,
+ * with no server state at all (see `display-sections.ts`).
  */
 export function ClassFilter({
   options,
@@ -23,64 +23,28 @@ export function ClassFilter({
   if (options.length <= 1) return null;
 
   return (
-    <div
-      role="tablist"
-      aria-label="Filter by class"
-      className="flex gap-2 overflow-x-auto px-4 pb-1 sm:px-6"
-    >
-      <Chip
-        label="All classes"
-        selected={value === ""}
-        onClick={() => onChange("")}
-      />
-      {options.map((option) => (
-        <Chip
-          key={option.key}
-          label={option.label}
-          count={option.waiting}
-          selected={value === option.key}
-          onClick={() => onChange(option.key)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function Chip({
-  label,
-  count,
-  selected,
-  onClick,
-}: {
-  label: string;
-  count?: number;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={selected}
-      onClick={onClick}
-      className={cn(
-        "focus-ring flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 font-mono text-xs uppercase tracking-eyebrow transition-[background-color,color] duration-150",
-        selected
-          ? "bg-marigold-500 text-curb-900"
-          : "bg-white/10 text-white/80 hover:bg-white/20",
-      )}
-    >
-      {label}
-      {count !== undefined && (
-        <span
-          className={cn(
-            "rounded-full px-1.5 py-0.5 text-[0.6875rem]",
-            selected ? "bg-curb-900/15" : "bg-white/15",
-          )}
-        >
-          {count}
-        </span>
-      )}
-    </button>
+    <label className="flex items-center gap-2 px-4 sm:px-6">
+      <span className="sr-only">Filter by class</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(
+          "focus-ring min-h-tap w-full max-w-xs rounded-xl border border-white/15 bg-white/10 px-3.5 font-mono text-xs uppercase tracking-eyebrow text-white/80 transition-colors duration-150 hover:bg-white/15 sm:w-auto",
+        )}
+      >
+        <option value="" className="bg-curb-900 text-white">
+          All classes
+        </option>
+        {options.map((option) => (
+          <option
+            key={option.key}
+            value={option.key}
+            className="bg-curb-900 text-white"
+          >
+            {option.label} ({option.waiting} waiting)
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

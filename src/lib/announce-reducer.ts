@@ -56,7 +56,6 @@ export function candidateLabel(candidate: ResolveCandidateLike): string {
 export type ResolveOrigin = "voice" | "manual";
 
 export interface AnnounceFilter {
-  grade: string;
   classGroup: string;
 }
 
@@ -100,7 +99,7 @@ export interface AnnounceState {
 
 export function initialAnnounceState(): AnnounceState {
   return {
-    filter: { grade: "", classGroup: "" },
+    filter: { classGroup: "" },
     searchText: "",
     micStatus: "idle",
     resolving: false,

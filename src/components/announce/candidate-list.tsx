@@ -82,9 +82,7 @@ export function CandidateList({
           const label = candidateLabel(candidate);
           const meta = candidate.carpool
             ? `${candidate.students.length} student${candidate.students.length === 1 ? "" : "s"}`
-            : [candidate.students[0].grade, candidate.students[0].class_group]
-                .filter(Boolean)
-                .join(" · ") || "No grade on file";
+            : (candidate.students[0].class_group ?? "No class on file");
 
           return (
             <li key={key}>

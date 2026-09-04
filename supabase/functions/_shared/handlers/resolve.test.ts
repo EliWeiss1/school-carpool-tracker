@@ -12,20 +12,20 @@ const ROSTER = [
     first_name: "Maya",
     last_name: "Cohen",
     aliases: ["Kohen"],
-    grade: "K",
+    class_group: "K1",
   }),
   makeStudent({
     id: "kohen",
     first_name: "Elias",
     last_name: "Kohen",
     aliases: ["Cohen"],
-    grade: "K",
+    class_group: "K1",
   }),
   makeStudent({
     id: "marsh",
     first_name: "Ava",
     last_name: "Marsh",
-    grade: "4",
+    class_group: "4th",
   }),
 ];
 
@@ -131,7 +131,7 @@ describe("createResolveHandler", () => {
           pin: STAFF_PIN,
           deviceId: "phone-1",
           transcript: "Marsh",
-          grade: "K",
+          classGroup: "K1",
         }),
       )
     ).json()) as ResolveBody;

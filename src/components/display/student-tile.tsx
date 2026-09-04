@@ -23,7 +23,7 @@ export function StudentTile({
   flashing: boolean;
 }) {
   const arrived = student.status === "arrived";
-  const meta = [student.grade, student.class_group].filter(Boolean).join(" · ");
+  const meta = student.class_group ?? "";
 
   return (
     <li

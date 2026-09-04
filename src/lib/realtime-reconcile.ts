@@ -13,7 +13,7 @@ import type { Student } from "@/types/db";
  *    `supabase/migrations/20260902090000_init_carpool_board.sql`), so an
  *    UPDATE payload's `old` is a complete previous row, not a primary-key-only
  *    stub. That is what would let a caller tell a genuine waiting -> arrived
- *    transition from an unrelated edit (a rename, a grade change) using the
+ *    transition from an unrelated edit (a rename, a class change) using the
  *    wire payload alone -- but `reconcile` does not actually need `old` for
  *    this, and deliberately does not trust it. See the note on `old` below.
  * 2. `updated_at` is a transaction timestamp. A payload that is not strictly

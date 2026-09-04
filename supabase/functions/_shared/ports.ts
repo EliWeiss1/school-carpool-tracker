@@ -16,7 +16,6 @@ export interface StudentRow {
   first_name: string;
   last_name: string;
   aliases: string[];
-  grade: string | null;
   class_group: string | null;
   status: StudentStatus;
   arrived_at: string | null;
@@ -36,7 +35,6 @@ export interface CarpoolRow {
 
 /** Narrows the roster to one class, keeping the keyterm list small. */
 export interface RosterFilter {
-  grade?: string | null;
   classGroup?: string | null;
 }
 
@@ -51,7 +49,6 @@ export interface StudentWriteInput {
   first_name: string;
   last_name: string;
   aliases: string[];
-  grade: string | null;
   class_group: string | null;
   carpool_id: string | null;
 }

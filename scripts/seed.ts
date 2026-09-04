@@ -83,19 +83,19 @@ async function main() {
   const { data, error } = await supabase
     .from("students")
     .insert(SAMPLE_ROSTER.map((s) => ({ ...s, status: "waiting" as const })))
-    .select("id, grade");
+    .select("id, class_group");
 
   if (error) fail(`Insert failed: ${error.message}`);
 
-  const byGrade = new Map<string, number>();
+  const byClass = new Map<string, number>();
   for (const row of data ?? []) {
-    const grade = row.grade ?? "—";
-    byGrade.set(grade, (byGrade.get(grade) ?? 0) + 1);
+    const classGroup = row.class_group ?? "—";
+    byClass.set(classGroup, (byClass.get(classGroup) ?? 0) + 1);
   }
 
   console.log(`  ✓ Inserted ${data?.length ?? 0} students, all waiting`);
-  for (const grade of [...byGrade.keys()].sort()) {
-    console.log(`      grade ${grade}: ${byGrade.get(grade)}`);
+  for (const classGroup of [...byClass.keys()].sort()) {
+    console.log(`      class ${classGroup}: ${byClass.get(classGroup)}`);
   }
   console.log("");
 }

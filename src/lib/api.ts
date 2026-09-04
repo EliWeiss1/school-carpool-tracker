@@ -34,7 +34,6 @@ export interface CandidateStudent {
   id: string;
   first_name: string;
   last_name: string;
-  grade: string | null;
   class_group: string | null;
   status: StudentStatus;
 }
@@ -182,7 +181,6 @@ export interface Credentials {
 
 /** The optional narrowing that keeps the keyterm list inside Deepgram's budget. */
 export interface RosterScope {
-  grade?: string | null;
   classGroup?: string | null;
 }
 
@@ -344,10 +342,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   const post = createEdgeFunctionPost(options);
 
   return {
-    requestToken({ pin, deviceId, grade, classGroup, signal }) {
+    requestToken({ pin, deviceId, classGroup, signal }) {
       return post<TokenResponse>(
         "deepgram-token",
-        compact({ pin, deviceId, grade, classGroup }),
+        compact({ pin, deviceId, classGroup }),
         signal,
       );
     },
@@ -357,7 +355,6 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       deviceId,
       alternatives,
       transcript,
-      grade,
       classGroup,
       signal,
     }) {
@@ -369,7 +366,6 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
           alternatives:
             alternatives && alternatives.length > 0 ? alternatives : undefined,
           transcript,
-          grade,
           classGroup,
         }),
         signal,

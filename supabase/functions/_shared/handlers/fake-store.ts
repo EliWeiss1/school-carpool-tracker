@@ -44,7 +44,6 @@ export function makeStudent(overrides: Partial<StudentRow> = {}): StudentRow {
     first_name: "Test",
     last_name: `Name${counter}`,
     aliases: [],
-    grade: null,
     class_group: null,
     status: "waiting",
     arrived_at: null,
@@ -83,7 +82,6 @@ export function createFakeStore(
     list(filter: RosterFilter): Promise<StudentRow[]> {
       return Promise.resolve(
         students
-          .filter((student) => !filter.grade || student.grade === filter.grade)
           .filter(
             (student) =>
               !filter.classGroup || student.class_group === filter.classGroup,
@@ -139,7 +137,6 @@ export function createFakeStore(
         first_name: input.first_name,
         last_name: input.last_name,
         aliases: [...input.aliases],
-        grade: input.grade,
         class_group: input.class_group,
         status: "waiting",
         arrived_at: null,
@@ -160,7 +157,6 @@ export function createFakeStore(
       if (patch.first_name !== undefined) found.first_name = patch.first_name;
       if (patch.last_name !== undefined) found.last_name = patch.last_name;
       if (patch.aliases !== undefined) found.aliases = [...patch.aliases];
-      if (patch.grade !== undefined) found.grade = patch.grade;
       if (patch.class_group !== undefined)
         found.class_group = patch.class_group;
       if (patch.carpool_id !== undefined) found.carpool_id = patch.carpool_id;
@@ -193,7 +189,6 @@ export function createFakeStore(
           first_name: input.first_name,
           last_name: input.last_name,
           aliases: [...input.aliases],
-          grade: input.grade,
           class_group: input.class_group,
           status: "waiting",
           arrived_at: null,

@@ -5,6 +5,7 @@ import { type FormEvent, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import type { StudentFields } from "@/lib/admin-api";
+import { CLASS_GROUPS } from "@/lib/classes";
 import { cn } from "@/lib/cn";
 import type { Carpool, Student } from "@/types/db";
 
@@ -52,7 +53,6 @@ export function StudentForm({
   const [aliasesText, setAliasesText] = useState(
     (student?.aliases ?? []).join(", "),
   );
-  const [grade, setGrade] = useState(student?.grade ?? "");
   const [classGroup, setClassGroup] = useState(student?.class_group ?? "");
   const [carpoolId, setCarpoolId] = useState(student?.carpool_id ?? NO_CARPOOL);
   const formId = useId();
@@ -63,7 +63,6 @@ export function StudentForm({
       first_name: firstName.trim(),
       last_name: lastName.trim(),
       aliases: parseAliasesInput(aliasesText),
-      grade: grade.trim() === "" ? null : grade.trim(),
       class_group: classGroup.trim() === "" ? null : classGroup.trim(),
       carpool_id: carpoolId === NO_CARPOOL ? null : carpoolId,
     });
@@ -123,29 +122,22 @@ export function StudentForm({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label className={LABEL_CLASS} htmlFor={`${formId}-grade`}>
-            Grade
-          </label>
-          <input
-            id={`${formId}-grade`}
-            className={cn(INPUT_CLASS, "font-mono")}
-            value={grade}
-            onChange={(event) => setGrade(event.target.value)}
-            placeholder="K"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
           <label className={LABEL_CLASS} htmlFor={`${formId}-class`}>
             Class
           </label>
-          <input
+          <select
             id={`${formId}-class`}
             className={cn(INPUT_CLASS, "font-mono")}
             value={classGroup}
             onChange={(event) => setClassGroup(event.target.value)}
-            placeholder="K-Alvarez"
-          />
+          >
+            <option value="">No class</option>
+            {CLASS_GROUPS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col gap-1.5 sm:col-span-2">

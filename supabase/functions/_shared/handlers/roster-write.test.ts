@@ -13,8 +13,7 @@ function setup() {
       first_name: "Maya",
       last_name: "Cohen",
       aliases: ["Kohen"],
-      grade: "K",
-      class_group: "K-Alvarez",
+      class_group: "K1",
     }),
   ]);
   const handle = createRosterWriteHandler({
@@ -44,8 +43,7 @@ describe("createRosterWriteHandler — create", () => {
         first_name: "Theo",
         last_name: "Ng",
         aliases: ["Eng", "Ang"],
-        grade: "K",
-        class_group: "K-Alvarez",
+        class_group: "K1",
       }),
     );
     const body = (await response.json()) as {
@@ -60,18 +58,18 @@ describe("createRosterWriteHandler — create", () => {
     expect(store.rows()).toHaveLength(2);
   });
 
-  it("defaults aliases, grade and class to empty/null", async () => {
+  it("defaults aliases and class to empty/null", async () => {
     const { handle } = setup();
 
     const response = await handle(
       base({ first_name: "New", last_name: "Student" }),
     );
     const body = (await response.json()) as {
-      student: { aliases: string[]; grade: string | null };
+      student: { aliases: string[]; class_group: string | null };
     };
 
     expect(body.student.aliases).toEqual([]);
-    expect(body.student.grade).toBeNull();
+    expect(body.student.class_group).toBeNull();
   });
 
   it("drops blank and duplicate aliases", async () => {
@@ -111,7 +109,7 @@ describe("createRosterWriteHandler — create", () => {
 });
 
 describe("createRosterWriteHandler — update", () => {
-  it("edits an existing student's name, aliases, grade and class", async () => {
+  it("edits an existing student's name, aliases and class", async () => {
     const { handle, store } = setup();
 
     const response = await handle(
@@ -120,38 +118,36 @@ describe("createRosterWriteHandler — update", () => {
         first_name: "Maya",
         last_name: "Cohen",
         aliases: ["Kohen", "Cohn"],
-        grade: "1",
-        class_group: "1-Diaz",
+        class_group: "1st",
       }),
     );
     const body = (await response.json()) as {
       created: boolean;
-      student: { grade: string | null; aliases: string[] };
+      student: { class_group: string | null; aliases: string[] };
     };
 
     expect(response.status).toBe(200);
     expect(body.created).toBe(false);
-    expect(body.student.grade).toBe("1");
+    expect(body.student.class_group).toBe("1st");
     expect(body.student.aliases).toEqual(["Kohen", "Cohn"]);
-    expect(store.row("cohen")?.class_group).toBe("1-Diaz");
+    expect(store.row("cohen")?.class_group).toBe("1st");
   });
 
   it("only touches fields that were actually sent", async () => {
     const { handle, store } = setup();
 
-    await handle(base({ studentId: "cohen", grade: "2" }));
+    await handle(base({ studentId: "cohen", class_group: "2nd" }));
 
     expect(store.row("cohen")?.first_name).toBe("Maya");
-    expect(store.row("cohen")?.grade).toBe("2");
+    expect(store.row("cohen")?.class_group).toBe("2nd");
     expect(store.row("cohen")?.aliases).toEqual(["Kohen"]);
   });
 
-  it("can clear grade and class back to null", async () => {
+  it("can clear the class back to null", async () => {
     const { handle, store } = setup();
 
-    await handle(base({ studentId: "cohen", grade: null, class_group: null }));
+    await handle(base({ studentId: "cohen", class_group: null }));
 
-    expect(store.row("cohen")?.grade).toBeNull();
     expect(store.row("cohen")?.class_group).toBeNull();
   });
 
@@ -167,7 +163,9 @@ describe("createRosterWriteHandler — update", () => {
   it("says so when the student is not on the roster", async () => {
     const { handle } = setup();
 
-    const response = await handle(base({ studentId: "nobody", grade: "3" }));
+    const response = await handle(
+      base({ studentId: "nobody", class_group: "3rd" }),
+    );
 
     expect(response.status).toBe(404);
   });
@@ -217,7 +215,7 @@ describe("createRosterWriteHandler — bounds and duplicates", () => {
         studentId: "cohen",
         first_name: "Maya",
         last_name: "Cohen",
-        grade: "1",
+        class_group: "1st",
       }),
     );
 

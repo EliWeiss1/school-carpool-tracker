@@ -5,7 +5,7 @@ import { parseRosterCsv } from "./csv-import";
 describe("parseRosterCsv — header handling", () => {
   it("accepts headers in any column order", () => {
     const report = parseRosterCsv(
-      "last_name,grade,first_name,class_group\nCohen,K,Maya,K-Alvarez\n",
+      "last_name,first_name,class_group\nCohen,Maya,K1\n",
     );
 
     expect(report.headerErrors).toEqual([]);
@@ -14,8 +14,7 @@ describe("parseRosterCsv — header handling", () => {
         first_name: "Maya",
         last_name: "Cohen",
         aliases: [],
-        grade: "K",
-        class_group: "K-Alvarez",
+        class_group: "K1",
         carpool: null,
       },
     ]);
@@ -23,7 +22,7 @@ describe("parseRosterCsv — header handling", () => {
 
   it("matches friendly header names case-insensitively", () => {
     const report = parseRosterCsv(
-      'First Name,Last Name,Aliases,Grade,Class\nTheo,Ng,"Eng, Ang",K,K-Alvarez\n',
+      'First Name,Last Name,Aliases,Class\nTheo,Ng,"Eng, Ang",K1\n',
     );
 
     expect(report.headerErrors).toEqual([]);
@@ -31,8 +30,7 @@ describe("parseRosterCsv — header handling", () => {
       first_name: "Theo",
       last_name: "Ng",
       aliases: ["Eng", "Ang"],
-      grade: "K",
-      class_group: "K-Alvarez",
+      class_group: "K1",
       carpool: null,
     });
   });
@@ -47,7 +45,7 @@ describe("parseRosterCsv — header handling", () => {
   });
 
   it("reports missing required columns and imports nothing", () => {
-    const report = parseRosterCsv("grade,class_group\nK,K-Alvarez\n");
+    const report = parseRosterCsv("class_group\nK1\n");
 
     expect(report.headerErrors).toEqual(
       expect.arrayContaining([
@@ -93,7 +91,7 @@ describe("parseRosterCsv — row handling", () => {
     // Dropping trailing empty columns is normal exporter behaviour, not a
     // broken file. Erroring on it turned a 400-row import into 400 errors.
     const report = parseRosterCsv(
-      "first_name,last_name,grade\nMaya,Cohen,K\nTheo,Ng\nNora,Chen,K\n",
+      "first_name,last_name,class_group\nMaya,Cohen,K1\nTheo,Ng\nNora,Chen,K1\n",
     );
 
     expect(report.toImport.map((s) => s.last_name)).toEqual([
@@ -102,14 +100,14 @@ describe("parseRosterCsv — row handling", () => {
       "Chen",
     ]);
     expect(report.errors).toEqual([]);
-    expect(report.toImport[1].grade).toBeNull();
+    expect(report.toImport[1].class_group).toBeNull();
   });
 
   it("flags a row with MORE fields than the header, without crashing the rest of the file", () => {
     // This direction really is broken: the values no longer line up with the
     // column names, so there is no safe way to guess what was meant.
     const report = parseRosterCsv(
-      "first_name,last_name,grade\nMaya,Cohen,K\nTheo,Ng,K,extra\nNora,Chen,K\n",
+      "first_name,last_name,class_group\nMaya,Cohen,K1\nTheo,Ng,K1,extra\nNora,Chen,K1\n",
     );
 
     expect(report.toImport.map((s) => s.last_name)).toEqual(["Cohen", "Chen"]);
@@ -261,14 +259,13 @@ describe("parseRosterCsv — malformed files must never import silently", () => 
     // Plenty of SIS exports drop trailing empties. Rejecting all 400 rows
     // with a column-count error is a report nobody can act on.
     const report = parseRosterCsv(
-      "first_name,last_name,grade,class_group\nMaya,Cohen\n",
+      "first_name,last_name,class_group\nMaya,Cohen\n",
     );
 
     expect(report.errors).toHaveLength(0);
     expect(report.toImport[0]).toMatchObject({
       first_name: "Maya",
       last_name: "Cohen",
-      grade: null,
       class_group: null,
     });
   });

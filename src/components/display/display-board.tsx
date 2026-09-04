@@ -108,7 +108,6 @@ export function DisplayBoard({
   mockEmpty = false,
   flashPreview = false,
   initialClassParam = null,
-  initialGradeParam = null,
 }: {
   /** Dev-only: seeds synthetic data instead of calling Supabase. Gated in src/app/display/page.tsx so it can never activate in production. */
   mockMode?: boolean;
@@ -118,8 +117,6 @@ export function DisplayBoard({
   flashPreview?: boolean;
   /** From `?class=`, read server-side. Resolved to a section key once the roster loads. */
   initialClassParam?: string | null;
-  /** From `?grade=`, read server-side. Only used when it resolves to exactly one section. */
-  initialGradeParam?: string | null;
 }) {
   const [roster, setRoster] = useState<DisplayRoster>({});
   const [connection, setConnection] = useState<ConnectionState>("connecting");
@@ -161,30 +158,25 @@ export function DisplayBoard({
     if (stored !== null) setSectionKey(stored);
   }, []);
 
-  // Resolve ?class=/?grade= against the loaded sections, exactly once. A
-  // bookmarked or embedded URL should win over whatever was remembered from
-  // last time this browser opened the board.
+  // Resolve ?class= against the loaded sections, exactly once. A bookmarked
+  // or embedded URL should win over whatever was remembered from last time
+  // this browser opened the board.
   useEffect(() => {
     if (urlFilterResolvedRef.current) return;
     if (grouped.allSections.length === 0) return;
-    if (!initialClassParam && !initialGradeParam) {
+    if (!initialClassParam) {
       urlFilterResolvedRef.current = true;
       return;
     }
 
-    const match = grouped.allSections.find((section) => {
-      if (initialClassParam) {
-        return (
-          section.classGroup?.toLowerCase() ===
-          initialClassParam.toLowerCase()
-        );
-      }
-      return section.grade?.toLowerCase() === initialGradeParam!.toLowerCase();
-    });
+    const match = grouped.allSections.find(
+      (section) =>
+        section.classGroup?.toLowerCase() === initialClassParam.toLowerCase(),
+    );
 
     if (match) setSectionKey(match.key);
     urlFilterResolvedRef.current = true;
-  }, [grouped.allSections, initialClassParam, initialGradeParam]);
+  }, [grouped.allSections, initialClassParam]);
 
   function handleFilterChange(nextKey: string) {
     setSectionKey(nextKey);

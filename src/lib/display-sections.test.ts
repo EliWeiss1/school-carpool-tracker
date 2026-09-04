@@ -8,8 +8,7 @@ function student(overrides: Partial<Student> & Pick<Student, "id">): Student {
     first_name: "Jonah",
     last_name: "Smith",
     aliases: [],
-    grade: "K",
-    class_group: "K-Alvarez",
+    class_group: "K1",
     status: "waiting",
     arrived_at: null,
     updated_at: "2026-09-02T12:00:00.000Z",
@@ -19,11 +18,11 @@ function student(overrides: Partial<Student> & Pick<Student, "id">): Student {
 }
 
 describe("groupIntoSections", () => {
-  it("groups students by grade + class into one section each", () => {
+  it("groups students by class into one section each", () => {
     const students = [
-      student({ id: "s1", grade: "K", class_group: "K-Alvarez" }),
-      student({ id: "s2", grade: "K", class_group: "K-Alvarez" }),
-      student({ id: "s3", grade: "1", class_group: "1-Reyes" }),
+      student({ id: "s1", class_group: "K1" }),
+      student({ id: "s2", class_group: "K1" }),
+      student({ id: "s3", class_group: "1st" }),
     ];
 
     const result = groupIntoSections(students, { sectionKey: "" });
@@ -35,28 +34,30 @@ describe("groupIntoSections", () => {
     ]);
   });
 
-  it("orders sections by grade, K before 1, and numerically after that", () => {
+  it("orders sections K1, K2, then 1st through 5th", () => {
     const students = [
-      student({ id: "s10", grade: "10", class_group: "A" }),
-      student({ id: "s2", grade: "2", class_group: "A" }),
-      student({ id: "sK", grade: "K", class_group: "A" }),
-      student({ id: "s1", grade: "1", class_group: "A" }),
+      student({ id: "s5", class_group: "5th" }),
+      student({ id: "s2", class_group: "2nd" }),
+      student({ id: "sK2", class_group: "K2" }),
+      student({ id: "s1", class_group: "1st" }),
+      student({ id: "sK1", class_group: "K1" }),
     ];
 
     const result = groupIntoSections(students, { sectionKey: "" });
 
-    expect(result.allSections.map((s) => s.grade)).toEqual([
-      "K",
-      "1",
-      "2",
-      "10",
+    expect(result.allSections.map((s) => s.classGroup)).toEqual([
+      "K1",
+      "K2",
+      "1st",
+      "2nd",
+      "5th",
     ]);
   });
 
-  it("puts students with no grade or class into a trailing 'Ungrouped' section", () => {
+  it("puts students with no class into a trailing 'Ungrouped' section", () => {
     const students = [
-      student({ id: "s1", grade: "K", class_group: "A" }),
-      student({ id: "s2", grade: null, class_group: null }),
+      student({ id: "s1", class_group: "K1" }),
+      student({ id: "s2", class_group: null }),
     ];
 
     const result = groupIntoSections(students, { sectionKey: "" });
@@ -81,11 +82,11 @@ describe("groupIntoSections", () => {
     ]);
   });
 
-  it("labels a section 'Grade N · Class'", () => {
-    const students = [student({ id: "s1", grade: "3", class_group: "Foxes" })];
+  it("labels a section with the bare class name", () => {
+    const students = [student({ id: "s1", class_group: "3rd" })];
     const result = groupIntoSections(students, { sectionKey: "" });
 
-    expect(result.allSections[0].label).toBe("Grade 3 · Foxes");
+    expect(result.allSections[0].label).toBe("3rd");
   });
 
   it("counts waiting and arrived per section", () => {
@@ -103,8 +104,8 @@ describe("groupIntoSections", () => {
 
   describe("filtering to one section", () => {
     const students = [
-      student({ id: "s1", grade: "K", class_group: "A", status: "waiting" }),
-      student({ id: "s2", grade: "1", class_group: "B", status: "arrived" }),
+      student({ id: "s1", class_group: "K1", status: "waiting" }),
+      student({ id: "s2", class_group: "1st", status: "arrived" }),
     ];
 
     it("shows only the matching section when a filter key is set", () => {
@@ -157,8 +158,8 @@ describe("groupIntoSections", () => {
 
   it("with no filter, visibleIds covers the whole roster", () => {
     const students = [
-      student({ id: "s1", grade: "K" }),
-      student({ id: "s2", grade: "1" }),
+      student({ id: "s1", class_group: "K1" }),
+      student({ id: "s2", class_group: "1st" }),
     ];
 
     const result = groupIntoSections(students, { sectionKey: "" });
@@ -168,16 +169,16 @@ describe("groupIntoSections", () => {
 
   it("produces one filter option per section, each carrying its waiting count", () => {
     const students = [
-      student({ id: "s1", grade: "K", class_group: "A", status: "waiting" }),
-      student({ id: "s2", grade: "K", class_group: "A", status: "waiting" }),
-      student({ id: "s3", grade: "1", class_group: "B", status: "arrived" }),
+      student({ id: "s1", class_group: "K1", status: "waiting" }),
+      student({ id: "s2", class_group: "K1", status: "waiting" }),
+      student({ id: "s3", class_group: "1st", status: "arrived" }),
     ];
 
     const result = groupIntoSections(students, { sectionKey: "" });
 
     expect(result.options).toEqual([
-      { key: expect.any(String), label: "Grade K · A", waiting: 2 },
-      { key: expect.any(String), label: "Grade 1 · B", waiting: 0 },
+      { key: expect.any(String), label: "K1", waiting: 2 },
+      { key: expect.any(String), label: "1st", waiting: 0 },
     ]);
   });
 

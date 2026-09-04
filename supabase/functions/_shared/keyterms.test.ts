@@ -96,8 +96,8 @@ describe("buildKeyterms", () => {
   });
 
   it("offers every carpool regardless of the roster passed in", () => {
-    // Carpools are not narrowed by the announce screen's grade/class filter --
-    // a carpool can span grades -- so this only proves carpools with no
+    // Carpools are not narrowed by the announce screen's class filter -- a
+    // carpool can span classes -- so this only proves carpools with no
     // matching students still make the list.
     const terms = buildKeyterms([], [{ name: "Weiss Carpool", aliases: [] }]);
 

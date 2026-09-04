@@ -28,7 +28,6 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
   return {
     async list(filter: RosterFilter): Promise<StudentRow[]> {
       let query = client.from("students").select("*").order("last_name");
-      if (filter.grade) query = query.eq("grade", filter.grade);
       if (filter.classGroup) query = query.eq("class_group", filter.classGroup);
 
       const { data, error } = await query;
@@ -104,7 +103,6 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
           first_name: input.first_name,
           last_name: input.last_name,
           aliases: input.aliases,
-          grade: input.grade,
           class_group: input.class_group,
           carpool_id: input.carpool_id,
         })
@@ -180,7 +178,6 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
             first_name: input.first_name,
             last_name: input.last_name,
             aliases: input.aliases,
-            grade: input.grade,
             class_group: input.class_group,
             carpool_id: input.carpool_id,
           })),

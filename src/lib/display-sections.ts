@@ -1,3 +1,4 @@
+import { CLASS_GROUPS } from "@/lib/classes";
 import type { Student } from "@/types/db";
 
 /**
@@ -13,8 +14,8 @@ import type { Student } from "@/types/db";
  * each filter to their own class off the one public realtime subscription,
  * with no server state and no extra query. `visibleIds` is what
  * `display-board.tsx` intersects against `reconcile`'s `arrivals` before
- * flashing or chiming, so a grade-3 teacher's screen is never chimed for a
- * grade-5 arrival.
+ * flashing or chiming, so a 3rd-class teacher's screen is never chimed for a
+ * 5th-class arrival.
  */
 
 export interface DisplayFilter {
@@ -24,9 +25,8 @@ export interface DisplayFilter {
 
 export interface DisplaySection {
   key: string;
-  grade: string | null;
   classGroup: string | null;
-  /** "Grade 3 · Foxes", or "Ungrouped" when a student has neither field set. */
+  /** The bare class name, e.g. "3rd", or "Ungrouped" when a student has none. */
   label: string;
   students: Student[];
   waiting: number;
@@ -52,28 +52,28 @@ export interface GroupedSections {
   options: FilterOption[];
 }
 
-/** Stable ordering: by grade text, then class group, with unassigned last. */
 function sectionKeyFor(student: Student): string {
-  if (!student.grade && !student.class_group) return "__none__";
-  return `${student.grade ?? ""}|${student.class_group ?? ""}`;
+  return student.class_group ?? "__none__";
 }
 
-function labelFor(grade: string | null, classGroup: string | null): string {
-  if (!grade && !classGroup) return "Ungrouped";
-  const gradeLabel = grade ? `Grade ${grade}` : null;
-  return [gradeLabel, classGroup].filter(Boolean).join(" · ");
+function labelFor(classGroup: string | null): string {
+  return classGroup ?? "Ungrouped";
 }
 
-/** Sorts grade text numerically when possible ("2" before "10"), else lexically ("K" before "1" is intentional -- K comes first). */
-function compareGrades(a: string | null, b: string | null): number {
+/**
+ * Orders by position in the known class list (K1, K2, 1st .. 5th); a
+ * class_group that isn't one of those (free text, so always possible) sorts
+ * after every known class, alphabetically among themselves.
+ */
+function compareClasses(a: string | null, b: string | null): number {
   if (a === b) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
-  if (a === "K" && b !== "K") return -1;
-  if (b === "K" && a !== "K") return 1;
-  const numA = Number(a);
-  const numB = Number(b);
-  if (!Number.isNaN(numA) && !Number.isNaN(numB)) return numA - numB;
+  const indexA = CLASS_GROUPS.indexOf(a as (typeof CLASS_GROUPS)[number]);
+  const indexB = CLASS_GROUPS.indexOf(b as (typeof CLASS_GROUPS)[number]);
+  if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+  if (indexA !== -1) return -1;
+  if (indexB !== -1) return 1;
   return a.localeCompare(b);
 }
 
@@ -99,13 +99,11 @@ export function groupIntoSections(
           ? byLastName
           : a.first_name.localeCompare(b.first_name);
       });
-      const grade = sorted[0]?.grade ?? null;
       const classGroup = sorted[0]?.class_group ?? null;
       return {
         key,
-        grade,
         classGroup,
-        label: labelFor(grade, classGroup),
+        label: labelFor(classGroup),
         students: sorted,
         waiting: sorted.filter((s) => s.status === "waiting").length,
         arrived: sorted.filter((s) => s.status === "arrived").length,
@@ -114,10 +112,7 @@ export function groupIntoSections(
     .sort((a, b) => {
       if (a.key === "__none__") return 1;
       if (b.key === "__none__") return -1;
-      const byGrade = compareGrades(a.grade, b.grade);
-      return byGrade !== 0
-        ? byGrade
-        : (a.classGroup ?? "").localeCompare(b.classGroup ?? "");
+      return compareClasses(a.classGroup, b.classGroup);
     });
 
   const sections =

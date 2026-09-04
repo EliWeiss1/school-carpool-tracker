@@ -33,7 +33,6 @@ export interface Credentials {
 
 /** The optional narrowing /roster-list accepts, mirroring the announce endpoints. */
 export interface RosterScope {
-  grade?: string | null;
   classGroup?: string | null;
 }
 
@@ -46,7 +45,6 @@ export interface StudentFields {
   first_name: string;
   last_name: string;
   aliases?: string[];
-  grade?: string | null;
   class_group?: string | null;
   carpool_id?: string | null;
 }
@@ -187,10 +185,10 @@ export function createAdminApiClient(
   });
 
   return {
-    listRoster({ pin, deviceId, grade, classGroup, signal }) {
+    listRoster({ pin, deviceId, classGroup, signal }) {
       return post<RosterListResponse>(
         "roster-list",
-        compact({ pin, deviceId, grade, classGroup }),
+        compact({ pin, deviceId, classGroup }),
         signal,
       );
     },
@@ -201,7 +199,6 @@ export function createAdminApiClient(
       first_name,
       last_name,
       aliases,
-      grade,
       class_group,
       carpool_id,
       signal,
@@ -214,7 +211,6 @@ export function createAdminApiClient(
           first_name,
           last_name,
           aliases,
-          grade,
           class_group,
           carpool_id,
         }),
@@ -229,7 +225,6 @@ export function createAdminApiClient(
       first_name,
       last_name,
       aliases,
-      grade,
       class_group,
       carpool_id,
       signal,
@@ -244,7 +239,6 @@ export function createAdminApiClient(
       if (first_name !== undefined) body.first_name = first_name;
       if (last_name !== undefined) body.last_name = last_name;
       if (aliases !== undefined) body.aliases = aliases;
-      if (grade !== undefined) body.grade = grade;
       if (class_group !== undefined) body.class_group = class_group;
       if (carpool_id !== undefined) body.carpool_id = carpool_id;
 

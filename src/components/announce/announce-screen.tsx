@@ -43,7 +43,6 @@ interface TokenCache {
   token: string;
   keyterms: string[];
   expiresAtMs: number;
-  grade: string;
   classGroup: string;
 }
 
@@ -129,7 +128,6 @@ export function AnnounceScreen() {
     const cached = tokenCacheRef.current;
     if (
       cached &&
-      cached.grade === state.filter.grade &&
       cached.classGroup === state.filter.classGroup &&
       isFresh(cached.expiresAtMs, Date.now())
     ) {
@@ -139,14 +137,12 @@ export function AnnounceScreen() {
     try {
       const response = await api.requestToken({
         ...creds,
-        grade: state.filter.grade || undefined,
         classGroup: state.filter.classGroup || undefined,
       });
       const next: TokenCache = {
         token: response.token,
         keyterms: response.keyterms,
         expiresAtMs: expiresAt(Date.now(), response.expiresIn),
-        grade: state.filter.grade,
         classGroup: state.filter.classGroup,
       };
       tokenCacheRef.current = next;
@@ -175,7 +171,6 @@ export function AnnounceScreen() {
       const response = await api.resolveName({
         ...creds,
         ...input,
-        grade: state.filter.grade || undefined,
         classGroup: state.filter.classGroup || undefined,
       });
       dispatch({

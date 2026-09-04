@@ -11,7 +11,6 @@ export type Student = {
   first_name: string;
   last_name: string;
   aliases: string[];
-  grade: string | null;
   class_group: string | null;
   status: StudentStatus;
   /** Derived by a trigger from the status transition — never set by a caller. */

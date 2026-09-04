@@ -33,9 +33,8 @@ function requireCredentials(session: UsePinSession) {
  * Nothing is written until a person has seen the validation report and
  * pressed Import: `parseRosterCsv` runs entirely in the browser, and the
  * report is the only thing rendered until then. Row numbers use `font-mono`
- * throughout, matching the roster table's grade/class columns and the rest
- * of the app's rule that anything meant to line up in columns gets the mono
- * face.
+ * throughout, matching the roster table's class column and the rest of the
+ * app's rule that anything meant to line up in columns gets the mono face.
  */
 export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
   const [fileName, setFileName] = useState<string | null>(null);
@@ -97,9 +96,9 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
         </h2>
         <p className="mt-1 text-curb-600">
           Columns can be in any order. Required: first name, last name.
-          Optional: aliases (comma or semicolon separated), grade, class,
-          carpool. A new carpool name is created automatically; an existing
-          one (matched by name) gets this student added to it.
+          Optional: aliases (comma or semicolon separated), class, carpool. A
+          new carpool name is created automatically; an existing one (matched
+          by name) gets this student added to it.
         </p>
       </div>
 
@@ -203,7 +202,6 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
                       <tr className="text-curb-500">
                         <th className="px-3 py-2 font-semibold">Name</th>
                         <th className="px-3 py-2 font-semibold">Aliases</th>
-                        <th className="px-3 py-2 font-semibold">Grade</th>
                         <th className="px-3 py-2 font-semibold">Class</th>
                         <th className="px-3 py-2 font-semibold">Carpool</th>
                       </tr>
@@ -219,9 +217,6 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
                           </td>
                           <td className="px-3 py-2 font-mono text-xs text-curb-600">
                             {row.aliases.join(", ") || "—"}
-                          </td>
-                          <td className="px-3 py-2 font-mono text-curb-700">
-                            {row.grade ?? "—"}
                           </td>
                           <td className="px-3 py-2 font-mono text-curb-700">
                             {row.class_group ?? "—"}

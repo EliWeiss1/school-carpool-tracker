@@ -9,8 +9,7 @@ function student(overrides: Partial<Student> & Pick<Student, "id">): Student {
     first_name: "Jonah",
     last_name: "Smith",
     aliases: [],
-    grade: "K",
-    class_group: "K-Alvarez",
+    class_group: "K1",
     status: "waiting",
     arrived_at: null,
     updated_at: "2026-09-02T12:00:00.000Z",
@@ -91,14 +90,14 @@ describe("reconcile", () => {
     expect(result.arrivals).toEqual([]);
   });
 
-  it("stays silent on a grade/class edit", () => {
+  it("stays silent on a class edit", () => {
     const before: DisplayRoster = {
-      s1: student({ id: "s1", status: "waiting", class_group: "K-Alvarez" }),
+      s1: student({ id: "s1", status: "waiting", class_group: "K1" }),
     };
     const after = student({
       id: "s1",
       status: "waiting",
-      class_group: "K-Bloom",
+      class_group: "K2",
       updated_at: "2026-09-02T12:02:00.000Z",
     });
 
@@ -108,7 +107,7 @@ describe("reconcile", () => {
       old: before.s1,
     });
 
-    expect(result.roster.s1.class_group).toBe("K-Bloom");
+    expect(result.roster.s1.class_group).toBe("K2");
     expect(result.arrivals).toEqual([]);
   });
 

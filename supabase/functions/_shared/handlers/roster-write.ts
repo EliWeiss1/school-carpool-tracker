@@ -56,10 +56,9 @@ async function create(
     return errorResponse(400, "A student needs a first and last name.");
   }
 
-  const grade = readString(body, "grade");
   const classGroup = readString(body, "class_group");
   const carpoolId = readString(body, "carpool_id");
-  if (nameTooLong(firstName, lastName, grade, classGroup)) {
+  if (nameTooLong(firstName, lastName, classGroup)) {
     return errorResponse(
       400,
       "One of those entries is far too long to be a name. Check the row for a stray quotation mark.",
@@ -87,7 +86,6 @@ async function create(
     first_name: firstName,
     last_name: lastName,
     aliases: readAliases(body),
-    grade,
     class_group: classGroup,
     carpool_id: carpoolId,
   };
@@ -104,7 +102,7 @@ async function update(
   const patch: Partial<StudentWriteInput> = {};
 
   // Only a field actually present in the request is touched, so a partial
-  // edit -- e.g. changing just a grade from the roster table -- cannot blank
+  // edit -- e.g. changing just a class from the roster table -- cannot blank
   // out every other column by omission.
   if ("first_name" in body) {
     const firstName = readString(body, "first_name");
@@ -123,7 +121,6 @@ async function update(
   }
 
   if ("aliases" in body) patch.aliases = readAliases(body);
-  if ("grade" in body) patch.grade = readString(body, "grade");
   if ("class_group" in body)
     patch.class_group = readString(body, "class_group");
   if ("carpool_id" in body) patch.carpool_id = readString(body, "carpool_id");
@@ -132,7 +129,6 @@ async function update(
     nameTooLong(
       patch.first_name ?? null,
       patch.last_name ?? null,
-      patch.grade ?? null,
       patch.class_group ?? null,
     )
   ) {

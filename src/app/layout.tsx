@@ -8,7 +8,7 @@ import "./globals.css";
  * Archivo is a road-signage grotesque — it is what the display type wants to be
  * on a board read from across a room. Plex Sans is the reading face: humanist,
  * engineered, and legible at 16px on a phone held at arm's length in daylight.
- * Plex Mono is reserved for things that line up in columns — grades, device
+ * Plex Mono is reserved for things that line up in columns — classes, device
  * ids, CSV row numbers, timestamps.
  */
 const display = Archivo({

@@ -46,12 +46,12 @@ describe("listRoster", () => {
       jsonResponse({ students: [] }),
     );
 
-    await client.listRoster({ ...CREDENTIALS, grade: "K" });
+    await client.listRoster({ ...CREDENTIALS, classGroup: "K1" });
     const sent = firstRequest(fetchImpl);
 
     expect(sent.url).toBe(BASE + "/roster-list");
     expect(sent.headers.authorization).toBe("Bearer anon-key");
-    expect(sent.body).toMatchObject({ ...CREDENTIALS, grade: "K" });
+    expect(sent.body).toMatchObject({ ...CREDENTIALS, classGroup: "K1" });
   });
 
   it("returns the students from the response", async () => {
@@ -95,7 +95,7 @@ describe("updateStudent", () => {
   it("posts only the fields that were actually passed", async () => {
     const { client, fetchImpl } = clientReturning(
       jsonResponse({
-        student: { id: "cohen", grade: "2" },
+        student: { id: "cohen", class_group: "2nd" },
         created: false,
       }),
     );
@@ -103,20 +103,20 @@ describe("updateStudent", () => {
     await client.updateStudent({
       ...CREDENTIALS,
       studentId: "cohen",
-      grade: "2",
+      class_group: "2nd",
     });
     const sent = firstRequest(fetchImpl);
 
     expect(sent.body).toEqual({
       ...CREDENTIALS,
       studentId: "cohen",
-      grade: "2",
+      class_group: "2nd",
     });
     expect(sent.body).not.toHaveProperty("first_name");
     expect(sent.body).not.toHaveProperty("aliases");
   });
 
-  it("sends an explicit null to clear grade or class, unlike an omitted field", async () => {
+  it("sends an explicit null to clear the class, unlike an omitted field", async () => {
     // compact() (used elsewhere in this client) drops null along with
     // undefined, which would make "clear this field" indistinguishable from
     // "don't touch it" -- updateStudent deliberately does not use it.
@@ -127,14 +127,12 @@ describe("updateStudent", () => {
     await client.updateStudent({
       ...CREDENTIALS,
       studentId: "cohen",
-      grade: null,
       class_group: null,
     });
     const sent = firstRequest(fetchImpl);
 
-    expect(sent.body.grade).toBeNull();
     expect(sent.body.class_group).toBeNull();
-    expect("grade" in sent.body).toBe(true);
+    expect("class_group" in sent.body).toBe(true);
   });
 });
 
@@ -166,7 +164,6 @@ describe("importRoster", () => {
       first_name,
       last_name,
       aliases: [],
-      grade: null,
       class_group: null,
       carpool: null,
     });

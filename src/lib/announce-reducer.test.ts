@@ -12,8 +12,7 @@ const student = (id: string, overrides: Partial<ResolveCandidateLike["students"]
   id,
   first_name: "Maya",
   last_name: "Cohen",
-  grade: "K",
-  class_group: "K-Alvarez",
+  class_group: "K1",
   status: "waiting" as const,
   ...overrides,
 });
@@ -66,7 +65,7 @@ describe("initialAnnounceState", () => {
     expect(state.banner).toBeNull();
     expect(state.info).toBeNull();
     expect(state.undo).toBeNull();
-    expect(state.filter).toEqual({ grade: "", classGroup: "" });
+    expect(state.filter).toEqual({ classGroup: "" });
     expect(state.searchText).toBe("");
     expect(state.multiSelect).toBe(false);
     expect(state.selectedKeys).toEqual([]);
@@ -74,20 +73,15 @@ describe("initialAnnounceState", () => {
 });
 
 describe("filter and search text", () => {
-  it("updates one filter field without touching the other", () => {
+  it("updates the class filter", () => {
     let state = initialAnnounceState();
     state = announceReducer(state, {
       type: "filter/change",
-      field: "grade",
-      value: "3",
-    });
-    state = announceReducer(state, {
-      type: "filter/change",
       field: "classGroup",
-      value: "3-Diaz",
+      value: "3rd",
     });
 
-    expect(state.filter).toEqual({ grade: "3", classGroup: "3-Diaz" });
+    expect(state.filter).toEqual({ classGroup: "3rd" });
   });
 
   it("changing the filter clears stale results so a stale candidate can't be confirmed", () => {
@@ -102,8 +96,8 @@ describe("filter and search text", () => {
 
     state = announceReducer(state, {
       type: "filter/change",
-      field: "grade",
-      value: "1",
+      field: "classGroup",
+      value: "1st",
     });
 
     expect(state.results).toBeNull();
