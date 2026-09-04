@@ -877,12 +877,41 @@ verified in dev (`?mock=1` for `/display`'s 105-student density; the PIN
 gate for `/announce` and `/admin`, since neither has a reachable Supabase
 project from this machine without `.env.local`).
 
-**Not done, on purpose, pending the user's go-ahead:** the migration has not
-been pushed to the live Supabase project (`npx supabase db push --linked`),
-the new roster has not been seeded there, and no Edge Function needed
-redeploying (none of their code changed in a way that touches the deployed
-bundle differently than the wire contract already covered by
-`pin-budget.test.ts` and the handler tests). CLAUDE.md's process rule is
-explicit: never spend real Supabase steps against a shared project without
-asking first. Everything above is proven against PGlite, Vitest, and the
-Next.js dev server — not yet against the live site.
+The user then said to make it fully live. Done, in this order (deploy the
+functions first, so nothing live ever tries to write a `grade` field the
+database no longer has):
+
+1. Committed (`4148bd2`) and pushed to `master`, which triggered Vercel's
+   connected auto-deploy for the frontend the same way every previous push
+   to this repo has.
+2. All nine Edge Functions redeployed with
+   `npx supabase functions deploy --use-api` (no Docker on this machine, same
+   flag every prior deploy in this repo has used) — all nine, not just the
+   ones with a direct handler change, because every one bundles
+   `supabase-store.deno.ts` and `ports.ts`, both of which changed.
+3. `npx supabase db push --linked` applied `20260903120000_drop_grade.sql` to
+   the live project. Deliberately after the function redeploy, not before:
+   the new function code never references `grade` at all, so it works
+   identically whether the column exists or not, which means there was no
+   window where a live write could fail against a column that no longer
+   existed.
+4. `npm run seed -- --allow-remote` wiped `students` and inserted the new
+   105-entry roster.
+
+**Verified live**, via direct HTTP calls with `.env.local`'s real anon key
+and staff PIN (never through the browser): `roster-list` returns exactly 105
+students, 15 in each of the 7 classes, and no row carries a `grade` field
+anymore. `resolve-name` on "Cohen" reproduces the exact three-way ambiguous
+match the local resolver tests predict for the new roster — Miriam Cohen,
+Aaron Cohen, Rivka Cohen, tier `ambiguous` — proving the redeployed
+`resolve-name` function, the new roster, and the local test suite all agree.
+A wrong PIN against the redeployed `resolve-name` still 401s.
+
+One thing verification caught that this session did not cause: a stale
+`"Test carpool"` row was still present after the reseed, created in an
+earlier session (before this one started) and never cleaned up — the wipe
+in `scripts/seed.ts` only ever touches `students`, so a leftover carpool
+survives any reseed by design. Deleted via `carpool-write`
+(`action: "delete"`) so the live project ends this session exactly where
+CLAUDE.md's own convention says it should: 105 students, 0 carpools, no
+residue from testing.

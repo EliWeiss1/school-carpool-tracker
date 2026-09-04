@@ -45,13 +45,24 @@ sample seed roster (`supabase/seed/roster.ts`) was rewritten to 105 Jewish-
 named students (15 per class), keeping the file's adversarial confusable-
 surname-cluster design. `/display`'s board is now visibly denser at that
 scale — see "Carpools" below for the class-filter dropdown and the
-per-section grid layout fix that made it possible. **Built, tested (527
-tests, all green), typechecked, linted and built locally; not yet pushed to
-the live Supabase project or reseeded there** — that migration
-(`20260903120000_drop_grade.sql`) and the new roster still need a live push
-and a fresh end-to-end verification pass, the same way every other schema
-change in this repo has gotten one, before this status line can say
-"deployed" the way the carpools paragraph above does.
+per-section grid layout fix that made it possible.
+
+**Built, tested (527 tests, all green), typechecked, linted, built,
+committed and pushed (`4148bd2` on `master`), and deployed live**: the
+`20260903120000_drop_grade.sql` migration is applied to the linked Supabase
+project, all nine Edge Functions were redeployed (their shared store/handler
+code changed, same reasoning as the carpools deploy), and the live roster
+was wiped and reseeded with the new 105-student roster via
+`npm run seed -- --allow-remote`. Verified live: `roster-list` returns
+exactly 105 students across the 7 classes (15 each) with no `grade` field on
+any row; `resolve-name` on "Cohen" reproduces the same three-way ambiguous
+Cohen-family match (Miriam/Aaron/Rivka Cohen) the local resolver tests
+predict; the PIN boundary still 401s a wrong PIN on the redeployed
+`resolve-name`. One unrelated stale carpool ("Test carpool", left over from
+an earlier session and never touched by the reseed, since `scripts/seed.ts`
+only wipes `students`) was found during verification and deleted, leaving
+the live project at exactly 105 students, 0 carpools. Vercel's connected
+auto-deploy picked up the push for the frontend.
 
 **All nine Edge Functions (the original eight, plus `carpool-write`) are
 deployed to a live Supabase project, and every end-to-end path has been run
