@@ -12,7 +12,7 @@ const destinations = [
     href: "/announce",
     lane: "01",
     title: "Announce",
-    who: "Outside, at the kerb",
+    who: "Outside, at the curb",
     blurb: "Say or type a last name, then tap to confirm the child.",
   },
   {

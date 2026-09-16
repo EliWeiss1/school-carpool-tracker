@@ -138,8 +138,9 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
         <p className="mt-1 text-curb-600">
           Columns can be in any order. Required: first name, last name.
           Optional: aliases (comma or semicolon separated), class, carpool,
-          parent 1 name, parent 2 name. A new carpool name is created
-          automatically; an existing one (matched by name) gets this student
+          parent 1 name, parent 2 name. If the carpool column names a carpool
+          that already exists, this student is added to it; if it doesn&apos;t
+          exist yet, it&apos;s created with that exact name and this student
           added to it. This always adds to the roster you already have -- it
           never replaces or removes anyone.
         </p>
