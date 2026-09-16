@@ -58,6 +58,39 @@ describe("createRosterWriteHandler — create", () => {
     expect(store.rows()).toHaveLength(2);
   });
 
+  it("accepts parent names on create", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      base({
+        first_name: "Eli",
+        last_name: "Weiss",
+        parent1_name: "Dana Weiss",
+        parent2_name: "Mark Weiss",
+      }),
+    );
+    const body = (await response.json()) as {
+      student: { id: string; parent1_name: string | null; parent2_name: string | null };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.student.parent1_name).toBe("Dana Weiss");
+    expect(body.student.parent2_name).toBe("Mark Weiss");
+    expect(store.row(body.student.id)?.parent1_name).toBe("Dana Weiss");
+  });
+
+  it("defaults parent names to null when omitted", async () => {
+    const { handle } = setup();
+
+    const response = await handle(base({ first_name: "Theo", last_name: "Ng" }));
+    const body = (await response.json()) as {
+      student: { parent1_name: string | null; parent2_name: string | null };
+    };
+
+    expect(body.student.parent1_name).toBeNull();
+    expect(body.student.parent2_name).toBeNull();
+  });
+
   it("defaults aliases and class to empty/null", async () => {
     const { handle } = setup();
 
@@ -149,6 +182,25 @@ describe("createRosterWriteHandler — update", () => {
     await handle(base({ studentId: "cohen", class_group: null }));
 
     expect(store.row("cohen")?.class_group).toBeNull();
+  });
+
+  it("sets and then clears a parent name", async () => {
+    const { handle, store } = setup();
+
+    await handle(base({ studentId: "cohen", parent1_name: "Rina Cohen" }));
+    expect(store.row("cohen")?.parent1_name).toBe("Rina Cohen");
+
+    await handle(base({ studentId: "cohen", parent1_name: null }));
+    expect(store.row("cohen")?.parent1_name).toBeNull();
+  });
+
+  it("leaves parent names untouched when not sent", async () => {
+    const { handle, store } = setup();
+
+    await handle(base({ studentId: "cohen", parent1_name: "Rina Cohen" }));
+    await handle(base({ studentId: "cohen", class_group: "2nd" }));
+
+    expect(store.row("cohen")?.parent1_name).toBe("Rina Cohen");
   });
 
   it("rejects blanking out the last name", async () => {

@@ -22,6 +22,7 @@ import {
   type StudentChangePayload,
 } from "@/lib/realtime-reconcile";
 import { getBrowserClient } from "@/lib/supabase/browser";
+import { useClassGroups } from "@/lib/use-class-groups";
 import type { Student } from "@/types/db";
 
 /** Remembers the last class a viewer picked, per browser tab's origin -- a
@@ -134,10 +135,21 @@ export function DisplayBoard({
     new Map<string, ReturnType<typeof setTimeout>>(),
   );
 
+  // The class list is admin-editable data (see class-manager.tsx in /admin),
+  // not a hardcoded order -- fetched here the same public, no-PIN way the
+  // roster itself is. Falls back to groupIntoSections' own default order
+  // until it loads, rather than an empty list sorting nothing.
+  const { names: classOrder } = useClassGroups();
+
   const students = useMemo(() => Object.values(roster), [roster]);
   const grouped = useMemo(
-    () => groupIntoSections(students, { sectionKey }),
-    [students, sectionKey],
+    () =>
+      groupIntoSections(
+        students,
+        { sectionKey },
+        classOrder.length > 0 ? classOrder : undefined,
+      ),
+    [students, sectionKey, classOrder],
   );
 
   // A ref updated on every render (not in an effect) so the realtime

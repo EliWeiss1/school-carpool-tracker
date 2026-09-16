@@ -19,7 +19,7 @@ import type { StatusEventSource, Student, StudentStatus } from "@/types/db";
 /* -------------------------------------------------------------------------- */
 
 /** Which of a student's names the transcript actually looked like. */
-export type MatchedVia = "surname" | "alias" | "full_name";
+export type MatchedVia = "surname" | "alias" | "full_name" | "parent_name";
 
 /**
  * The confidence tier drives the whole /announce interaction:

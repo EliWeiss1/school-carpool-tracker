@@ -9,6 +9,8 @@
 import type {
   CarpoolRow,
   CarpoolWriteInput,
+  ClassGroupRow,
+  ClassGroupWriteInput,
   RosterFilter,
   RosterStore,
   StatusEventInput,
@@ -32,10 +34,12 @@ export interface FakeStore extends RosterStore {
   rows(): StudentRow[];
   row(id: string): StudentRow | undefined;
   carpoolRows(): CarpoolRow[];
+  classGroupRows(): ClassGroupRow[];
 }
 
 let counter = 0;
 let carpoolCounter = 0;
+let classGroupCounter = 0;
 
 export function makeStudent(overrides: Partial<StudentRow> = {}): StudentRow {
   counter++;
@@ -49,6 +53,8 @@ export function makeStudent(overrides: Partial<StudentRow> = {}): StudentRow {
     arrived_at: null,
     updated_at: "2026-09-02T12:00:00.000Z",
     carpool_id: null,
+    parent1_name: null,
+    parent2_name: null,
     ...overrides,
   };
 }
@@ -65,12 +71,26 @@ export function makeCarpool(overrides: Partial<CarpoolRow> = {}): CarpoolRow {
   };
 }
 
+export function makeClassGroup(
+  overrides: Partial<ClassGroupRow> = {},
+): ClassGroupRow {
+  classGroupCounter++;
+  return {
+    id: `class-${classGroupCounter}`,
+    name: `Class ${classGroupCounter}`,
+    sort_order: classGroupCounter,
+    ...overrides,
+  };
+}
+
 export function createFakeStore(
   initial: StudentRow[],
   initialCarpools: CarpoolRow[] = [],
+  initialClassGroups: ClassGroupRow[] = [],
 ): FakeStore {
   const students = initial.map((student) => ({ ...student }));
   const carpools = initialCarpools.map((carpool) => ({ ...carpool }));
+  const classGroups = initialClassGroups.map((group) => ({ ...group }));
   const events: LoggedEvent[] = [];
 
   return {
@@ -78,6 +98,7 @@ export function createFakeStore(
     rows: () => students.map((student) => ({ ...student })),
     row: (id) => students.find((student) => student.id === id),
     carpoolRows: () => carpools.map((carpool) => ({ ...carpool })),
+    classGroupRows: () => classGroups.map((group) => ({ ...group })),
 
     list(filter: RosterFilter): Promise<StudentRow[]> {
       return Promise.resolve(
@@ -142,6 +163,8 @@ export function createFakeStore(
         arrived_at: null,
         updated_at: "2026-09-02T12:00:00.000Z",
         carpool_id: input.carpool_id,
+        parent1_name: input.parent1_name,
+        parent2_name: input.parent2_name,
       };
       students.push(student);
       return Promise.resolve({ ...student });
@@ -160,25 +183,33 @@ export function createFakeStore(
       if (patch.class_group !== undefined)
         found.class_group = patch.class_group;
       if (patch.carpool_id !== undefined) found.carpool_id = patch.carpool_id;
+      if (patch.parent1_name !== undefined)
+        found.parent1_name = patch.parent1_name;
+      if (patch.parent2_name !== undefined)
+        found.parent2_name = patch.parent2_name;
       found.updated_at = "2026-09-02T14:30:00.000Z";
 
       return Promise.resolve({ ...found });
     },
 
-    removeStudent(id: string): Promise<boolean> {
-      const index = students.findIndex((student) => student.id === id);
-      if (index === -1) return Promise.resolve(false);
-      students.splice(index, 1);
+    removeStudents(ids: string[]): Promise<string[]> {
+      const removed: string[] = [];
+      for (const id of ids) {
+        const index = students.findIndex((student) => student.id === id);
+        if (index === -1) continue;
+        students.splice(index, 1);
+        removed.push(id);
 
-      // The FK really is `on delete set null` (schema.test.ts proves it by
-      // execution), so the audit row survives the student but stops naming
-      // them. The fake used to leave studentId intact, which is the more
-      // forgiving behaviour -- and a fake that is kinder than Postgres lets a
-      // handler test pass on something production would not do.
-      for (let i = 0; i < events.length; i++) {
-        if (events[i].studentId === id) events[i].studentId = null;
+        // The FK really is `on delete set null` (schema.test.ts proves it by
+        // execution), so the audit row survives the student but stops naming
+        // them. The fake used to leave studentId intact, which is the more
+        // forgiving behaviour -- and a fake that is kinder than Postgres lets
+        // a handler test pass on something production would not do.
+        for (let i = 0; i < events.length; i++) {
+          if (events[i].studentId === id) events[i].studentId = null;
+        }
       }
-      return Promise.resolve(true);
+      return Promise.resolve(removed);
     },
 
     bulkCreateStudents(inputs: StudentWriteInput[]): Promise<StudentRow[]> {
@@ -194,6 +225,8 @@ export function createFakeStore(
           arrived_at: null,
           updated_at: "2026-09-02T12:00:00.000Z",
           carpool_id: input.carpool_id,
+          parent1_name: input.parent1_name,
+          parent2_name: input.parent2_name,
         };
         students.push(student);
         return { ...student };
@@ -269,6 +302,46 @@ export function createFakeStore(
         updated.push({ ...found });
       }
       return Promise.resolve(updated);
+    },
+
+    listClassGroups(): Promise<ClassGroupRow[]> {
+      return Promise.resolve(
+        [...classGroups]
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((group) => ({ ...group })),
+      );
+    },
+
+    createClassGroup(input: ClassGroupWriteInput): Promise<ClassGroupRow> {
+      classGroupCounter++;
+      const nextOrder =
+        classGroups.reduce((max, g) => Math.max(max, g.sort_order), -1) + 1;
+      const group: ClassGroupRow = {
+        id: `class-${classGroupCounter}`,
+        name: input.name,
+        sort_order: nextOrder,
+      };
+      classGroups.push(group);
+      return Promise.resolve({ ...group });
+    },
+
+    removeClassGroup(id: string): Promise<boolean> {
+      const index = classGroups.findIndex((group) => group.id === id);
+      if (index === -1) return Promise.resolve(false);
+      classGroups.splice(index, 1);
+      return Promise.resolve(true);
+    },
+
+    reorderClassGroups(orderedIds: string[]): Promise<ClassGroupRow[]> {
+      orderedIds.forEach((id, index) => {
+        const found = classGroups.find((group) => group.id === id);
+        if (found) found.sort_order = index;
+      });
+      return Promise.resolve(
+        [...classGroups]
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((group) => ({ ...group })),
+      );
     },
   };
 }

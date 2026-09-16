@@ -4,10 +4,9 @@ import { type FormEvent, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import type { StudentFields } from "@/lib/admin-api";
-import { CLASS_GROUPS } from "@/lib/classes";
+import type { RosterStudent, StudentFields } from "@/lib/admin-api";
 import { cn } from "@/lib/cn";
-import type { Carpool, Student } from "@/types/db";
+import type { Carpool } from "@/types/db";
 
 const INPUT_CLASS =
   "focus-ring min-h-tap w-full rounded-xl border border-curb-300 bg-curb-50 px-3.5 text-curb-900 transition-colors duration-150 placeholder:text-curb-400 hover:border-curb-400";
@@ -24,9 +23,11 @@ function parseAliasesInput(value: string): string[] {
 
 export interface StudentFormProps {
   /** Omitted for "add a student"; a row for "edit this one". */
-  student?: Student;
+  student?: RosterStudent;
   /** For the carpool picker. Empty is fine -- the field just has one option, "None". */
   carpools: Carpool[];
+  /** The admin-editable class list, in display order. */
+  classGroups: string[];
   onCancel: () => void;
   onSubmit: (fields: StudentFields) => Promise<void>;
   submitting: boolean;
@@ -43,6 +44,7 @@ const NO_CARPOOL = "";
 export function StudentForm({
   student,
   carpools,
+  classGroups,
   onCancel,
   onSubmit,
   submitting,
@@ -55,6 +57,8 @@ export function StudentForm({
   );
   const [classGroup, setClassGroup] = useState(student?.class_group ?? "");
   const [carpoolId, setCarpoolId] = useState(student?.carpool_id ?? NO_CARPOOL);
+  const [parent1Name, setParent1Name] = useState(student?.parent1_name ?? "");
+  const [parent2Name, setParent2Name] = useState(student?.parent2_name ?? "");
   const formId = useId();
 
   async function submit(event: FormEvent) {
@@ -65,6 +69,8 @@ export function StudentForm({
       aliases: parseAliasesInput(aliasesText),
       class_group: classGroup.trim() === "" ? null : classGroup.trim(),
       carpool_id: carpoolId === NO_CARPOOL ? null : carpoolId,
+      parent1_name: parent1Name.trim() === "" ? null : parent1Name.trim(),
+      parent2_name: parent2Name.trim() === "" ? null : parent2Name.trim(),
     });
   }
 
@@ -132,12 +138,42 @@ export function StudentForm({
             onChange={(event) => setClassGroup(event.target.value)}
           >
             <option value="">No class</option>
-            {CLASS_GROUPS.map((option) => (
+            {classGroups.map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className={LABEL_CLASS} htmlFor={`${formId}-parent1`}>
+            Parent 1 name
+          </label>
+          <input
+            id={`${formId}-parent1`}
+            className={INPUT_CLASS}
+            value={parent1Name}
+            onChange={(event) => setParent1Name(event.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className={LABEL_CLASS} htmlFor={`${formId}-parent2`}>
+            Parent 2 name
+          </label>
+          <input
+            id={`${formId}-parent2`}
+            className={INPUT_CLASS}
+            value={parent2Name}
+            onChange={(event) => setParent2Name(event.target.value)}
+            placeholder="Optional"
+          />
+          <p className="text-xs text-curb-500">
+            For your own reference, and so saying a parent&apos;s name at
+            pickup announces this child too.
+          </p>
         </div>
 
         <div className="flex flex-col gap-1.5 sm:col-span-2">

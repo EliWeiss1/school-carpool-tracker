@@ -4,11 +4,18 @@ import { KEYTERM_LIMIT, buildKeyterms } from "./keyterms.ts";
 
 const student = (
   last_name: string,
-  overrides: Partial<{ aliases: string[]; status: "waiting" | "arrived" }> = {},
+  overrides: Partial<{
+    aliases: string[];
+    status: "waiting" | "arrived";
+    parent1_name: string | null;
+    parent2_name: string | null;
+  }> = {},
 ) => ({
   last_name,
   aliases: overrides.aliases ?? [],
   status: overrides.status ?? "waiting",
+  parent1_name: overrides.parent1_name ?? null,
+  parent2_name: overrides.parent2_name ?? null,
 });
 
 describe("buildKeyterms", () => {
@@ -93,6 +100,50 @@ describe("buildKeyterms", () => {
     );
 
     expect(terms).toEqual(["Nguyen", "Weiss Carpool", "Win", "The Van"]);
+  });
+
+  it("puts parent names after carpools but before arrived surnames", () => {
+    const terms = buildKeyterms([
+      student("Weiss", { parent1_name: "Eli Weiss", parent2_name: "Dana Weiss" }),
+      student("Marsh", { status: "arrived" }),
+    ]);
+
+    expect(terms).toEqual(["Weiss", "Eli Weiss", "Dana Weiss", "Marsh"]);
+  });
+
+  it("keeps a student's own parent name paired with their own surname under truncation", () => {
+    // The bug this replaces: parent names used to sit in one trailing tier
+    // behind every surname, so on a large roster only whichever names came
+    // alphabetically first survived the limit -- unrelated to which
+    // students actually had a parent name on file. Interleaving means a
+    // truncated roster still pairs each surviving student with their own
+    // parent name, not someone else's or nobody's.
+    const roster = Array.from({ length: 60 }, (_, i) =>
+      student(`Name${i}`, { parent1_name: `Parent${i}` }),
+    );
+
+    const terms = buildKeyterms(roster, [], { limit: 10 });
+
+    expect(terms).toEqual([
+      "Name0",
+      "Parent0",
+      "Name1",
+      "Parent1",
+      "Name2",
+      "Parent2",
+      "Name3",
+      "Parent3",
+      "Name4",
+      "Parent4",
+    ]);
+  });
+
+  it("skips a null or blank parent name", () => {
+    const terms = buildKeyterms([
+      student("Cohen", { parent1_name: "  ", parent2_name: null }),
+    ]);
+
+    expect(terms).toEqual(["Cohen"]);
   });
 
   it("offers every carpool regardless of the roster passed in", () => {

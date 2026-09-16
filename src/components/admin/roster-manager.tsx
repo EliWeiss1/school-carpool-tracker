@@ -7,9 +7,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ApiError } from "@/lib/api";
-import { adminApi, type StudentFields } from "@/lib/admin-api";
+import { adminApi, type RosterStudent, type StudentFields } from "@/lib/admin-api";
 import type { UsePinSession } from "@/lib/use-pin-session";
-import type { Carpool, Student } from "@/types/db";
+import type { Carpool } from "@/types/db";
 
 import { RosterTable } from "./roster-table";
 import { StudentForm } from "./student-form";
@@ -27,14 +27,19 @@ function requireCredentials(session: UsePinSession) {
 }
 
 /** What editor is open, if any: a fresh form, or an edit of one row. */
-type Editor = { mode: "add" } | { mode: "edit"; student: Student } | null;
+type Editor =
+  | { mode: "add" }
+  | { mode: "edit"; student: RosterStudent }
+  | null;
 
 export interface RosterManagerProps {
   session: UsePinSession;
   /** null while the first load is in flight. */
-  students: Student[] | null;
+  students: RosterStudent[] | null;
   /** For the carpool column and the student form's carpool picker. */
   carpools: Carpool[];
+  /** The admin-editable class list, in display order. */
+  classGroups: string[];
   listError: string | null;
   /** Re-fetches the roster. Shared with the import and reset panels so all
    *  three sections of /admin always agree on the current state. */
@@ -51,6 +56,7 @@ export function RosterManager({
   session,
   students,
   carpools,
+  classGroups,
   listError,
   refresh,
 }: RosterManagerProps) {
@@ -59,6 +65,10 @@ export function RosterManager({
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkConfirming, setBulkConfirming] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkInfo, setBulkInfo] = useState<string | null>(null);
 
   async function handleSubmit(fields: StudentFields) {
     setSubmitting(true);
@@ -89,13 +99,19 @@ export function RosterManager({
     }
   }
 
-  async function handleDelete(student: Student) {
+  async function handleDelete(student: RosterStudent) {
     setDeletingId(student.id);
     setDeleteError(null);
     try {
       await adminApi.deleteStudent({
         ...requireCredentials(session),
         studentId: student.id,
+      });
+      setSelectedIds((prev) => {
+        if (!prev.has(student.id)) return prev;
+        const next = new Set(prev);
+        next.delete(student.id);
+        return next;
       });
       await refresh();
     } catch (error: unknown) {
@@ -106,6 +122,33 @@ export function RosterManager({
       );
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function handleBulkDelete() {
+    setBulkDeleting(true);
+    setDeleteError(null);
+    try {
+      const result = await adminApi.deleteStudents({
+        ...requireCredentials(session),
+        studentIds: [...selectedIds],
+      });
+      setBulkInfo(
+        result.missingIds.length > 0
+          ? `Removed ${result.deletedIds.length} student${result.deletedIds.length === 1 ? "" : "s"} (${result.missingIds.length} were already gone).`
+          : `Removed ${result.deletedIds.length} student${result.deletedIds.length === 1 ? "" : "s"}.`,
+      );
+      setSelectedIds(new Set());
+      setBulkConfirming(false);
+      await refresh();
+    } catch (error: unknown) {
+      setDeleteError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not remove those students. Try again.",
+      );
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -142,6 +185,7 @@ export function RosterManager({
         <StudentForm
           student={editor.mode === "edit" ? editor.student : undefined}
           carpools={carpools}
+          classGroups={classGroups}
           onCancel={() => setEditor(null)}
           onSubmit={handleSubmit}
           submitting={submitting}
@@ -157,6 +201,7 @@ export function RosterManager({
       )}
 
       {deleteError && <ErrorBanner message={deleteError} />}
+      {bulkInfo && <ErrorBanner tone="warning" message={bulkInfo} />}
 
       {students === null && listError === null && (
         <LoadingState label="Loading the roster" rows={5} />
@@ -170,16 +215,76 @@ export function RosterManager({
       )}
 
       {students !== null && students.length > 0 && (
-        <RosterTable
-          students={students}
-          carpools={carpools}
-          onEdit={(student) => {
-            setFormError(null);
-            setEditor({ mode: "edit", student });
-          }}
-          onDelete={handleDelete}
-          deletingId={deletingId}
-        />
+        <>
+          {selectedIds.size > 0 &&
+            (bulkConfirming ? (
+              <div className="flex flex-col gap-3 rounded-xl border border-waiting bg-white p-4">
+                <p className="font-medium text-curb-900">
+                  Remove {selectedIds.size} student
+                  {selectedIds.size === 1 ? "" : "s"} from the roster? This
+                  can&apos;t be undone.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="quiet"
+                    size="md"
+                    onClick={() => setBulkConfirming(false)}
+                    disabled={bulkDeleting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="md"
+                    onClick={() => void handleBulkDelete()}
+                    disabled={bulkDeleting}
+                  >
+                    {bulkDeleting
+                      ? "Removing…"
+                      : `Yes, remove ${selectedIds.size}`}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between rounded-xl border border-curb-200 bg-curb-50 px-4 py-3">
+                <span className="text-sm text-curb-700">
+                  {selectedIds.size} selected
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    onClick={() => setSelectedIds(new Set())}
+                  >
+                    Clear
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => {
+                      setBulkInfo(null);
+                      setBulkConfirming(true);
+                    }}
+                  >
+                    Delete {selectedIds.size} selected
+                  </Button>
+                </div>
+              </div>
+            ))}
+
+          <RosterTable
+            students={students}
+            carpools={carpools}
+            onEdit={(student) => {
+              setFormError(null);
+              setEditor({ mode: "edit", student });
+            }}
+            onDelete={handleDelete}
+            deletingId={deletingId}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+          />
+        </>
       )}
     </section>
   );

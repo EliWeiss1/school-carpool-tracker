@@ -16,6 +16,7 @@ import {
   errorResponse,
   jsonResponse,
   preflight,
+  readIdOrIds,
   readString,
   withStoreErrors,
 } from "../http.ts";
@@ -64,20 +65,23 @@ function readConfidence(value: unknown): number | null {
     : null;
 }
 
-/** Accepts either a single `studentId` or a `studentIds` array; never both mixed. */
-function readStudentIds(body: Record<string, unknown>): string[] | null {
-  if (Array.isArray(body.studentIds)) {
-    const ids = body.studentIds.filter(
-      (id): id is string => typeof id === "string" && id.trim() !== "",
-    );
-    return ids.length === 0 ? null : ids.slice(0, MAX_STUDENT_IDS);
-  }
-  const single = readString(body, "studentId");
-  return single === null ? null : [single];
-}
-
 function readCarpoolId(body: Record<string, unknown>): string | null {
   return readString(body, "carpoolId");
+}
+
+/**
+ * Strips parent names before a student reaches the browser. Mirrors
+ * resolve.ts's `candidateStudent()` -- this response is what /announce
+ * displays after a confirm, not an admin surface, so it gets the same
+ * public-facing shape rather than the admin-only StudentRow.
+ */
+function publicStudent(student: StudentRow): Omit<
+  StudentRow,
+  "parent1_name" | "parent2_name"
+> {
+  const { parent1_name: _parent1Name, parent2_name: _parent2Name, ...rest } =
+    student;
+  return rest;
 }
 
 export function createStatusHandler(deps: StatusHandlerDeps) {
@@ -88,7 +92,12 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
     const guard = await guardRequest(request, deps);
     if (!guard.ok) return guard.response;
 
-    const studentIds = readStudentIds(guard.body);
+    const studentIds = readIdOrIds(
+      guard.body,
+      "studentId",
+      "studentIds",
+      MAX_STUDENT_IDS,
+    );
     if (studentIds === null) {
       return errorResponse(400, "No student was chosen.");
     }
@@ -160,7 +169,7 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
       }
 
       return jsonResponse({
-        students: settled,
+        students: settled.map(publicStudent),
         changed: changedRows.map((row) => row.id),
         logged,
         missing,

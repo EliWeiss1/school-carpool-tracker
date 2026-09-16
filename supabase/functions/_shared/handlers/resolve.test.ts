@@ -293,4 +293,80 @@ describe("createResolveHandler — carpools", () => {
     const carpoolIds = body.candidates.map((c) => c.carpool?.id).filter(Boolean);
     expect(new Set(carpoolIds).size).toBe(carpoolIds.length);
   });
+
+  it("a parent's name for a carpool member still surfaces the whole carpool", async () => {
+    // Proves WS1's "no new collapse dimension": a parent name is just one
+    // more way to match the student, and the EXISTING carpool_id collapse
+    // (not a new one keyed on the parent) is what pulls in the sibling.
+    const store = createFakeStore(
+      [
+        makeStudent({
+          id: "cohen",
+          first_name: "Maya",
+          last_name: "Cohen",
+          carpool_id: "weiss",
+          parent1_name: "Dana Weiss",
+        }),
+        makeStudent({
+          id: "weiss-jr",
+          first_name: "Sara",
+          last_name: "Weiss",
+          carpool_id: "weiss",
+        }),
+        makeStudent({ id: "marsh", first_name: "Ava", last_name: "Marsh" }),
+      ],
+      [makeCarpool({ id: "weiss", name: "Weiss Carpool" })],
+    );
+    const handle = createResolveHandler({
+      staffPin: STAFF_PIN,
+      rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
+      pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
+      store,
+    });
+
+    const body = (await (
+      await handle(
+        post({ pin: STAFF_PIN, deviceId: "phone-1", transcript: "Dana Weiss" }),
+      )
+    ).json()) as ResolveBody;
+
+    expect(body.tier).toBe("clear");
+    expect(body.candidates[0].carpool).toEqual({
+      id: "weiss",
+      name: "Weiss Carpool",
+    });
+    expect(body.candidates[0].students.map((s) => s.id).sort()).toEqual([
+      "cohen",
+      "weiss-jr",
+    ]);
+  });
+});
+
+describe("createResolveHandler — parent names never reach the browser", () => {
+  it("does not include parent1_name/parent2_name on a candidate's student", async () => {
+    const store = createFakeStore([
+      makeStudent({
+        id: "weiss",
+        first_name: "Eli",
+        last_name: "Weiss",
+        parent1_name: "Dana Weiss",
+      }),
+    ]);
+    const handle = createResolveHandler({
+      staffPin: STAFF_PIN,
+      rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
+      pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
+      store,
+    });
+
+    const response = await handle(
+      post({ pin: STAFF_PIN, deviceId: "phone-1", transcript: "Weiss" }),
+    );
+    const body = (await response.json()) as {
+      candidates: Array<{ students: Array<Record<string, unknown>> }>;
+    };
+
+    expect(body.candidates[0].students[0]).not.toHaveProperty("parent1_name");
+    expect(body.candidates[0].students[0]).not.toHaveProperty("parent2_name");
+  });
 });

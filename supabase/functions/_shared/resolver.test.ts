@@ -301,3 +301,95 @@ describe("resolveName — a first name that does not belong to the surname", () 
     expect(ids(resolveName("Ari Cohen", ROSTER))[0]).toBe("Maya-Cohen");
   });
 });
+
+describe("resolveName — parent names", () => {
+  // A small, isolated roster rather than SAMPLE_ROSTER: parent names are a
+  // new field the seed roster doesn't carry, and mixing it with the real
+  // roster's confusable-surname clusters would make these cases harder to
+  // read for no benefit.
+  const family: ResolverStudent[] = [
+    {
+      id: "weiss-1",
+      first_name: "Eli",
+      last_name: "Weiss",
+      aliases: [],
+      parentNames: ["Dana Weiss"],
+    },
+    {
+      id: "cohen-1",
+      first_name: "Maya",
+      last_name: "Cohen",
+      aliases: [],
+      parentNames: [],
+    },
+  ];
+
+  it("resolves a parent's name to their child at the clear tier", () => {
+    const result = resolveName("Dana Weiss", family);
+
+    expect(result.tier).toBe("clear");
+    expect(ids(result)).toEqual(["weiss-1"]);
+  });
+
+  it("records that the match came from a parent name, not the child's own", () => {
+    const result = resolveName("Dana Weiss", family);
+    expect(result.candidates[0].matchedVia).toBe("parent_name");
+  });
+
+  it("does not affect a student with no parent names on file", () => {
+    // Regression guard: adding parentNames must not change how every
+    // existing student (parentNames undefined or []) resolves.
+    expect(resolveName("Cohen", family).tier).toBe("clear");
+    expect(ids(resolveName("Cohen", family))).toEqual(["cohen-1"]);
+  });
+
+  it("still resolves the child by their own surname once a parent name exists", () => {
+    expect(ids(resolveName("Weiss", family))).toEqual(["weiss-1"]);
+  });
+
+  it("disambiguates two same-surname children by their parent's name", () => {
+    // The motivating case: two unrelated (or sibling) Weiss children score
+    // identically on the bare surname, but only one has "Dana Weiss" as a
+    // parent -- saying the parent's full name should single that one out,
+    // the same way saying a child's own first-plus-last already does.
+    const twoWeiss: ResolverStudent[] = [
+      {
+        id: "weiss-a",
+        first_name: "Eli",
+        last_name: "Weiss",
+        aliases: [],
+        parentNames: ["Dana Weiss"],
+      },
+      {
+        id: "weiss-b",
+        first_name: "Noa",
+        last_name: "Weiss",
+        aliases: [],
+        parentNames: [],
+      },
+    ];
+
+    const result = resolveName("Dana Weiss", twoWeiss);
+
+    expect(result.tier).toBe("clear");
+    expect(ids(result)[0]).toBe("weiss-a");
+  });
+
+  it("two unrelated families sharing a parent name are offered, not pre-highlighted", () => {
+    const twoFamilies: ResolverStudent[] = [
+      { ...family[0], parentNames: ["Sam Levy"] },
+      {
+        id: "brown-1",
+        first_name: "Noa",
+        last_name: "Brown",
+        aliases: [],
+        parentNames: ["Sam Levy"],
+      },
+    ];
+
+    const result = resolveName("Sam Levy", twoFamilies);
+
+    expect(result.tier).not.toBe("clear");
+    expect(ids(result).sort()).toEqual(["brown-1", "weiss-1"]);
+  });
+});

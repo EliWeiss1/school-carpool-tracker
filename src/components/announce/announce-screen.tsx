@@ -20,12 +20,14 @@ import {
   announceReducer,
   candidateKey,
   candidateLabel,
+  effectiveMemberIds,
   initialAnnounceState,
 } from "@/lib/announce-reducer";
 import { expiresAt, isFresh } from "@/lib/announce-token";
 import { formatRemaining, remainingMs } from "@/lib/announce-undo";
 import { ApiError, api } from "@/lib/api";
 import { publicEnv } from "@/lib/env";
+import { useClassGroups } from "@/lib/use-class-groups";
 import {
   SpeechError,
   createDeepgramSpeechSource,
@@ -56,6 +58,7 @@ interface MicSession {
 
 export function AnnounceScreen() {
   const session = usePinSession();
+  const { names: classGroups } = useClassGroups();
   const [state, dispatch] = useReducer(
     announceReducer,
     undefined,
@@ -337,7 +340,7 @@ export function AnnounceScreen() {
   function handleConfirm(candidate: ResolveCandidateLike) {
     void confirmCandidates(
       candidateKey(candidate),
-      candidate.students.map((student) => student.id),
+      effectiveMemberIds(candidate, state.excludedMemberIds),
       candidateLabel(candidate),
       candidate.carpool?.id ?? null,
       candidate.score,
@@ -350,8 +353,11 @@ export function AnnounceScreen() {
     const selected = state.results.candidates.filter((candidate) =>
       state.selectedKeys.includes(candidateKey(candidate)),
     );
+    // A carpool exclusion only ever removes ids from ITS candidate's own
+    // contribution here -- it never changes which candidates are selected,
+    // so this is a straightforward per-candidate substitution.
     const studentIds = selected.flatMap((candidate) =>
-      candidate.students.map((student) => student.id),
+      effectiveMemberIds(candidate, state.excludedMemberIds),
     );
     const displayName = selected.map(candidateLabel).join(", ");
     // Only meaningful to attribute this confirm to a single carpool when
@@ -454,6 +460,7 @@ export function AnnounceScreen() {
             onChange={(field, value) =>
               dispatch({ type: "filter/change", field, value })
             }
+            classGroups={classGroups}
           />
 
           {state.resolving && (
@@ -468,6 +475,7 @@ export function AnnounceScreen() {
                 confirmingKey={state.confirmingKey}
                 multiSelect={state.multiSelect}
                 selectedKeys={state.selectedKeys}
+                excludedMemberIds={state.excludedMemberIds}
                 onConfirm={handleConfirm}
                 onToggleSelect={(key) =>
                   dispatch({ type: "candidate/toggleSelect", key })
@@ -475,6 +483,9 @@ export function AnnounceScreen() {
                 onConfirmSelected={handleConfirmSelected}
                 onToggleMultiSelect={() =>
                   dispatch({ type: "multiSelect/toggle" })
+                }
+                onToggleMember={(candidateKey, studentId) =>
+                  dispatch({ type: "candidate/toggleMember", candidateKey, studentId })
                 }
               />
             )}

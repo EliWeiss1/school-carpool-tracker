@@ -54,6 +54,41 @@ describe("groupIntoSections", () => {
     ]);
   });
 
+  it("orders sections by a custom class order when one is passed in", () => {
+    // The class list is admin-editable data now (see use-class-groups.ts),
+    // not a hardcoded constant -- this proves the live order actually
+    // controls section order, e.g. an EC class placed before K1.
+    const students = [
+      student({ id: "sK1", class_group: "K1" }),
+      student({ id: "sEC", class_group: "EC Hummingbirds" }),
+    ];
+
+    const result = groupIntoSections(
+      students,
+      { sectionKey: "" },
+      ["EC Hummingbirds", "K1"],
+    );
+
+    expect(result.allSections.map((s) => s.classGroup)).toEqual([
+      "EC Hummingbirds",
+      "K1",
+    ]);
+  });
+
+  it("falls back to the default order when none is passed", () => {
+    const students = [
+      student({ id: "s5", class_group: "5th" }),
+      student({ id: "sK1", class_group: "K1" }),
+    ];
+
+    const result = groupIntoSections(students, { sectionKey: "" });
+
+    expect(result.allSections.map((s) => s.classGroup)).toEqual([
+      "K1",
+      "5th",
+    ]);
+  });
+
   it("puts students with no class into a trailing 'Ungrouped' section", () => {
     const students = [
       student({ id: "s1", class_group: "K1" }),

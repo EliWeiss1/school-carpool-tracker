@@ -66,6 +66,12 @@ function targetsFor(students: StudentRow[], carpools: CarpoolRow[]): Target[] {
     first_name: student.first_name,
     last_name: student.last_name,
     aliases: student.aliases,
+    // A parent name resolves to this ONE student, never a new group of its
+    // own -- if the student is in a carpool, the existing carpool_id-based
+    // collapse below still applies, exactly as it would for a surname match.
+    parentNames: [student.parent1_name, student.parent2_name].filter(
+      (name): name is string => name !== null && name !== "",
+    ),
     kind: "student",
     studentRow: student,
   }));

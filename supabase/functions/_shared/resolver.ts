@@ -26,7 +26,7 @@ import { jaroWinkler } from "./similarity.ts";
 export type MatchTier = "clear" | "ambiguous" | "none";
 
 /** Which of a student's names the transcript actually looked like. */
-export type MatchedVia = "surname" | "alias" | "full_name";
+export type MatchedVia = "surname" | "alias" | "full_name" | "parent_name";
 
 /** The roster fields the resolver needs. Callers may pass richer rows. */
 export interface ResolverStudent {
@@ -34,6 +34,15 @@ export interface ResolverStudent {
   first_name: string;
   last_name: string;
   aliases: string[];
+  /**
+   * A parent's name is one more thing that resolves to THIS student -- not a
+   * new grouping dimension. If the student happens to be in a carpool, the
+   * existing carpool_id-based collapse in resolve.ts applies exactly as it
+   * would for a surname match; a parent name introduces no collapse logic
+   * of its own. Optional and defaulting to empty so every existing caller
+   * and fixture stays valid unchanged.
+   */
+  parentNames?: string[];
 }
 
 /** One Deepgram hypothesis, with its own 0-1 estimate of itself. */
@@ -110,6 +119,22 @@ export const MATCH_POLICY = Object.freeze({
    * spelling is stronger, so an exact surname hit outranks an exact alias hit.
    */
   aliasWeight: 0.98,
+  /**
+   * A parent's name is modeled like `full_name` (weight 1), not like an
+   * alias (weight < 1): an alias is a known alternate spelling of the
+   * child's OWN name, where the canonical spelling should still win a tie,
+   * but a parent's name is independent identifying information the same way
+   * first-plus-last is. This matters concretely: two same-surname children
+   * are told apart today by the coverage/tiebreak mechanism preferring the
+   * longer, more specific "First Last" phrase over a bare surname match
+   * (see the "Layla Nguyen" case) -- that mechanism only fires on a
+   * near-tie. Weighting parent names below 1 let a plain one-word surname
+   * match (score 1.0 at weight 1) always beat even an exact two-word parent
+   * name match before the tiebreak ever got a chance to prefer the more
+   * specific phrase, which defeated the parent-name feature for exactly the
+   * two-Weiss-children case it exists to help with.
+   */
+  parentNameWeight: 1,
   /** Sharing a phonetic code lifts a score to at least this before distance. */
   phoneticFloor: 0.8,
   /**
@@ -176,6 +201,14 @@ function rosterKeys(student: ResolverStudent): RosterKey[] {
       label: alias,
       via: "alias" as const,
       weight: MATCH_POLICY.aliasWeight,
+    })),
+    // A parent name is spoken as a whole name ("Eli Weiss"), the same way
+    // full_name is folded above -- not as a surname standing alone.
+    ...(student.parentNames ?? []).map((parentName) => ({
+      key: compareKey(parentName),
+      label: parentName,
+      via: "parent_name" as const,
+      weight: MATCH_POLICY.parentNameWeight,
     })),
   ];
 

@@ -89,6 +89,17 @@ export interface AnnounceState {
   multiSelect: boolean;
   /** Candidate keys currently checked, only meaningful while multiSelect is on. */
   selectedKeys: string[];
+  /**
+   * Carpool members toggled OFF for this confirm only -- keyed by
+   * `candidateKey(candidate)`, values are student ids from that carpool.
+   * Absent key (or an empty array) means "everyone in", the same
+   * always-announce-everyone behaviour as before this existed. This is a
+   * different concern from `multiSelect`/`selectedKeys`: that toggle picks
+   * WHICH candidates get confirmed, this one excludes a member from WITHIN
+   * one carpool candidate's own confirm -- e.g. a sibling who isn't riding
+   * today.
+   */
+  excludedMemberIds: Record<string, string[]>;
   /** The candidate key (or "multi") currently mid-flight through `set-status`, if any. */
   confirmingKey: string | null;
   banner: AnnounceBanner | null;
@@ -106,11 +117,28 @@ export function initialAnnounceState(): AnnounceState {
     results: null,
     multiSelect: false,
     selectedKeys: [],
+    excludedMemberIds: {},
     confirmingKey: null,
     banner: null,
     info: null,
     undo: null,
   };
+}
+
+/**
+ * The member ids a confirm of this candidate should actually send --
+ * `candidate.students` filtered against any exclusion the announcer made for
+ * this specific carpool. A candidate never touched here returns everyone,
+ * exactly as before this feature existed.
+ */
+export function effectiveMemberIds(
+  candidate: ResolveCandidateLike,
+  excludedMemberIds: Record<string, string[]>,
+): string[] {
+  const excluded = new Set(excludedMemberIds[candidateKey(candidate)] ?? []);
+  return candidate.students
+    .map((student) => student.id)
+    .filter((id) => !excluded.has(id));
 }
 
 export type AnnounceAction =
@@ -129,6 +157,7 @@ export type AnnounceAction =
   | { type: "resolve/error"; banner: AnnounceBanner }
   | { type: "multiSelect/toggle" }
   | { type: "candidate/toggleSelect"; key: string }
+  | { type: "candidate/toggleMember"; candidateKey: string; studentId: string }
   | { type: "confirm/start"; key: string }
   | {
       type: "confirm/settled";
@@ -164,6 +193,7 @@ export function announceReducer(
         // filter, so a result matched against the old scope is stale.
         results: null,
         selectedKeys: [],
+        excludedMemberIds: {},
       };
 
     case "search/change":
@@ -178,6 +208,7 @@ export function announceReducer(
         micStatus: "idle",
         results: null,
         selectedKeys: [],
+        excludedMemberIds: {},
         info: "Didn't catch that. Try again, or type the name below.",
       };
 
@@ -194,6 +225,7 @@ export function announceReducer(
         ...state,
         resolving: false,
         selectedKeys: [],
+        excludedMemberIds: {},
         results: {
           origin: action.origin,
           tier: action.tier,
@@ -208,6 +240,7 @@ export function announceReducer(
         resolving: false,
         results: null,
         selectedKeys: [],
+        excludedMemberIds: {},
         banner: action.banner,
       };
 
@@ -224,6 +257,22 @@ export function announceReducer(
       };
     }
 
+    case "candidate/toggleMember": {
+      const current = state.excludedMemberIds[action.candidateKey] ?? [];
+      const isExcluded = current.includes(action.studentId);
+      const next = isExcluded
+        ? current.filter((id) => id !== action.studentId)
+        : [...current, action.studentId];
+
+      return {
+        ...state,
+        excludedMemberIds: {
+          ...state.excludedMemberIds,
+          [action.candidateKey]: next,
+        },
+      };
+    }
+
     case "confirm/start":
       return { ...state, confirmingKey: action.key, banner: null };
 
@@ -233,6 +282,7 @@ export function announceReducer(
         confirmingKey: null,
         results: null,
         selectedKeys: [],
+        excludedMemberIds: {},
       };
 
       const total = action.studentIds.length;

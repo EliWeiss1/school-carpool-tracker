@@ -4,6 +4,7 @@ import {
   announceReducer,
   candidateKey,
   candidateLabel,
+  effectiveMemberIds,
   initialAnnounceState,
   type ResolveCandidateLike,
 } from "./announce-reducer";
@@ -241,6 +242,98 @@ describe("multi-select", () => {
     });
 
     expect(state.selectedKeys).toEqual([]);
+  });
+});
+
+describe("carpool member exclusion", () => {
+  it("effectiveMemberIds returns everyone for a candidate never touched", () => {
+    const c = carpoolCandidate("weiss", "Weiss Carpool", ["s1", "s2"]);
+    expect(effectiveMemberIds(c, {})).toEqual(["s1", "s2"]);
+  });
+
+  it("candidate/toggleMember excludes a member from that candidate's confirm", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, {
+      type: "candidate/toggleMember",
+      candidateKey: "carpool:weiss",
+      studentId: "s2",
+    });
+
+    const c = carpoolCandidate("weiss", "Weiss Carpool", ["s1", "s2"]);
+    expect(effectiveMemberIds(c, state.excludedMemberIds)).toEqual(["s1"]);
+  });
+
+  it("toggling the same member twice re-includes them", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, {
+      type: "candidate/toggleMember",
+      candidateKey: "carpool:weiss",
+      studentId: "s2",
+    });
+    state = announceReducer(state, {
+      type: "candidate/toggleMember",
+      candidateKey: "carpool:weiss",
+      studentId: "s2",
+    });
+
+    const c = carpoolCandidate("weiss", "Weiss Carpool", ["s1", "s2"]);
+    expect(effectiveMemberIds(c, state.excludedMemberIds)).toEqual([
+      "s1",
+      "s2",
+    ]);
+  });
+
+  it("only excludes from the candidate it was toggled on, not other carpools", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, {
+      type: "candidate/toggleMember",
+      candidateKey: "carpool:weiss",
+      studentId: "s2",
+    });
+
+    const other = carpoolCandidate("other", "Other Carpool", ["s2", "s3"]);
+    expect(effectiveMemberIds(other, state.excludedMemberIds)).toEqual([
+      "s2",
+      "s3",
+    ]);
+  });
+
+  it("a new resolve result clears any prior exclusion", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, {
+      type: "candidate/toggleMember",
+      candidateKey: "carpool:weiss",
+      studentId: "s2",
+    });
+    state = announceReducer(state, {
+      type: "resolve/success",
+      origin: "voice",
+      tier: "clear",
+      transcript: "Weiss Carpool",
+      candidates: [carpoolCandidate("weiss", "Weiss Carpool", ["s1", "s2"])],
+    });
+
+    expect(state.excludedMemberIds).toEqual({});
+  });
+
+  it("a settled confirm clears the exclusion, so it never leaks into the next resolve", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, {
+      type: "candidate/toggleMember",
+      candidateKey: "carpool:weiss",
+      studentId: "s2",
+    });
+    state = announceReducer(state, {
+      type: "confirm/settled",
+      studentIds: ["s1"],
+      changedIds: ["s1"],
+      displayName: "Weiss Carpool",
+      carpoolId: "weiss",
+      logged: 1,
+      confirmedAt: 0,
+    });
+
+    expect(state.excludedMemberIds).toEqual({});
   });
 });
 

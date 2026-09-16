@@ -16,6 +16,8 @@ describe("parseRosterCsv — header handling", () => {
         aliases: [],
         class_group: "K1",
         carpool: null,
+        parent1_name: null,
+        parent2_name: null,
       },
     ]);
   });
@@ -32,6 +34,8 @@ describe("parseRosterCsv — header handling", () => {
       aliases: ["Eng", "Ang"],
       class_group: "K1",
       carpool: null,
+      parent1_name: null,
+      parent2_name: null,
     });
   });
 
@@ -42,6 +46,49 @@ describe("parseRosterCsv — header handling", () => {
 
     expect(report.toImport[0].carpool).toBe("Weiss Carpool");
     expect(report.toImport[1].carpool).toBeNull();
+  });
+
+  it("reads a 'Grade' column into class_group, the real EC roster export's header", () => {
+    // The bug this literally reproduces: a school's real EC export used
+    // "Grade" as the header for a column of class names (e.g. "EC
+    // Hummingbirds"), which this app didn't recognize at all -- the class
+    // data vanished with no error anywhere.
+    const report = parseRosterCsv(
+      "First Name,Last Name,Grade\nAsher,Brazg,EC Hummingbirds\n",
+    );
+
+    expect(report.headerErrors).toEqual([]);
+    expect(report.toImport[0].class_group).toBe("EC Hummingbirds");
+    expect(report.unrecognizedHeaders).toEqual([]);
+  });
+
+  it("reads Parent 1/Parent 2 columns into parent1_name/parent2_name", () => {
+    const report = parseRosterCsv(
+      "First Name,Last Name,Parent 1,Parent 2\nEli,Weiss,Dana Weiss,Mark Weiss\n",
+    );
+
+    expect(report.toImport[0].parent1_name).toBe("Dana Weiss");
+    expect(report.toImport[0].parent2_name).toBe("Mark Weiss");
+  });
+
+  it("surfaces a header it doesn't recognize instead of silently ignoring it", () => {
+    // This is the fix for the whole bug class, not just today's "Grade"
+    // case: a future renamed column now surfaces here instead of vanishing.
+    const report = parseRosterCsv(
+      "First Name,Last Name,Grade Level\nMaya,Cohen,K1\n",
+    );
+
+    expect(report.headerErrors).toEqual([]);
+    expect(report.unrecognizedHeaders).toEqual(["Grade Level"]);
+    expect(report.toImport[0].class_group).toBeNull();
+  });
+
+  it("reports no unrecognized headers when every column is understood", () => {
+    const report = parseRosterCsv(
+      "first_name,last_name,class_group,carpool\nMaya,Cohen,K1,\n",
+    );
+
+    expect(report.unrecognizedHeaders).toEqual([]);
   });
 
   it("reports missing required columns and imports nothing", () => {

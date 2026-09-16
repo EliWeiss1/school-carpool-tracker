@@ -28,6 +28,16 @@ export type Carpool = {
   updated_at: string;
 };
 
+/** A class students can be assigned to. Publicly readable, like students --
+ *  see the class_groups migration. class_group on Student itself stays free
+ *  text; this is only the admin-editable list of suggestions. */
+export type ClassGroup = {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+};
+
 export type StatusEvent = {
   id: string;
   /** Nulled rather than deleted when a student leaves the roster. */
@@ -46,6 +56,9 @@ export type StudentInsert = Pick<Student, "first_name" | "last_name"> &
 
 export type CarpoolInsert = Pick<Carpool, "name"> &
   Partial<Omit<Carpool, "name">>;
+
+export type ClassGroupInsert = Pick<ClassGroup, "name" | "sort_order"> &
+  Partial<Omit<ClassGroup, "name" | "sort_order">>;
 
 export type StatusEventInsert = Pick<StatusEvent, "changed_to" | "source"> &
   Partial<Omit<StatusEvent, "changed_to" | "source">>;
@@ -69,6 +82,12 @@ export type Database = {
         Row: Carpool;
         Insert: CarpoolInsert;
         Update: Partial<Carpool>;
+        Relationships: [];
+      };
+      class_groups: {
+        Row: ClassGroup;
+        Insert: ClassGroupInsert;
+        Update: Partial<ClassGroup>;
         Relationships: [];
       };
     };

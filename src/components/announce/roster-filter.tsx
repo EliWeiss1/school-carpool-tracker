@@ -2,7 +2,6 @@
 
 import { useId, useState } from "react";
 
-import { CLASS_GROUPS } from "@/lib/classes";
 import { cn } from "@/lib/cn";
 
 export interface AnnounceFilterValue {
@@ -18,9 +17,12 @@ export interface AnnounceFilterValue {
 export function RosterFilter({
   value,
   onChange,
+  classGroups,
 }: {
   value: AnnounceFilterValue;
   onChange: (field: keyof AnnounceFilterValue, next: string) => void;
+  /** The admin-editable class list, in display order. */
+  classGroups: string[];
 }) {
   const [open, setOpen] = useState(false);
   const classId = useId();
@@ -64,7 +66,7 @@ export function RosterFilter({
               className="focus-ring min-h-tap rounded-lg border border-curb-300 bg-curb-50 px-3 text-base text-curb-900"
             >
               <option value="">Any class</option>
-              {CLASS_GROUPS.map((classGroup) => (
+              {classGroups.map((classGroup) => (
                 <option key={classGroup} value={classGroup}>
                   {classGroup}
                 </option>

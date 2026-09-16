@@ -10,7 +10,10 @@
 export type StudentStatus = "waiting" | "arrived";
 export type StatusEventSource = "voice" | "manual" | "admin";
 
-/** A roster row as the handlers see it. Mirrors public.students. */
+/** A roster row as the handlers see it. Mirrors public.students, plus the
+ *  parent names joined in from the separate student_parents table (see that
+ *  migration for why they live apart) -- callers here never need to know
+ *  the two live in different tables. */
 export interface StudentRow {
   id: string;
   first_name: string;
@@ -22,6 +25,8 @@ export interface StudentRow {
   updated_at: string;
   /** Nulled, not cascaded, when the carpool is deleted. */
   carpool_id: string | null;
+  parent1_name: string | null;
+  parent2_name: string | null;
 }
 
 /** A carpool row as the handlers see it. Mirrors public.carpools. */
@@ -51,6 +56,20 @@ export interface StudentWriteInput {
   aliases: string[];
   class_group: string | null;
   carpool_id: string | null;
+  parent1_name: string | null;
+  parent2_name: string | null;
+}
+
+/** A class a student can be assigned to. Mirrors public.class_groups. */
+export interface ClassGroupRow {
+  id: string;
+  name: string;
+  sort_order: number;
+}
+
+/** The fields /admin is allowed to set on a class group. */
+export interface ClassGroupWriteInput {
+  name: string;
 }
 
 export interface StatusEventInput {
@@ -109,12 +128,17 @@ export interface RosterStore {
     patch: Partial<StudentWriteInput>,
   ): Promise<StudentRow | null>;
   /**
-   * Removes a student outright. `status_events` rows for them are not
+   * Removes one or many students outright, returning the ids that actually
+   * existed and were removed -- an id already gone is simply absent from the
+   * result, never a reason to throw, the same "only report what changed"
+   * contract as `setStatusMany`. `status_events` rows for them are not
    * touched -- the foreign key nulls `student_id` rather than cascading, so
    * the audit history a removed student contributed survives the edit (see
-   * the migration comment on `status_events.student_id`).
+   * the migration comment on `status_events.student_id`). Their
+   * `student_parents` row, if any, IS deleted (cascade) -- there is no audit
+   * reason to keep a parent name around for a student no longer on the roster.
    */
-  removeStudent(id: string): Promise<boolean>;
+  removeStudents(ids: string[]): Promise<string[]>;
   /** Bulk version of `createStudent`, for a confirmed CSV import. */
   bulkCreateStudents(inputs: StudentWriteInput[]): Promise<StudentRow[]>;
   /**
@@ -145,4 +169,13 @@ export interface RosterStore {
     carpoolId: string | null,
     studentIds: string[],
   ): Promise<StudentRow[]>;
+
+  /** Ordered by sort_order -- the order pickers should offer them in. */
+  listClassGroups(): Promise<ClassGroupRow[]>;
+  /** Appended after the current highest sort_order. */
+  createClassGroup(input: ClassGroupWriteInput): Promise<ClassGroupRow>;
+  /** Never touches any student's existing class_group value -- see the migration comment. */
+  removeClassGroup(id: string): Promise<boolean>;
+  /** Rewrites sort_order to match this exact id order. Ids not on the list are left untouched. */
+  reorderClassGroups(orderedIds: string[]): Promise<ClassGroupRow[]>;
 }

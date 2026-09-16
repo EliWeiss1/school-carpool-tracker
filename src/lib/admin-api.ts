@@ -18,7 +18,7 @@ import {
   compact,
   createEdgeFunctionPost,
 } from "@/lib/api";
-import type { Carpool, Student } from "@/types/db";
+import type { Carpool, ClassGroup, Student } from "@/types/db";
 import type { CsvImportStudent } from "@/lib/csv-import";
 
 /* -------------------------------------------------------------------------- */
@@ -47,7 +47,21 @@ export interface StudentFields {
   aliases?: string[];
   class_group?: string | null;
   carpool_id?: string | null;
+  /** Up to two parent/guardian names, for admin identification and voice-match resolution. Stored separately from every other student field -- see the parent_names migration. */
+  parent1_name?: string | null;
+  parent2_name?: string | null;
 }
+
+/**
+ * A student as /admin sees it: every public field, plus parent names --
+ * which are never returned to /display or /announce (see `resolve.ts`'s
+ * `candidateStudent()`), only to the PIN-gated roster-list/roster-write
+ * responses this type describes.
+ */
+export type RosterStudent = Student & {
+  parent1_name: string | null;
+  parent2_name: string | null;
+};
 
 /* -------------------------------------------------------------------------- */
 /* Per-endpoint request/response shapes                                       */
@@ -56,7 +70,7 @@ export interface StudentFields {
 export type RosterListInput = Credentials & RosterScope & RequestOptions;
 
 export interface RosterListResponse {
-  students: Student[];
+  students: RosterStudent[];
   carpools: Carpool[];
 }
 
@@ -68,7 +82,7 @@ export type RosterUpdateInput = Credentials &
   } & Partial<StudentFields>;
 
 export interface RosterWriteResponse {
-  student: Student;
+  student: RosterStudent;
   /** False when this was an edit rather than a new roster entry. */
   created: boolean;
 }
@@ -78,8 +92,18 @@ export type RosterDeleteInput = Credentials &
     studentId: string;
   };
 
+/** The bulk form: a select-and-delete from the roster table, or the ids a
+ *  just-confirmed import created (for "Undo import"). */
+export type RosterDeleteManyInput = Credentials &
+  RequestOptions & {
+    studentIds: string[];
+  };
+
 export interface RosterDeleteResponse {
-  deleted: boolean;
+  /** Ids that existed and were removed. */
+  deletedIds: string[];
+  /** Ids that were already gone -- never a reason to treat the call as failed. */
+  missingIds: string[];
 }
 
 export type RosterImportInput = Credentials &
@@ -144,6 +168,38 @@ export interface CarpoolDeleteResponse {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Class list                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export type ClassCreateInput = Credentials &
+  RequestOptions & {
+    name: string;
+  };
+
+export type ClassDeleteInput = Credentials &
+  RequestOptions & {
+    classId: string;
+  };
+
+export type ClassReorderInput = Credentials &
+  RequestOptions & {
+    orderedIds: string[];
+  };
+
+export interface ClassWriteResponse {
+  classGroup: ClassGroup;
+  created: boolean;
+}
+
+export interface ClassDeleteResponse {
+  deleted: boolean;
+}
+
+export interface ClassReorderResponse {
+  classGroups: ClassGroup[];
+}
+
+/* -------------------------------------------------------------------------- */
 /* Client                                                                      */
 /* -------------------------------------------------------------------------- */
 
@@ -152,11 +208,15 @@ export interface AdminApiClient {
   createStudent(input: RosterCreateInput): Promise<RosterWriteResponse>;
   updateStudent(input: RosterUpdateInput): Promise<RosterWriteResponse>;
   deleteStudent(input: RosterDeleteInput): Promise<RosterDeleteResponse>;
+  deleteStudents(input: RosterDeleteManyInput): Promise<RosterDeleteResponse>;
   importRoster(input: RosterImportInput): Promise<RosterImportResponse>;
   resetAllToWaiting(input: RosterResetInput): Promise<RosterResetResponse>;
   createCarpool(input: CarpoolCreateInput): Promise<CarpoolWriteResponse>;
   updateCarpool(input: CarpoolUpdateInput): Promise<CarpoolWriteResponse>;
   deleteCarpool(input: CarpoolDeleteInput): Promise<CarpoolDeleteResponse>;
+  createClass(input: ClassCreateInput): Promise<ClassWriteResponse>;
+  deleteClass(input: ClassDeleteInput): Promise<ClassDeleteResponse>;
+  reorderClasses(input: ClassReorderInput): Promise<ClassReorderResponse>;
 }
 
 /**
@@ -201,6 +261,8 @@ export function createAdminApiClient(
       aliases,
       class_group,
       carpool_id,
+      parent1_name,
+      parent2_name,
       signal,
     }) {
       return post<RosterWriteResponse>(
@@ -213,6 +275,8 @@ export function createAdminApiClient(
           aliases,
           class_group,
           carpool_id,
+          parent1_name,
+          parent2_name,
         }),
         signal,
       );
@@ -227,6 +291,8 @@ export function createAdminApiClient(
       aliases,
       class_group,
       carpool_id,
+      parent1_name,
+      parent2_name,
       signal,
     }) {
       // Not `compact()` here: that helper drops `null` along with
@@ -241,6 +307,8 @@ export function createAdminApiClient(
       if (aliases !== undefined) body.aliases = aliases;
       if (class_group !== undefined) body.class_group = class_group;
       if (carpool_id !== undefined) body.carpool_id = carpool_id;
+      if (parent1_name !== undefined) body.parent1_name = parent1_name;
+      if (parent2_name !== undefined) body.parent2_name = parent2_name;
 
       return post<RosterWriteResponse>("roster-write", body, signal);
     },
@@ -249,6 +317,14 @@ export function createAdminApiClient(
       return post<RosterDeleteResponse>(
         "roster-delete",
         compact({ pin, deviceId, studentId }),
+        signal,
+      );
+    },
+
+    deleteStudents({ pin, deviceId, studentIds, signal }) {
+      return post<RosterDeleteResponse>(
+        "roster-delete",
+        compact({ pin, deviceId, studentIds }),
         signal,
       );
     },
@@ -309,6 +385,30 @@ export function createAdminApiClient(
       return post<CarpoolDeleteResponse>(
         "carpool-write",
         compact({ pin, deviceId, action: "delete", carpoolId }),
+        signal,
+      );
+    },
+
+    createClass({ pin, deviceId, name, signal }) {
+      return post<ClassWriteResponse>(
+        "classes-write",
+        compact({ pin, deviceId, action: "create", name }),
+        signal,
+      );
+    },
+
+    deleteClass({ pin, deviceId, classId, signal }) {
+      return post<ClassDeleteResponse>(
+        "classes-write",
+        compact({ pin, deviceId, action: "delete", classId }),
+        signal,
+      );
+    },
+
+    reorderClasses({ pin, deviceId, orderedIds, signal }) {
+      return post<ClassReorderResponse>(
+        "classes-write",
+        compact({ pin, deviceId, action: "reorder", orderedIds }),
         signal,
       );
     },

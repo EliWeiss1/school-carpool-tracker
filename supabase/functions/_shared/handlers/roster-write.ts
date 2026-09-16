@@ -58,7 +58,9 @@ async function create(
 
   const classGroup = readString(body, "class_group");
   const carpoolId = readString(body, "carpool_id");
-  if (nameTooLong(firstName, lastName, classGroup)) {
+  const parent1Name = readString(body, "parent1_name");
+  const parent2Name = readString(body, "parent2_name");
+  if (nameTooLong(firstName, lastName, classGroup, parent1Name, parent2Name)) {
     return errorResponse(
       400,
       "One of those entries is far too long to be a name. Check the row for a stray quotation mark.",
@@ -88,6 +90,8 @@ async function create(
     aliases: readAliases(body),
     class_group: classGroup,
     carpool_id: carpoolId,
+    parent1_name: parent1Name,
+    parent2_name: parent2Name,
   };
 
   const student = await deps.store.createStudent(input);
@@ -124,12 +128,18 @@ async function update(
   if ("class_group" in body)
     patch.class_group = readString(body, "class_group");
   if ("carpool_id" in body) patch.carpool_id = readString(body, "carpool_id");
+  if ("parent1_name" in body)
+    patch.parent1_name = readString(body, "parent1_name");
+  if ("parent2_name" in body)
+    patch.parent2_name = readString(body, "parent2_name");
 
   if (
     nameTooLong(
       patch.first_name ?? null,
       patch.last_name ?? null,
       patch.class_group ?? null,
+      patch.parent1_name ?? null,
+      patch.parent2_name ?? null,
     )
   ) {
     return errorResponse(

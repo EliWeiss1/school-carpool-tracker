@@ -5,12 +5,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { PinGate } from "@/components/ui/pin-gate";
-import { adminApi } from "@/lib/admin-api";
+import { adminApi, type RosterStudent } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
 import { usePinSession } from "@/lib/use-pin-session";
-import type { Carpool, Student } from "@/types/db";
+import { useClassGroups } from "@/lib/use-class-groups";
+import type { Carpool } from "@/types/db";
 
 import { CarpoolManager } from "./carpool-manager";
+import { ClassManager } from "./class-manager";
 import { CsvImportPanel } from "./csv-import-panel";
 import { ResetPanel } from "./reset-panel";
 import { RosterManager } from "./roster-manager";
@@ -26,9 +28,14 @@ import { RosterManager } from "./roster-manager";
  */
 function AdminContent() {
   const session = usePinSession();
-  const [students, setStudents] = useState<Student[] | null>(null);
+  const [students, setStudents] = useState<RosterStudent[] | null>(null);
   const [carpools, setCarpools] = useState<Carpool[]>([]);
   const [listError, setListError] = useState<string | null>(null);
+  const {
+    classGroups,
+    names: classGroupNames,
+    refresh: refreshClassGroups,
+  } = useClassGroups();
 
   const refresh = useCallback(async () => {
     const credentials = session.credentials();
@@ -85,6 +92,7 @@ function AdminContent() {
           session={session}
           students={students}
           carpools={carpools}
+          classGroups={classGroupNames}
           listError={listError}
           refresh={refresh}
         />
@@ -93,6 +101,11 @@ function AdminContent() {
           carpools={carpools}
           students={students ?? []}
           refresh={refresh}
+        />
+        <ClassManager
+          session={session}
+          classGroups={classGroups}
+          refresh={refreshClassGroups}
         />
         <CsvImportPanel session={session} onImported={refresh} />
         <ResetPanel session={session} students={students} onReset={refresh} />

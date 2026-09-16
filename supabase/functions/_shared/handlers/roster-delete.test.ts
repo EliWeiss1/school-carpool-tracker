@@ -9,6 +9,7 @@ const STAFF_PIN = "4821";
 function setup() {
   const store = createFakeStore([
     makeStudent({ id: "cohen", first_name: "Maya", last_name: "Cohen" }),
+    makeStudent({ id: "ng", first_name: "Theo", last_name: "Ng" }),
   ]);
   const handle = createRosterDeleteHandler({
     staffPin: STAFF_PIN,
@@ -38,14 +39,52 @@ describe("createRosterDeleteHandler", () => {
     const { handle, store } = setup();
 
     const response = await handle(del());
-    const body = (await response.json()) as { deleted: boolean };
+    const body = (await response.json()) as {
+      deletedIds: string[];
+      missingIds: string[];
+    };
 
     expect(response.status).toBe(200);
-    expect(body.deleted).toBe(true);
+    expect(body.deletedIds).toEqual(["cohen"]);
+    expect(body.missingIds).toEqual([]);
+    expect(store.rows()).toHaveLength(1);
+  });
+
+  it("removes several students at once via studentIds", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      del({ studentId: undefined, studentIds: ["cohen", "ng"] }),
+    );
+    const body = (await response.json()) as {
+      deletedIds: string[];
+      missingIds: string[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.deletedIds.sort()).toEqual(["cohen", "ng"]);
+    expect(body.missingIds).toEqual([]);
     expect(store.rows()).toHaveLength(0);
   });
 
-  it("says so when the student is already gone", async () => {
+  it("reports ids that were already gone rather than failing the whole call", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      del({ studentId: undefined, studentIds: ["cohen", "nobody"] }),
+    );
+    const body = (await response.json()) as {
+      deletedIds: string[];
+      missingIds: string[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.deletedIds).toEqual(["cohen"]);
+    expect(body.missingIds).toEqual(["nobody"]);
+    expect(store.rows()).toHaveLength(1);
+  });
+
+  it("says so when every requested student is already gone", async () => {
     const { handle } = setup();
 
     const response = await handle(del({ studentId: "nobody" }));
@@ -59,7 +98,7 @@ describe("createRosterDeleteHandler", () => {
     const response = await handle(del({ studentId: "" }));
 
     expect(response.status).toBe(400);
-    expect(store.rows()).toHaveLength(1);
+    expect(store.rows()).toHaveLength(2);
   });
 
   it("requires the staff PIN", async () => {
@@ -68,6 +107,6 @@ describe("createRosterDeleteHandler", () => {
     const response = await handle(del({ pin: "0000" }));
 
     expect(response.status).toBe(401);
-    expect(store.rows()).toHaveLength(1);
+    expect(store.rows()).toHaveLength(2);
   });
 });

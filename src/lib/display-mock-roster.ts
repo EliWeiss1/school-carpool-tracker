@@ -1,5 +1,20 @@
-import { CLASS_GROUPS } from "@/lib/classes";
 import type { Student } from "@/types/db";
+
+/**
+ * The class list is admin-editable data now (see `use-class-groups.ts`), not
+ * a hardcoded constant this file could still import -- this mock preview has
+ * no live class list to read, so it keeps its own fixed set, decoupled from
+ * whatever a real deployment's admin has configured.
+ */
+const MOCK_CLASS_GROUPS = [
+  "K1",
+  "K2",
+  "1st",
+  "2nd",
+  "3rd",
+  "4th",
+  "5th",
+] as const;
 
 /**
  * Synthetic roster for the dev-only `/display?mock=1` preview.
@@ -49,7 +64,7 @@ interface MockSeed {
   status: Student["status"];
 }
 
-const SEEDS: MockSeed[] = CLASS_GROUPS.flatMap((classGroup, classIndex) =>
+const SEEDS: MockSeed[] = MOCK_CLASS_GROUPS.flatMap((classGroup, classIndex) =>
   NAME_POOL.map(([firstName, lastName], nameIndex) => {
     const seq = classIndex * NAME_POOL.length + nameIndex;
     return {

@@ -23,7 +23,7 @@ describe("fake store fidelity to the real schema", () => {
       carpoolId: null,
     });
 
-    await store.removeStudent("cohen");
+    await store.removeStudents(["cohen"]);
 
     expect(store.events).toHaveLength(1);
     expect(store.events[0].studentId).toBeNull();
@@ -40,7 +40,7 @@ describe("fake store fidelity to the real schema", () => {
       carpoolId: null,
     });
 
-    await store.removeStudent("cohen");
+    await store.removeStudents(["cohen"]);
 
     expect(store.events[0]).toMatchObject({
       changedTo: "arrived",
@@ -63,7 +63,7 @@ describe("fake store fidelity to the real schema", () => {
       carpoolId: null,
     });
 
-    await store.removeStudent("cohen");
+    await store.removeStudents(["cohen"]);
 
     expect(store.events[0].studentId).toBe("ng");
   });

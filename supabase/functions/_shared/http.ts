@@ -99,3 +99,26 @@ export function readString(
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
 }
+
+/**
+ * Accepts either a single `<singularField>` or a `<pluralField>` array, never
+ * both mixed -- the same convention `set-status` established for confirming
+ * one child or a whole carpool through one endpoint. Shared here because
+ * `roster-delete` needs the identical shape for a bulk select-and-delete.
+ */
+export function readIdOrIds(
+  body: Record<string, unknown>,
+  singularField: string,
+  pluralField: string,
+  max: number,
+): string[] | null {
+  const raw = body[pluralField];
+  if (Array.isArray(raw)) {
+    const ids = raw.filter(
+      (id): id is string => typeof id === "string" && id.trim() !== "",
+    );
+    return ids.length === 0 ? null : ids.slice(0, max);
+  }
+  const single = readString(body, singularField);
+  return single === null ? null : [single];
+}

@@ -1,5 +1,12 @@
-import { CLASS_GROUPS } from "@/lib/classes";
 import type { Student } from "@/types/db";
+
+/**
+ * Falls back to this when the live, admin-editable class order (see
+ * `use-class-groups.ts`) hasn't loaded yet, or a caller (a test, the mock
+ * preview) passes none -- the classes this app has always shipped with.
+ * Never the source of truth once the real list has loaded.
+ */
+const DEFAULT_CLASS_ORDER = ["K1", "K2", "1st", "2nd", "3rd", "4th", "5th"];
 
 /**
  * Groups the roster into class sections and applies the per-viewer class
@@ -61,16 +68,20 @@ function labelFor(classGroup: string | null): string {
 }
 
 /**
- * Orders by position in the known class list (K1, K2, 1st .. 5th); a
- * class_group that isn't one of those (free text, so always possible) sorts
- * after every known class, alphabetically among themselves.
+ * Orders by position in the admin-editable class list; a class_group that
+ * isn't on that list (free text, so always possible) sorts after every known
+ * class, alphabetically among themselves.
  */
-function compareClasses(a: string | null, b: string | null): number {
+function compareClasses(
+  a: string | null,
+  b: string | null,
+  classOrder: readonly string[],
+): number {
   if (a === b) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
-  const indexA = CLASS_GROUPS.indexOf(a as (typeof CLASS_GROUPS)[number]);
-  const indexB = CLASS_GROUPS.indexOf(b as (typeof CLASS_GROUPS)[number]);
+  const indexA = classOrder.indexOf(a);
+  const indexB = classOrder.indexOf(b);
   if (indexA !== -1 && indexB !== -1) return indexA - indexB;
   if (indexA !== -1) return -1;
   if (indexB !== -1) return 1;
@@ -80,6 +91,7 @@ function compareClasses(a: string | null, b: string | null): number {
 export function groupIntoSections(
   students: readonly Student[],
   filter: DisplayFilter,
+  classOrder: readonly string[] = DEFAULT_CLASS_ORDER,
 ): GroupedSections {
   const byKey = new Map<string, Student[]>();
   for (const student of students) {
@@ -112,7 +124,7 @@ export function groupIntoSections(
     .sort((a, b) => {
       if (a.key === "__none__") return 1;
       if (b.key === "__none__") return -1;
-      return compareClasses(a.classGroup, b.classGroup);
+      return compareClasses(a.classGroup, b.classGroup, classOrder);
     });
 
   const sections =

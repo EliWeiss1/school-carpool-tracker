@@ -42,6 +42,10 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
+  const [importedIds, setImportedIds] = useState<string[] | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  const [undoError, setUndoError] = useState<string | null>(null);
+  const [undone, setUndone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
 
@@ -51,6 +55,9 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
 
     setImportError(null);
     setImportedCount(null);
+    setImportedIds(null);
+    setUndone(false);
+    setUndoError(null);
     setFileName(file.name);
     const text = await file.text();
     setReport(parseRosterCsv(text));
@@ -61,6 +68,9 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
     setReport(null);
     setImportError(null);
     setImportedCount(null);
+    setImportedIds(null);
+    setUndoError(null);
+    setUndone(false);
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -75,6 +85,9 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
         students: report.toImport,
       });
       setImportedCount(result.created);
+      setImportedIds(result.students.map((student) => student.id));
+      setUndone(false);
+      setUndoError(null);
       setReport(null);
       onImported();
     } catch (error: unknown) {
@@ -88,6 +101,34 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
     }
   }
 
+  /** Removes exactly the students the last import created -- not a bulk
+   *  "delete all," and not the roster's own multi-select, so it's safe to
+   *  offer immediately after a bad import without a separate confirmation
+   *  step (it only ever undoes what this panel just did). */
+  async function undoImport() {
+    if (!importedIds || importedIds.length === 0) return;
+
+    setUndoing(true);
+    setUndoError(null);
+    try {
+      await adminApi.deleteStudents({
+        ...requireCredentials(session),
+        studentIds: importedIds,
+      });
+      setUndone(true);
+      setImportedIds(null);
+      onImported();
+    } catch (error: unknown) {
+      setUndoError(
+        error instanceof ApiError
+          ? error.message
+          : "The undo did not go through. Try again.",
+      );
+    } finally {
+      setUndoing(false);
+    }
+  }
+
   return (
     <section className="flex flex-col gap-4 rounded-2xl border border-curb-200 bg-white p-6 shadow-card">
       <div>
@@ -96,9 +137,11 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
         </h2>
         <p className="mt-1 text-curb-600">
           Columns can be in any order. Required: first name, last name.
-          Optional: aliases (comma or semicolon separated), class, carpool. A
-          new carpool name is created automatically; an existing one (matched
-          by name) gets this student added to it.
+          Optional: aliases (comma or semicolon separated), class, carpool,
+          parent 1 name, parent 2 name. A new carpool name is created
+          automatically; an existing one (matched by name) gets this student
+          added to it. This always adds to the roster you already have -- it
+          never replaces or removes anyone.
         </p>
       </div>
 
@@ -126,11 +169,31 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
       </div>
 
       {importedCount !== null && (
-        <ErrorBanner
-          tone="warning"
-          message={`Imported ${importedCount} student${importedCount === 1 ? "" : "s"}.`}
-        />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <ErrorBanner
+            tone="warning"
+            message={
+              undone
+                ? `Undone -- ${importedCount} student${importedCount === 1 ? "" : "s"} removed again.`
+                : `Imported ${importedCount} student${importedCount === 1 ? "" : "s"}.`
+            }
+          />
+          {importedIds && importedIds.length > 0 && (
+            <Button
+              variant="quiet"
+              size="sm"
+              onClick={() => void undoImport()}
+              disabled={undoing}
+            >
+              {undoing
+                ? "Undoing…"
+                : `Undo import (${importedIds.length} student${importedIds.length === 1 ? "" : "s"})`}
+            </Button>
+          )}
+        </div>
       )}
+
+      {undoError && <ErrorBanner message={undoError} />}
 
       {report && (
         <div className="flex flex-col gap-4">
@@ -140,6 +203,13 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
             />
           ) : (
             <>
+              {report.unrecognizedHeaders.length > 0 && (
+                <ErrorBanner
+                  tone="warning"
+                  message={`These columns weren't recognized and will be ignored: ${report.unrecognizedHeaders.join(", ")}. If this was meant to be a field like class or parent name, rename the column and re-upload.`}
+                />
+              )}
+
               <dl className="grid grid-cols-2 gap-3 rounded-xl border border-curb-200 bg-curb-50 p-4 text-sm sm:grid-cols-4">
                 <div>
                   <dt className="text-curb-500">Rows in file</dt>
@@ -204,6 +274,7 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
                         <th className="px-3 py-2 font-semibold">Aliases</th>
                         <th className="px-3 py-2 font-semibold">Class</th>
                         <th className="px-3 py-2 font-semibold">Carpool</th>
+                        <th className="px-3 py-2 font-semibold">Parents</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -223,6 +294,11 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
                           </td>
                           <td className="px-3 py-2 text-curb-700">
                             {row.carpool ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-curb-600">
+                            {[row.parent1_name, row.parent2_name]
+                              .filter((name): name is string => name !== null)
+                              .join(" · ") || "—"}
                           </td>
                         </tr>
                       ))}

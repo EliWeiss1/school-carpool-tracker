@@ -45,6 +45,28 @@ describe("createRosterImportHandler", () => {
     expect(store.rows()).toHaveLength(3);
   });
 
+  it("carries parent names through the import", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      imp([
+        {
+          first_name: "Eli",
+          last_name: "Weiss",
+          parent1_name: "Dana Weiss",
+          parent2_name: "Mark Weiss",
+        },
+      ]),
+    );
+    const body = (await response.json()) as {
+      students: Array<{ id: string; parent1_name: string | null }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.students[0].parent1_name).toBe("Dana Weiss");
+    expect(store.row(body.students[0].id)?.parent2_name).toBe("Mark Weiss");
+  });
+
   it("rejects an empty list", async () => {
     const { handle, store } = setup();
 

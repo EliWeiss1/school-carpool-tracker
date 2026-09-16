@@ -139,7 +139,7 @@ describe("updateStudent", () => {
 describe("deleteStudent", () => {
   it("posts to roster-delete", async () => {
     const { client, fetchImpl } = clientReturning(
-      jsonResponse({ deleted: true }),
+      jsonResponse({ deletedIds: ["cohen"], missingIds: [] }),
     );
 
     const result = await client.deleteStudent({
@@ -150,7 +150,25 @@ describe("deleteStudent", () => {
 
     expect(sent.url).toBe(BASE + "/roster-delete");
     expect(sent.body.studentId).toBe("cohen");
-    expect(result.deleted).toBe(true);
+    expect(result.deletedIds).toEqual(["cohen"]);
+  });
+});
+
+describe("deleteStudents", () => {
+  it("posts the plural studentIds to roster-delete", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ deletedIds: ["cohen", "ng"], missingIds: [] }),
+    );
+
+    const result = await client.deleteStudents({
+      ...CREDENTIALS,
+      studentIds: ["cohen", "ng"],
+    });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.url).toBe(BASE + "/roster-delete");
+    expect(sent.body.studentIds).toEqual(["cohen", "ng"]);
+    expect(result.deletedIds).toEqual(["cohen", "ng"]);
   });
 });
 
@@ -166,6 +184,8 @@ describe("importRoster", () => {
       aliases: [],
       class_group: null,
       carpool: null,
+      parent1_name: null,
+      parent2_name: null,
     });
 
     await client.importRoster({

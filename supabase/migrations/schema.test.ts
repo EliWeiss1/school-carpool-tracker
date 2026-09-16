@@ -21,9 +21,15 @@ const BOOTSTRAP = `
   create role anon nologin;
   create role authenticated nologin;
   create role service_role nologin bypassrls;
-  -- Supabase grants service_role table privileges platform-side; default
-  -- privileges are the closest equivalent for tables this migration creates.
-  alter default privileges in schema public grant all on tables to service_role;
+  -- Supabase grants table privileges to anon, authenticated AND service_role
+  -- platform-side by default (RLS, and each migration's own explicit
+  -- REVOKE, are what actually narrow that); default privileges are the
+  -- closest local equivalent. Granting only service_role here would make
+  -- every "anon is denied" assertion below pass because anon was never
+  -- granted anything in the first place, not because a migration's REVOKE
+  -- did its job -- a regression guard that can't fail is not a guard.
+  alter default privileges in schema public
+    grant all on tables to anon, authenticated, service_role;
   create publication supabase_realtime;
 `;
 
@@ -262,7 +268,12 @@ describe("RLS boundary", () => {
     const res = await db.query<{ cmd: string }>(
       "select cmd from pg_policies where schemaname = 'public'",
     );
-    expect(res.rows.map((r) => r.cmd)).toEqual(["SELECT"]);
+    // One SELECT-only policy per publicly-readable table (students,
+    // class_groups) -- never an insert/update/delete policy anywhere.
+    expect(res.rows.map((r) => r.cmd)).toEqual(
+      res.rows.map(() => "SELECT"),
+    );
+    expect(res.rows.length).toBeGreaterThan(0);
   });
 });
 
@@ -376,6 +387,170 @@ describe("carpools", () => {
       "select 1 from pg_policies where schemaname = 'public' and tablename = 'carpools'",
     );
     expect(policies.rows).toHaveLength(0);
+  });
+});
+
+describe("student_parents", () => {
+  it("hides parent names from anon entirely, read and write", async () => {
+    const studentId = await insertStudent("Weiss");
+    await db.query(
+      "insert into public.student_parents (student_id, parent1_name) values ($1, 'Eli Weiss')",
+      [studentId],
+    );
+
+    expect(
+      await asRole("anon", () =>
+        isDenied("select * from public.student_parents"),
+      ),
+    ).toBe(true);
+    expect(
+      await asRole("anon", () =>
+        isDenied(
+          "insert into public.student_parents (student_id, parent1_name) values (gen_random_uuid(), 'Mal Actor')",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("hides parent names from authenticated too", async () => {
+    expect(
+      await asRole("authenticated", () =>
+        isDenied("select * from public.student_parents"),
+      ),
+    ).toBe(true);
+  });
+
+  it("still lets the service role manage parent names", async () => {
+    const studentId = await insertStudent("Cohen");
+    await asRole("service_role", async () => {
+      const res = await db.query<{ student_id: string }>(
+        "insert into public.student_parents (student_id, parent1_name, parent2_name) values ($1, 'Maya Cohen', 'Aaron Cohen') returning student_id",
+        [studentId],
+      );
+      expect(res.rows[0].student_id).toBe(studentId);
+    });
+  });
+
+  it("is not exposed anywhere a select * on students would reach it", async () => {
+    // The whole point of the separate table: students' own columns are
+    // completely untouched by this feature, so the existing public-read
+    // policy on students is unaffected.
+    await insertStudent("Untouched");
+    const rows = await asRole("anon", async () => {
+      const res = await db.query("select * from public.students");
+      return res.rows;
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows as Record<string, unknown>[]) {
+      expect(row).not.toHaveProperty("parent1_name");
+      expect(row).not.toHaveProperty("parent2_name");
+    }
+  });
+
+  it("deletes the parent-name row when the student is removed", async () => {
+    const studentId = await insertStudent("Departing");
+    await db.query(
+      "insert into public.student_parents (student_id, parent1_name) values ($1, 'Gone Parent')",
+      [studentId],
+    );
+    await db.query("delete from public.students where id = $1", [studentId]);
+
+    const res = await db.query(
+      "select 1 from public.student_parents where student_id = $1",
+      [studentId],
+    );
+    expect(res.rows).toHaveLength(0);
+  });
+
+  it("touches updated_at when a parent name is edited", async () => {
+    const studentId = await insertStudent("Renaming");
+    await db.query(
+      "insert into public.student_parents (student_id, parent1_name) values ($1, 'Old Name')",
+      [studentId],
+    );
+    const before = await db.query<{ updated_at: Date }>(
+      "select updated_at from public.student_parents where student_id = $1",
+      [studentId],
+    );
+    await db.query(
+      "update public.student_parents set parent1_name = 'New Name' where student_id = $1",
+      [studentId],
+    );
+    const after = await db.query<{ updated_at: Date }>(
+      "select updated_at from public.student_parents where student_id = $1",
+      [studentId],
+    );
+    expect(after.rows[0].updated_at.getTime()).toBeGreaterThanOrEqual(
+      before.rows[0].updated_at.getTime(),
+    );
+  });
+
+  it("has RLS enabled with no policy at all", async () => {
+    const res = await db.query<{ relrowsecurity: boolean }>(
+      "select relrowsecurity from pg_class where relname = 'student_parents'",
+    );
+    expect(res.rows[0].relrowsecurity).toBe(true);
+
+    const policies = await db.query(
+      "select 1 from pg_policies where schemaname = 'public' and tablename = 'student_parents'",
+    );
+    expect(policies.rows).toHaveLength(0);
+  });
+
+  it("is never added to the realtime publication", async () => {
+    const res = await db.query<{ tablename: string }>(
+      "select tablename from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public'",
+    );
+    expect(res.rows.map((r) => r.tablename)).not.toContain("student_parents");
+  });
+});
+
+describe("class groups", () => {
+  it("comes seeded with the EC classes before K1", async () => {
+    const res = await db.query<{ name: string }>(
+      "select name from public.class_groups order by sort_order",
+    );
+    const names = res.rows.map((r) => r.name);
+    expect(names.indexOf("EC Hummingbirds")).toBeLessThan(
+      names.indexOf("K1"),
+    );
+    expect(names).toContain("5th");
+  });
+
+  it("lets anon read the class list but not write it", async () => {
+    const rows = await asRole("anon", async () => {
+      const res = await db.query("select id from public.class_groups");
+      return res.rows;
+    });
+    expect(rows.length).toBeGreaterThan(0);
+
+    expect(
+      await asRole("anon", () =>
+        isDenied(
+          "insert into public.class_groups (name, sort_order) values ('Mal Actor', 99)",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects two classes with the same name, case-insensitively", async () => {
+    await db.query(
+      "insert into public.class_groups (name, sort_order) values ('Test Class', 50)",
+    );
+    expect(
+      await isDenied(
+        "insert into public.class_groups (name, sort_order) values ('test class', 51)",
+      ),
+    ).toBe(true);
+  });
+
+  it("still lets the service role manage the class list", async () => {
+    await asRole("service_role", async () => {
+      const res = await db.query<{ id: string }>(
+        "insert into public.class_groups (name, sort_order) values ('Service Class', 60) returning id",
+      );
+      expect(res.rows[0].id).toBeTruthy();
+    });
   });
 });
 

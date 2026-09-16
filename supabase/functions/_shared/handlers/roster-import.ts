@@ -48,8 +48,16 @@ function readStudentsInput(body: Record<string, unknown>): ImportRow[] | null {
     const firstName = readString(row, "first_name");
     const lastName = readString(row, "last_name");
     if (firstName === null || lastName === null) return null;
+    const parent1Name = readString(row, "parent1_name");
+    const parent2Name = readString(row, "parent2_name");
     if (
-      nameTooLong(firstName, lastName, readString(row, "class_group"))
+      nameTooLong(
+        firstName,
+        lastName,
+        readString(row, "class_group"),
+        parent1Name,
+        parent2Name,
+      )
     )
       return null;
 
@@ -59,6 +67,8 @@ function readStudentsInput(body: Record<string, unknown>): ImportRow[] | null {
       aliases: readAliases(row),
       class_group: readString(row, "class_group"),
       carpool: readString(row, "carpool"),
+      parent1_name: parent1Name,
+      parent2_name: parent2Name,
     });
   }
   return out;

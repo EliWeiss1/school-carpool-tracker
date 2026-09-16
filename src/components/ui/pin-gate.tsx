@@ -96,7 +96,18 @@ export function PinGate({
             id={inputId}
             type="password"
             inputMode="numeric"
-            autoComplete="off"
+            pattern="[0-9]*"
+            // "off" is well-documented to be ignored by Chrome/Edge/Firefox on
+            // type="password" fields for password-manager purposes -- that's
+            // the actual cause of the save-password prompt this field kept
+            // triggering. "one-time-code" is the value browsers specifically
+            // recognise to suppress that UI on a password-shaped field while
+            // still allowing normal typing. The data- attributes opt out of
+            // the third-party managers autocomplete can't reach.
+            autoComplete="one-time-code"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            data-bwignore="true"
             autoFocus
             value={pin}
             onChange={(event) => setPin(event.target.value)}

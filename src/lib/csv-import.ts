@@ -13,7 +13,13 @@
  */
 
 export type CsvField =
-  "first_name" | "last_name" | "aliases" | "class_group" | "carpool";
+  | "first_name"
+  | "last_name"
+  | "aliases"
+  | "class_group"
+  | "carpool"
+  | "parent1_name"
+  | "parent2_name";
 
 export interface CsvImportStudent {
   first_name: string;
@@ -22,6 +28,8 @@ export interface CsvImportStudent {
   class_group: string | null;
   /** The carpool name as typed in the file. Resolved to an id server-side. */
   carpool: string | null;
+  parent1_name: string | null;
+  parent2_name: string | null;
 }
 
 export interface CsvImportError {
@@ -41,6 +49,14 @@ export interface CsvImportReport {
   blankRowsSkipped: number;
   /** Data rows in the file, header excluded. errors + blankRowsSkipped + toImport.length <= this (duplicates and column-count mismatches also subtract). */
   totalDataRows: number;
+  /**
+   * Header cells that did not match any known field's aliases, exactly as
+   * written in the file. Surfaced rather than silently dropped: a column the
+   * importer doesn't recognise used to vanish with no signal at all, which is
+   * exactly how a school's "Grade" column full of class names went missing
+   * with no error anywhere.
+   */
+  unrecognizedHeaders: string[];
 }
 
 /**
@@ -58,8 +74,35 @@ const HEADER_ALIASES: Record<CsvField, string[]> = {
     "alt names",
     "nicknames",
   ],
-  class_group: ["class_group", "class", "classroom", "class group", "homeroom"],
+  // "grade" is here even though the app dropped grade as a concept (see the
+  // drop_grade migration): a school's own export still calls this column
+  // "Grade" and puts class names in it (e.g. "EC Hummingbirds"), and that
+  // real file is what class_group needs to receive.
+  class_group: [
+    "class_group",
+    "class",
+    "classroom",
+    "class group",
+    "homeroom",
+    "grade",
+  ],
   carpool: ["carpool", "carpool name", "car pool", "ride group", "ride"],
+  parent1_name: [
+    "parent1_name",
+    "parent 1",
+    "parent1",
+    "parent 1 name",
+    "mother",
+    "guardian 1",
+  ],
+  parent2_name: [
+    "parent2_name",
+    "parent 2",
+    "parent2",
+    "parent 2 name",
+    "father",
+    "guardian 2",
+  ],
 };
 
 const REQUIRED_FIELDS: CsvField[] = ["first_name", "last_name"];
@@ -171,9 +214,15 @@ function normalizeHeader(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function mapHeaders(headerRow: string[]): Partial<Record<CsvField, number>> {
+interface HeaderMap {
+  columnIndex: Partial<Record<CsvField, number>>;
+  /** Non-empty header cells that matched no field's aliases, as written. */
+  unrecognizedHeaders: string[];
+}
+
+function mapHeaders(headerRow: string[]): HeaderMap {
   const normalized = headerRow.map(normalizeHeader);
-  const result: Partial<Record<CsvField, number>> = {};
+  const columnIndex: Partial<Record<CsvField, number>> = {};
 
   // Walk the ALIASES in priority order and take the first that the file has,
   // rather than walking the FILE and taking the first column matching any
@@ -183,13 +232,18 @@ function mapHeaders(headerRow: string[]): Partial<Record<CsvField, number>> {
     for (const alias of HEADER_ALIASES[field]) {
       const index = normalized.indexOf(alias);
       if (index !== -1) {
-        result[field] = index;
+        columnIndex[field] = index;
         break;
       }
     }
   }
 
-  return result;
+  const claimedIndexes = new Set(Object.values(columnIndex));
+  const unrecognizedHeaders = headerRow.filter(
+    (cell, index) => cell.trim() !== "" && !claimedIndexes.has(index),
+  );
+
+  return { columnIndex, unrecognizedHeaders };
 }
 
 /** Aliases split on comma or semicolon, so a quoted "Kohen, Cohn" cell and a semicolon-delimited one both work. */
@@ -218,6 +272,7 @@ export function parseRosterCsv(text: string): CsvImportReport {
       errors: [],
       blankRowsSkipped: 0,
       totalDataRows: 0,
+      unrecognizedHeaders: [],
     };
   }
 
@@ -228,11 +283,12 @@ export function parseRosterCsv(text: string): CsvImportReport {
       errors: [],
       blankRowsSkipped: 0,
       totalDataRows: 0,
+      unrecognizedHeaders: [],
     };
   }
 
   const [headerRow, ...dataRows] = rows;
-  const columnIndex = mapHeaders(headerRow);
+  const { columnIndex, unrecognizedHeaders } = mapHeaders(headerRow);
 
   const headerErrors = REQUIRED_FIELDS.filter(
     (field) => columnIndex[field] === undefined,
@@ -248,6 +304,7 @@ export function parseRosterCsv(text: string): CsvImportReport {
       errors: [],
       blankRowsSkipped: 0,
       totalDataRows: dataRows.length,
+      unrecognizedHeaders: [],
     };
   }
 
@@ -297,9 +354,20 @@ export function parseRosterCsv(text: string): CsvImportReport {
       return;
     }
 
+    const parent1Name =
+      columnIndex.parent1_name !== undefined
+        ? nullableTrim(padded[columnIndex.parent1_name])
+        : null;
+    const parent2Name =
+      columnIndex.parent2_name !== undefined
+        ? nullableTrim(padded[columnIndex.parent2_name])
+        : null;
+
     const tooLong = [
       ["first name", firstName],
       ["last name", lastName],
+      ...(parent1Name ? [["parent 1 name", parent1Name] as const] : []),
+      ...(parent2Name ? [["parent 2 name", parent2Name] as const] : []),
     ].find(([, value]) => value.length > MAX_NAME_LENGTH);
     if (tooLong) {
       errors.push({
@@ -335,6 +403,8 @@ export function parseRosterCsv(text: string): CsvImportReport {
         columnIndex.carpool !== undefined
           ? nullableTrim(padded[columnIndex.carpool])
           : null,
+      parent1_name: parent1Name,
+      parent2_name: parent2Name,
     });
   });
 
@@ -344,5 +414,6 @@ export function parseRosterCsv(text: string): CsvImportReport {
     errors,
     blankRowsSkipped,
     totalDataRows: dataRows.length,
+    unrecognizedHeaders,
   };
 }
