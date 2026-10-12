@@ -1,8 +1,17 @@
 "use client";
 
-import { type FormEvent, useEffect, useReducer, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import { CandidateList } from "@/components/announce/candidate-list";
+import { ClassDrawer } from "@/components/announce/class-drawer";
+import { ClassRail } from "@/components/announce/class-rail";
 import { PushToTalkButton } from "@/components/announce/push-to-talk-button";
 import { RosterFilter } from "@/components/announce/roster-filter";
 import { SearchFallback } from "@/components/announce/search-fallback";
@@ -26,8 +35,18 @@ import {
 import { expiresAt, isFresh } from "@/lib/announce-token";
 import { formatRemaining, remainingMs } from "@/lib/announce-undo";
 import { ApiError, api } from "@/lib/api";
+import { cn } from "@/lib/cn";
+import {
+  announceLabel,
+  railClasses,
+  scopeKey,
+  selectedCountIn,
+  selectedIds,
+  studentsInClass,
+} from "@/lib/class-roster";
 import { publicEnv } from "@/lib/env";
 import { useClassGroups } from "@/lib/use-class-groups";
+import { useClassRoster } from "@/lib/use-class-roster";
 import {
   SpeechError,
   createDeepgramSpeechSource,
@@ -45,7 +64,14 @@ interface TokenCache {
   token: string;
   keyterms: string[];
   expiresAtMs: number;
-  classGroup: string;
+  /** `scopeKey` of the classes this token's keyterms were built for. */
+  scope: string;
+}
+
+/** How a confirm is recorded in `status_events`. */
+interface ConfirmAudit {
+  source: "voice" | "manual";
+  transcript?: string;
 }
 
 type ErrorActionType = "resolve/error" | "confirm/error" | "undo/error";
@@ -59,11 +85,14 @@ interface MicSession {
 export function AnnounceScreen() {
   const session = usePinSession();
   const { names: classGroups } = useClassGroups();
+  const classRoster = useClassRoster();
   const [state, dispatch] = useReducer(
     announceReducer,
     undefined,
     initialAnnounceState,
   );
+  const narrowedTo = state.filter.classGroups;
+  const narrowedScope = scopeKey(narrowedTo);
 
   const tokenCacheRef = useRef<TokenCache | null>(null);
   const micSessionRef = useRef<MicSession | null>(null);
@@ -131,7 +160,7 @@ export function AnnounceScreen() {
     const cached = tokenCacheRef.current;
     if (
       cached &&
-      cached.classGroup === state.filter.classGroup &&
+      cached.scope === narrowedScope &&
       isFresh(cached.expiresAtMs, Date.now())
     ) {
       return cached;
@@ -140,13 +169,13 @@ export function AnnounceScreen() {
     try {
       const response = await api.requestToken({
         ...creds,
-        classGroup: state.filter.classGroup || undefined,
+        classGroups: narrowedTo,
       });
       const next: TokenCache = {
         token: response.token,
         keyterms: response.keyterms,
         expiresAtMs: expiresAt(Date.now(), response.expiresIn),
-        classGroup: state.filter.classGroup,
+        scope: narrowedScope,
       };
       tokenCacheRef.current = next;
       return next;
@@ -174,7 +203,7 @@ export function AnnounceScreen() {
       const response = await api.resolveName({
         ...creds,
         ...input,
-        classGroup: state.filter.classGroup || undefined,
+        classGroups: narrowedTo,
       });
       dispatch({
         type: "resolve/success",
@@ -296,13 +325,23 @@ export function AnnounceScreen() {
     void runResolve({ transcript }, "manual");
   }
 
-  /** The one write shared by a single-tap confirm and a multi-select confirm. */
+  /**
+   * The one write shared by a single-tap confirm, a multi-select confirm and
+   * the class drawer. `audit` says how it is recorded; it defaults to whatever
+   * the current search result was (voice or typed), which is wrong for the
+   * drawer -- a stale voice result must never be logged against names that
+   * were tapped by hand -- so the drawer passes its own.
+   */
   async function confirmCandidates(
     key: string,
     studentIds: string[],
     displayName: string,
     carpoolId: string | null,
     score: number | null,
+    audit: ConfirmAudit = {
+      source: state.results?.origin === "voice" ? "voice" : "manual",
+      transcript: state.results?.transcript,
+    },
   ) {
     const creds = session.credentials();
     if (!creds || state.confirmingKey) return;
@@ -314,9 +353,9 @@ export function AnnounceScreen() {
         ...creds,
         studentIds,
         status: "arrived",
-        source: state.results?.origin === "voice" ? "voice" : "manual",
+        source: audit.source,
         matchConfidence: score,
-        transcript: state.results?.transcript,
+        transcript: audit.transcript,
         carpoolId,
       });
       dispatch({
@@ -328,6 +367,7 @@ export function AnnounceScreen() {
         logged: response.logged,
         confirmedAt: Date.now(),
       });
+      void classRoster.refresh();
     } catch (error) {
       if (isPinError(error)) {
         session.lock();
@@ -376,6 +416,22 @@ export function AnnounceScreen() {
     );
   }
 
+  /** The class drawer's one write: every name picked, across classes, at once. */
+  function handleAnnouncePicked() {
+    const ids = selectedIds(state.pad.selection);
+    if (ids.length === 0) return;
+
+    void confirmCandidates(
+      "pad",
+      ids,
+      announceLabel(classRoster.roster, ids),
+      null,
+      null,
+      // Tapped by hand: never voice, and no transcript to attach.
+      { source: "manual" },
+    );
+  }
+
   async function handleUndo() {
     const creds = session.credentials();
     if (!creds || !state.undo) return;
@@ -391,6 +447,7 @@ export function AnnounceScreen() {
         source: "manual",
       });
       dispatch({ type: "undo/success" });
+      void classRoster.refresh();
     } catch (error) {
       if (isPinError(error)) {
         session.lock();
@@ -414,8 +471,60 @@ export function AnnounceScreen() {
       ? undefined
       : "Voice capture isn't available on this device or browser. Use the search above.";
 
+  const railList = railClasses(classGroups, narrowedTo);
+  const railVisible = railList.length > 0;
+  const openClass = state.pad.openClass;
+  const pickedTotal = selectedIds(state.pad.selection).length;
+  const drawerStudents = useMemo(
+    () =>
+      openClass === null
+        ? []
+        : studentsInClass(classRoster.roster, openClass),
+    [classRoster.roster, openClass],
+  );
+
+  /**
+   * Banners, the undo window and the calm status line. They sit at the top of
+   * the page normally, but the drawer covers the top of the page, so while it
+   * is open the same nodes render inside it -- an announce must never succeed
+   * (or fail) out of sight.
+   */
+  const renderFeedback = (inDrawer: boolean) => (
+    <>
+      {state.banner && (
+        <ErrorBanner tone={state.banner.tone} message={state.banner.message} />
+      )}
+
+      {showUndo && state.undo && (
+        <UndoBanner
+          displayName={state.undo.displayName}
+          remainingLabel={formatRemaining(undoRemaining)}
+          pending={undoPending}
+          compact={inDrawer}
+          onUndo={handleUndo}
+        />
+      )}
+
+      {/* The undo banner already says who arrived; repeating it in the cramped
+          drawer would push the list off the screen. */}
+      {!state.banner && state.info && !(inDrawer && showUndo) && (
+        <p
+          role="status"
+          aria-live="polite"
+          className="rounded-xl bg-curb-50 px-4 py-3 text-curb-700"
+        >
+          {state.info}
+        </p>
+      )}
+    </>
+  );
+
   return (
-    <main className="flex min-h-screen flex-col bg-curb-50">
+    // h-dvh (not min-h-screen) so the header and the mic bar stay put and the
+    // middle scrolls: the rail and drawer are positioned against that middle,
+    // and dvh tracks the collapsing address bar on iOS Safari and Android
+    // Chrome, where plain vh leaves the mic button hidden underneath it.
+    <main className="flex h-screen flex-col bg-curb-50 supports-[height:100dvh]:h-dvh">
       <PageHeader
         eyebrow="Lane 01 · Outside"
         title="Announce"
@@ -427,104 +536,143 @@ export function AnnounceScreen() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto px-4 pb-6 pt-4 sm:px-6">
-        <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-          {state.banner && (
-            <ErrorBanner
-              tone={state.banner.tone}
-              message={state.banner.message}
+      <div className="relative mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col">
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 pl-4 pt-4",
+            // Leaves room for the rail so no candidate button slides under it.
+            railVisible ? "pr-16" : "pr-4",
+          )}
+        >
+          <div className="flex w-full flex-col gap-4">
+            {openClass === null && renderFeedback(false)}
+
+            <RosterFilter
+              classGroups={classGroups}
+              narrowedTo={narrowedTo}
+              onToggle={(classGroup) =>
+                dispatch({ type: "filter/toggleClass", classGroup })
+              }
+              onClear={() => dispatch({ type: "filter/clear" })}
             />
-          )}
 
-          {showUndo && state.undo && (
-            <UndoBanner
-              displayName={state.undo.displayName}
-              remainingLabel={formatRemaining(undoRemaining)}
-              pending={undoPending}
-              onUndo={handleUndo}
+            {state.resolving && (
+              <LoadingState label="Matching the name…" rows={2} />
+            )}
+
+            {!state.resolving &&
+              state.results &&
+              state.results.tier !== "none" && (
+                <CandidateList
+                  results={state.results}
+                  confirmingKey={state.confirmingKey}
+                  multiSelect={state.multiSelect}
+                  selectedKeys={state.selectedKeys}
+                  excludedMemberIds={state.excludedMemberIds}
+                  onConfirm={handleConfirm}
+                  onToggleSelect={(key) =>
+                    dispatch({ type: "candidate/toggleSelect", key })
+                  }
+                  onConfirmSelected={handleConfirmSelected}
+                  onToggleMultiSelect={() =>
+                    dispatch({ type: "multiSelect/toggle" })
+                  }
+                  onToggleMember={(candidateKey, studentId) =>
+                    dispatch({
+                      type: "candidate/toggleMember",
+                      candidateKey,
+                      studentId,
+                    })
+                  }
+                />
+              )}
+
+            {!state.resolving &&
+              state.results &&
+              state.results.tier === "none" && (
+                <EmptyState
+                  title="No match on the roster"
+                  hint={`Heard "${state.results.transcript}." Type the name below instead.`}
+                />
+              )}
+
+            {!state.resolving &&
+              !state.results &&
+              !state.info &&
+              !state.banner && (
+                <EmptyState
+                  title="Ready when you are"
+                  hint={
+                    railVisible
+                      ? "Hold the button below and say the last name, type it, or tap a class on the right to pick names."
+                      : "Hold the button below and say the last name, or type it below."
+                  }
+                />
+              )}
+
+            <SearchFallback
+              value={state.searchText}
+              onChange={(value) => dispatch({ type: "search/change", value })}
+              onSubmit={handleSearchSubmit}
+              disabled={state.resolving}
             />
-          )}
-
-          {!state.banner && state.info && (
-            <p
-              role="status"
-              aria-live="polite"
-              className="rounded-xl bg-white px-4 py-3 text-curb-700 shadow-card"
-            >
-              {state.info}
-            </p>
-          )}
-
-          <RosterFilter
-            value={state.filter}
-            onChange={(field, value) =>
-              dispatch({ type: "filter/change", field, value })
-            }
-            classGroups={classGroups}
-          />
-
-          {state.resolving && (
-            <LoadingState label="Matching the name…" rows={2} />
-          )}
-
-          {!state.resolving &&
-            state.results &&
-            state.results.tier !== "none" && (
-              <CandidateList
-                results={state.results}
-                confirmingKey={state.confirmingKey}
-                multiSelect={state.multiSelect}
-                selectedKeys={state.selectedKeys}
-                excludedMemberIds={state.excludedMemberIds}
-                onConfirm={handleConfirm}
-                onToggleSelect={(key) =>
-                  dispatch({ type: "candidate/toggleSelect", key })
-                }
-                onConfirmSelected={handleConfirmSelected}
-                onToggleMultiSelect={() =>
-                  dispatch({ type: "multiSelect/toggle" })
-                }
-                onToggleMember={(candidateKey, studentId) =>
-                  dispatch({ type: "candidate/toggleMember", candidateKey, studentId })
-                }
-              />
-            )}
-
-          {!state.resolving &&
-            state.results &&
-            state.results.tier === "none" && (
-              <EmptyState
-                title="No match on the roster"
-                hint={`Heard "${state.results.transcript}." Type the name below instead.`}
-              />
-            )}
-
-          {!state.resolving &&
-            !state.results &&
-            !state.info &&
-            !state.banner && (
-              <EmptyState
-                title="Ready when you are"
-                hint="Hold the button below and say the last name, or type it below."
-              />
-            )}
-
-          <SearchFallback
-            value={state.searchText}
-            onChange={(value) => dispatch({ type: "search/change", value })}
-            onSubmit={handleSearchSubmit}
-            disabled={state.resolving}
-          />
+          </div>
         </div>
+
+        {railVisible && (
+          <ClassRail
+            classes={railList}
+            openClass={openClass}
+            pickedCount={(classGroup) =>
+              selectedCountIn(state.pad.selection, classGroup)
+            }
+            onSelect={(classGroup) =>
+              dispatch(
+                classGroup === openClass
+                  ? { type: "pad/close" }
+                  : { type: "pad/open", classGroup },
+              )
+            }
+          />
+        )}
+
+        {openClass !== null && (
+          <ClassDrawer
+            classGroup={openClass}
+            students={drawerStudents}
+            pickedIds={state.pad.selection[openClass] ?? []}
+            totalPicked={pickedTotal}
+            announcing={state.confirmingKey !== null}
+            loading={classRoster.loading}
+            error={classRoster.error}
+            feedback={renderFeedback(true)}
+            onToggle={(studentId) =>
+              dispatch({
+                type: "pad/toggleStudent",
+                classGroup: openClass,
+                studentId,
+              })
+            }
+            onClear={() => dispatch({ type: "pad/clearSelection" })}
+            onAnnounce={handleAnnouncePicked}
+            onClose={() => dispatch({ type: "pad/close" })}
+            onRetry={() => void classRoster.refresh()}
+          />
+        )}
       </div>
 
       <div
-        className="sticky bottom-0 z-10 border-t border-curb-200 bg-curb-50/95 px-4 pt-4 backdrop-blur supports-[backdrop-filter]:bg-curb-50/80"
+        className={cn(
+          "z-10 border-t border-curb-200 bg-curb-50 px-4",
+          openClass === null ? "pt-4" : "pt-3",
+        )}
         style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
       >
         <PushToTalkButton
           status={state.micStatus}
           disabledReason={speechDisabledReason}
+          // The drawer needs the height more than the mic needs the size.
+          compact={openClass !== null}
           onPressStart={() => void handleMicPressStart()}
           onPressEnd={() => void handleMicPressEnd()}
         />

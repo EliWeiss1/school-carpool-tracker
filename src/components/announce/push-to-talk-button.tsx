@@ -25,12 +25,19 @@ const CAPTION: Record<SpeechStatus, string> = {
 export function PushToTalkButton({
   status,
   disabledReason,
+  compact = false,
   onPressStart,
   onPressEnd,
 }: {
   status: SpeechStatus;
   /** When set, voice capture is not available at all and the button is inert. */
   disabledReason?: string;
+  /**
+   * A shorter bar -- the button beside its caption instead of above it -- for
+   * when something else (the class drawer) needs the height. The target is
+   * still 64px, the app's floor for anything on this screen.
+   */
+  compact?: boolean;
   onPressStart: () => void;
   onPressEnd: () => void;
 }) {
@@ -77,8 +84,18 @@ export function PushToTalkButton({
   }
 
   return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="relative flex h-28 w-28 items-center justify-center">
+    <div
+      className={cn(
+        "flex items-center",
+        compact ? "flex-row justify-center gap-4" : "flex-col gap-3",
+      )}
+    >
+      <div
+        className={cn(
+          "relative flex shrink-0 items-center justify-center",
+          compact ? "h-16 w-16" : "h-28 w-28",
+        )}
+      >
         {listening && (
           <>
             <span
@@ -102,7 +119,8 @@ export function PushToTalkButton({
           onPointerCancel={handlePointerUp}
           onContextMenu={(event) => event.preventDefault()}
           className={cn(
-            "focus-ring relative flex h-28 w-28 touch-none select-none items-center justify-center rounded-full font-display text-base font-bold transition-[transform,background-color,box-shadow] duration-150 ease-spring",
+            compact ? "h-16 w-16" : "h-28 w-28",
+            "focus-ring relative flex touch-none select-none items-center justify-center rounded-full font-display text-base font-bold transition-[transform,background-color,box-shadow] duration-150 ease-spring",
             "disabled:pointer-events-none disabled:opacity-40",
             listening
               ? "scale-105 bg-marigold-400 text-curb-900 shadow-float"
@@ -111,7 +129,7 @@ export function PushToTalkButton({
                 : "bg-marigold-500 text-curb-900 shadow-float active:scale-95 active:bg-marigold-600 active:shadow-press",
           )}
         >
-          <MicGlyph className="h-9 w-9" />
+          <MicGlyph className={compact ? "h-6 w-6" : "h-9 w-9"} />
         </button>
       </div>
 
@@ -123,7 +141,8 @@ export function PushToTalkButton({
         role="status"
         aria-live="polite"
         className={cn(
-          "min-h-[1.5rem] text-center",
+          "min-h-[1.5rem]",
+          compact ? "min-w-0 text-left" : "text-center",
           disabledReason
             ? "text-sm leading-snug text-curb-600"
             : "font-mono text-sm uppercase tracking-eyebrow text-curb-600",

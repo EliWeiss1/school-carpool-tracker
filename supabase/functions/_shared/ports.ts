@@ -38,9 +38,12 @@ export interface CarpoolRow {
   updated_at: string;
 }
 
-/** Narrows the roster to one class, keeping the keyterm list small. */
+/**
+ * Narrows the roster to any number of classes, keeping the keyterm list small.
+ * Absent or empty means "every class" -- never "no class".
+ */
 export interface RosterFilter {
-  classGroup?: string | null;
+  classGroups?: readonly string[];
 }
 
 /**

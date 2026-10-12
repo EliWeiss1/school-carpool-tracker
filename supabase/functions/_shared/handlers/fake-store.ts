@@ -105,7 +105,10 @@ export function createFakeStore(
         students
           .filter(
             (student) =>
-              !filter.classGroup || student.class_group === filter.classGroup,
+              !filter.classGroups ||
+              filter.classGroups.length === 0 ||
+              (student.class_group !== null &&
+                filter.classGroups.includes(student.class_group)),
           )
           .map((student) => ({ ...student })),
       );

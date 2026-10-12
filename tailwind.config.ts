@@ -131,6 +131,11 @@ const config: Config = {
           "0%": { transform: "translateY(6px)", opacity: "0" },
           "100%": { transform: "translateY(0)", opacity: "1" },
         },
+        // The /announce class drawer slides in from the rail it hangs off.
+        "drawer-in": {
+          "0%": { transform: "translateX(24px)", opacity: "0" },
+          "100%": { transform: "translateX(0)", opacity: "1" },
+        },
       },
 
       animation: {
@@ -139,6 +144,7 @@ const config: Config = {
         "listen-pulse": "listen-pulse 1.5s ease-out infinite",
         "hazard-slide": "hazard-slide 1.2s linear infinite",
         "tile-in": "tile-in 0.3s ease-out both",
+        "drawer-in": "drawer-in 0.22s cubic-bezier(0.34,1.56,0.64,1) both",
       },
 
       // The spacing ladder. Only these steps appear in the app.

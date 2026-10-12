@@ -66,7 +66,8 @@ describe("initialAnnounceState", () => {
     expect(state.banner).toBeNull();
     expect(state.info).toBeNull();
     expect(state.undo).toBeNull();
-    expect(state.filter).toEqual({ classGroup: "" });
+    expect(state.filter).toEqual({ classGroups: [] });
+    expect(state.pad).toEqual({ openClass: null, selection: {} });
     expect(state.searchText).toBe("");
     expect(state.multiSelect).toBe(false);
     expect(state.selectedKeys).toEqual([]);
@@ -74,15 +75,31 @@ describe("initialAnnounceState", () => {
 });
 
 describe("filter and search text", () => {
-  it("updates the class filter", () => {
-    let state = initialAnnounceState();
-    state = announceReducer(state, {
-      type: "filter/change",
-      field: "classGroup",
-      value: "3rd",
-    });
+  const toggle = (
+    state: ReturnType<typeof initialAnnounceState>,
+    classGroup: string,
+  ) => announceReducer(state, { type: "filter/toggleClass", classGroup });
 
-    expect(state.filter).toEqual({ classGroup: "3rd" });
+  it("narrows to several classes at once", () => {
+    let state = initialAnnounceState();
+    state = toggle(state, "3rd");
+    state = toggle(state, "K1");
+
+    expect(state.filter).toEqual({ classGroups: ["3rd", "K1"] });
+  });
+
+  it("toggling a class that is already on takes it off", () => {
+    let state = toggle(toggle(initialAnnounceState(), "3rd"), "K1");
+    state = toggle(state, "3rd");
+
+    expect(state.filter).toEqual({ classGroups: ["K1"] });
+  });
+
+  it("clearing goes back to any class", () => {
+    let state = toggle(initialAnnounceState(), "3rd");
+    state = announceReducer(state, { type: "filter/clear" });
+
+    expect(state.filter).toEqual({ classGroups: [] });
   });
 
   it("changing the filter clears stale results so a stale candidate can't be confirmed", () => {
@@ -95,11 +112,7 @@ describe("filter and search text", () => {
       candidates: [candidate("s1")],
     });
 
-    state = announceReducer(state, {
-      type: "filter/change",
-      field: "classGroup",
-      value: "1st",
-    });
+    state = toggle(state, "1st");
 
     expect(state.results).toBeNull();
   });

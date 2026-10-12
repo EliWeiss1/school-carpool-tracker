@@ -115,7 +115,9 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
         .from("students")
         .select(STUDENT_SELECT)
         .order("last_name");
-      if (filter.classGroup) query = query.eq("class_group", filter.classGroup);
+      if (filter.classGroups && filter.classGroups.length > 0) {
+        query = query.in("class_group", [...filter.classGroups]);
+      }
 
       const { data, error } = await query;
       if (error) throw new Error(`Could not read the roster: ${error.message}`);

@@ -45,7 +45,7 @@ describe("request shape", () => {
       jsonResponse({ token: "t", expiresIn: 30, keyterms: ["Cohen"] }),
     );
 
-    await client.requestToken({ ...CREDENTIALS, classGroup: "3rd" });
+    await client.requestToken({ ...CREDENTIALS, classGroups: ["3rd", "K1"] });
     const sent = firstRequest(fetchImpl);
 
     expect(sent.url).toBe(BASE + "/deepgram-token");
@@ -56,7 +56,7 @@ describe("request shape", () => {
     expect(sent.body).toMatchObject({
       pin: "123456",
       deviceId: "device-a",
-      classGroup: "3rd",
+      classGroups: ["3rd", "K1"],
     });
   });
 
@@ -67,7 +67,17 @@ describe("request shape", () => {
 
     await client.requestToken(CREDENTIALS);
 
-    expect(firstRequest(fetchImpl).body).not.toHaveProperty("classGroup");
+    expect(firstRequest(fetchImpl).body).not.toHaveProperty("classGroups");
+  });
+
+  it("leaves an empty class list off the wire, since empty means every class", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ token: "t", expiresIn: 30, keyterms: [] }),
+    );
+
+    await client.requestToken({ ...CREDENTIALS, classGroups: [] });
+
+    expect(firstRequest(fetchImpl).body).not.toHaveProperty("classGroups");
   });
 
   it("sends source on every status write, because the server requires it", async () => {

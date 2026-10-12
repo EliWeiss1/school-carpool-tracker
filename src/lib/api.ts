@@ -179,9 +179,12 @@ export interface Credentials {
   deviceId: string;
 }
 
-/** The optional narrowing that keeps the keyterm list inside Deepgram's budget. */
+/**
+ * The optional narrowing that keeps the keyterm list inside Deepgram's budget.
+ * Empty or absent means every class.
+ */
 export interface RosterScope {
-  classGroup?: string | null;
+  classGroups?: readonly string[];
 }
 
 export interface RequestOptions {
@@ -249,6 +252,13 @@ export function compact(
     if (value !== undefined && value !== null) out[key] = value;
   }
   return out;
+}
+
+/** An empty class list means "every class", so it is simply left off the wire. */
+function nonEmpty(
+  classGroups: readonly string[] | undefined,
+): string[] | undefined {
+  return classGroups && classGroups.length > 0 ? [...classGroups] : undefined;
 }
 
 /**
@@ -342,10 +352,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   const post = createEdgeFunctionPost(options);
 
   return {
-    requestToken({ pin, deviceId, classGroup, signal }) {
+    requestToken({ pin, deviceId, classGroups, signal }) {
       return post<TokenResponse>(
         "deepgram-token",
-        compact({ pin, deviceId, classGroup }),
+        compact({ pin, deviceId, classGroups: nonEmpty(classGroups) }),
         signal,
       );
     },
@@ -355,7 +365,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       deviceId,
       alternatives,
       transcript,
-      classGroup,
+      classGroups,
       signal,
     }) {
       return post<ResolveResponse>(
@@ -366,7 +376,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
           alternatives:
             alternatives && alternatives.length > 0 ? alternatives : undefined,
           transcript,
-          classGroup,
+          classGroups: nonEmpty(classGroups),
         }),
         signal,
       );

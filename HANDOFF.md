@@ -915,3 +915,62 @@ survives any reseed by design. Deleted via `carpool-write`
 (`action: "delete"`) so the live project ends this session exactly where
 CLAUDE.md's own convention says it should: 105 students, 0 carpools, no
 residue from testing.
+
+## 12. Multi-class narrowing and the class drawer on `/announce`
+
+Asked for: let "Narrow by class" take several classes, and give each class in
+the narrowed set a button on the side of the screen that opens a partial-screen
+panel of that class's students, so staff can announce by tapping names instead
+of speaking or typing. Several names can be tapped without the panel closing.
+Classified as bounded (an existing flow), with one design question asked and
+answered: tapping a name **selects** it, and one "Announce N" button sends the
+batch -- not announce-on-tap -- so a mis-tap costs nothing.
+
+### What changed
+
+**Wire.** `deepgram-token`, `resolve-name` and `roster-list` accept
+`classGroups: string[]` (empty or absent = every class). The old single
+`classGroup` string is still accepted and merged in (`handlers/filter.ts`), so
+a stale browser tab never breaks. `RosterFilter` is now `{ classGroups? }` and
+the Supabase store uses `.in("class_group", ...)`. **Until those three functions
+are redeployed, a new frontend degrades safely: the old functions ignore
+`classGroups`, so narrowing simply does not narrow the keyterms or candidates.**
+Nothing breaks and nothing is mis-announced.
+
+**State.** `announce-reducer.ts`: `filter.classGroups` replaces `filter.classGroup`
+(`filter/toggleClass`, `filter/clear`), and a new `pad` slice holds
+`{ openClass, selection }`. Selection is grouped per class
+(`class-roster.ts`'s `PadSelection`) so narrowing a class out drops exactly its
+picks -- a flat list would leave invisible picks that "Announce 3" would still
+send. A search (`resolve/start`) closes the drawer but keeps the picks;
+`confirm/settled` removes the announced ids from every class.
+
+**UI.** `roster-filter.tsx` is now toggle chips (a native `<select multiple>` is
+unusable gloved on iOS and Android). `class-rail.tsx` is a 56px strip down the
+right edge with a badge of picks per class. `class-drawer.tsx` hangs off the
+rail: header, scrolling name list, sticky "Announce N". It never covers the
+header, the rail or the mic bar. Names already arrived are shown green, round
+tick, inert -- picked names are square and marigold, so the two are never
+confused. The roster comes from the public anon read (`use-class-roster.ts`),
+refetched after every announce/undo.
+
+**Layout consequences worth knowing.** `<main>` is now `h-dvh` (header and mic
+bar fixed, the middle scrolls) so the rail and drawer can be positioned against
+that middle; `dvh` is what keeps the mic button above iOS Safari's and Android
+Chrome's collapsing address bar. While the drawer is open the mic bar goes
+compact (64px button beside its caption, 97px instead of 185px) because on a
+320px-tall-budget phone the drawer otherwise has no room once the undo banner
+appears; the banners and undo move *into* the drawer for the same reason (the
+page behind it is covered). The drawer's own announce is always logged
+`source: "manual"` with no transcript -- a stale voice result is never
+attributed to names that were tapped.
+
+### Verified
+
+Typecheck, lint and all 625 tests green. Checked in a real browser with the
+network mocked (nothing live was read or written) at 390x844, 360x640, 320x568
+and 768x1024: no horizontal overflow, 56px+ targets, rail narrows to the chosen
+classes, picks persist across classes, one `set-status` carried ids from two
+classes with `source: "manual"`. **Not checked: a physical iPhone or Android
+phone.** Port 3000 on this machine is a different project's dev server; this
+app was run on 3100.

@@ -8,7 +8,10 @@ inside, with a flash and a chime.
 Three screens:
 
 - **`/announce`** — outside, on a phone or tablet. Push-to-talk, confirm the
-  matched name, or search the roster by hand. PIN-protected.
+  matched name, or search the roster by hand. "Narrow by class" takes any
+  number of classes, and a button per class down the right edge opens a
+  drawer of that class's students to tap and announce without speaking or
+  typing. PIN-protected.
 - **`/display`** — inside, on the big screen. Live red/green grid. No login.
 - **`/admin`** — roster management and a manual "Reset all to waiting". PIN-protected.
 

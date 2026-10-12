@@ -67,6 +67,19 @@ describe("createTokenHandler", () => {
     expect(body.keyterms).toEqual(["Nguyen"]);
   });
 
+  it("narrows the keyterms to several classes at once", async () => {
+    const response = await handler()(
+      post({
+        pin: STAFF_PIN,
+        deviceId: "phone-1",
+        classGroups: ["4-Espinoza", "K-Alvarez"],
+      }),
+    );
+
+    const body = (await response.json()) as { keyterms: string[] };
+    expect(body.keyterms).toEqual(["Cohen", "Nguyen", "Brooks", "Kohen"]);
+  });
+
   it("requires the staff PIN", async () => {
     const response = await handler()(post({ deviceId: "phone-1" }));
 

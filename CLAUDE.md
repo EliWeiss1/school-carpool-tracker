@@ -144,6 +144,10 @@ src/
                         ErrorBanner, EmptyState, LoadingState
     announce/           candidate-list.tsx renders both a lone student and a
                         whole carpool; multi-select is a toggle in this list
+                        class-rail.tsx + class-drawer.tsx: a button per class
+                        down the right edge opens a drawer of that class's
+                        students to tap and announce (state in the reducer's
+                        `pad`, pure logic in lib/class-roster.ts)
     display/            class-filter.tsx + section-heading.tsx group the board
                         by class, on top of the per-section grid + tile pieces
     admin/              carpool-manager.tsx (create/edit/delete a carpool,
@@ -223,10 +227,16 @@ act on" }`. Base URL is `NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL` or
 
 | Endpoint         | Body (beyond pin/deviceId)                                                       | Returns                                          |
 | ---------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `deepgram-token` | `classGroup?`                                                          | `{ token, expiresIn, keyterms[] }`               |
-| `resolve-name`   | `alternatives[{transcript,confidence}]` or `transcript`, `classGroup?` | `{ tier, transcript, candidates[] }`             |
+| `deepgram-token` | `classGroups?`                                                         | `{ token, expiresIn, keyterms[] }`               |
+| `resolve-name`   | `alternatives[{transcript,confidence}]` or `transcript`, `classGroups?` | `{ tier, transcript, candidates[] }`             |
 | `set-status`     | `studentId` **or** `studentIds[]`, `status`, `source`, `matchConfidence?`, `transcript?`, `carpoolId?` | `{ students[], changed[], logged, missing[] }` |
 | `carpool-write`  | `action: "create"\|"update"\|"delete"`, `carpoolId?`, `name?`, `aliases?`, `memberIds?` | `{ carpool, members[], created }` or `{ deleted }` |
+
+Notes on `classGroups`: an optional string array narrowing the roster (and so
+the Deepgram keyterm list and the resolver's candidate pool) to any number of
+classes; absent or empty means every class. The old single `classGroup` string
+is still accepted and merged in, so a stale browser tab never breaks mid-deploy
+(`handlers/filter.ts`).
 
 Notes phase 4 will need:
 

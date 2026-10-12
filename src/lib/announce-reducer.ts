@@ -25,6 +25,12 @@
  */
 
 import type { CandidateStudent, MatchTier, MatchedVia } from "@/lib/api";
+import {
+  type PadSelection,
+  pruneSelection,
+  removeIds,
+  toggleSelected,
+} from "@/lib/class-roster";
 import type { SpeechStatus } from "@/lib/speech-mock";
 
 /** Structurally identical to `ResolveCandidate` from `api.ts` — redeclared so
@@ -56,7 +62,20 @@ export function candidateLabel(candidate: ResolveCandidateLike): string {
 export type ResolveOrigin = "voice" | "manual";
 
 export interface AnnounceFilter {
-  classGroup: string;
+  /** Empty means "any class" -- the same default as before multi-class narrowing. */
+  classGroups: string[];
+}
+
+/**
+ * The class drawer: tap students by name instead of speaking or typing.
+ * Deliberately separate from `multiSelect`/`selectedKeys`, which pick among
+ * *search candidates* -- this picks straight from the roster.
+ */
+export interface RosterPad {
+  /** The class whose drawer is open, or null when it is closed. */
+  openClass: string | null;
+  /** Survives closing the drawer and switching classes; see `PadSelection`. */
+  selection: PadSelection;
 }
 
 export interface AnnounceResults {
@@ -81,6 +100,7 @@ export interface UndoState {
 
 export interface AnnounceState {
   filter: AnnounceFilter;
+  pad: RosterPad;
   searchText: string;
   micStatus: SpeechStatus;
   resolving: boolean;
@@ -110,7 +130,8 @@ export interface AnnounceState {
 
 export function initialAnnounceState(): AnnounceState {
   return {
-    filter: { classGroup: "" },
+    filter: { classGroups: [] },
+    pad: { openClass: null, selection: {} },
     searchText: "",
     micStatus: "idle",
     resolving: false,
@@ -142,7 +163,12 @@ export function effectiveMemberIds(
 }
 
 export type AnnounceAction =
-  | { type: "filter/change"; field: keyof AnnounceFilter; value: string }
+  | { type: "filter/toggleClass"; classGroup: string }
+  | { type: "filter/clear" }
+  | { type: "pad/open"; classGroup: string }
+  | { type: "pad/close" }
+  | { type: "pad/toggleStudent"; classGroup: string; studentId: string }
+  | { type: "pad/clearSelection" }
   | { type: "search/change"; value: string }
   | { type: "mic/status"; status: SpeechStatus }
   | { type: "mic/nothingHeard" }
@@ -180,21 +206,73 @@ function pluralize(count: number, singular: string, plural: string): string {
   return count === 1 ? singular : plural;
 }
 
+/**
+ * Applies a new class narrowing. The keyterm list and candidate pool are both
+ * scoped by it, so a result matched against the old scope is stale; and the
+ * drawer may only show, and keep picks from, classes still on offer.
+ */
+function narrow(state: AnnounceState, classGroups: string[]): AnnounceState {
+  const everyClass = classGroups.length === 0;
+  const stillOffered = (name: string) =>
+    everyClass || classGroups.includes(name);
+
+  return {
+    ...state,
+    filter: { classGroups },
+    pad: {
+      openClass:
+        state.pad.openClass !== null && stillOffered(state.pad.openClass)
+          ? state.pad.openClass
+          : null,
+      selection: everyClass
+        ? state.pad.selection
+        : pruneSelection(state.pad.selection, classGroups),
+    },
+    results: null,
+    selectedKeys: [],
+    excludedMemberIds: {},
+  };
+}
+
 export function announceReducer(
   state: AnnounceState,
   action: AnnounceAction,
 ): AnnounceState {
   switch (action.type) {
-    case "filter/change":
+    case "filter/toggleClass": {
+      const isOn = state.filter.classGroups.includes(action.classGroup);
+      return narrow(
+        state,
+        isOn
+          ? state.filter.classGroups.filter((name) => name !== action.classGroup)
+          : [...state.filter.classGroups, action.classGroup],
+      );
+    }
+
+    case "filter/clear":
+      return narrow(state, []);
+
+    case "pad/open":
+      return { ...state, pad: { ...state.pad, openClass: action.classGroup } };
+
+    case "pad/close":
+      return { ...state, pad: { ...state.pad, openClass: null } };
+
+    case "pad/toggleStudent":
       return {
         ...state,
-        filter: { ...state.filter, [action.field]: action.value },
-        // The keyterm list and the candidate pool are both scoped by the
-        // filter, so a result matched against the old scope is stale.
-        results: null,
-        selectedKeys: [],
-        excludedMemberIds: {},
+        pad: {
+          ...state.pad,
+          selection: toggleSelected(
+            state.pad.selection,
+            action.classGroup,
+            action.studentId,
+          ),
+        },
       };
+
+    case "pad/clearSelection":
+      return { ...state, pad: { ...state.pad, selection: {} } };
 
     case "search/change":
       return { ...state, searchText: action.value };
@@ -215,6 +293,9 @@ export function announceReducer(
     case "resolve/start":
       return {
         ...state,
+        // Results render in the page behind the drawer, so it steps aside.
+        // The picks stay: coming back to the drawer should not lose them.
+        pad: { ...state.pad, openClass: null },
         resolving: true,
         banner: null,
         info: null,
@@ -279,6 +360,11 @@ export function announceReducer(
     case "confirm/settled": {
       const settled: AnnounceState = {
         ...state,
+        // Whoever was just announced is no longer a pick, from any source.
+        pad: {
+          ...state.pad,
+          selection: removeIds(state.pad.selection, action.studentIds),
+        },
         confirmingKey: null,
         results: null,
         selectedKeys: [],
