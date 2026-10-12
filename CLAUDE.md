@@ -878,7 +878,16 @@ are not worth the complexity for a single-building board.
 - [x] Add / edit / remove students, including the `aliases` field
 - [x] CSV import for initial roster setup, with a validation report
 - [x] "Reset all to waiting" with a confirmation step
-- [ ] Optional: scheduled Edge Function doing the morning reset — not built
+- [x] Scheduled reset — built as a `pg_cron` job, not an Edge Function
+      (`20261011120000_nightly_board_reset.sql`, applied live). Resets every
+      `arrived` student to `waiting` at 8 PM Pacific, Sun–Fri, writing one
+      `source: 'admin'` audit row each. `pg_cron` is UTC-only, so it fires at
+      both 03:00 and 04:00 UTC and `nightly_reset_board()` checks the Pacific
+      wall clock (hour 20, not Saturday) — that is what keeps it correct across
+      daylight saving. Both functions are revoked from anon/authenticated (they
+      are reachable as RPC otherwise). `pg_cron` isn't in PGlite, so the
+      schedule `do` block is guarded and only the functions are unit-tested;
+      the schedule itself was verified on the live project.
 
 **Five new Edge Functions**: `roster-list`, `roster-write` (create and update,
 the way `set-status` covers both directions), `roster-delete`, `roster-import`,

@@ -588,3 +588,104 @@ describe("realtime wiring", () => {
     ).resolves.toBeDefined();
   });
 });
+
+describe("nightly board reset", () => {
+  const nightly = (at: string) =>
+    db.query<{ n: number | null }>(
+      "select public.nightly_reset_board($1::timestamptz) as n",
+      [at],
+    );
+
+  async function statusOf(id: string): Promise<string> {
+    return (await readStudent(id)).status;
+  }
+
+  async function adminResetRows(id: string): Promise<number> {
+    const res = await db.query<{ n: number }>(
+      "select count(*)::int as n from public.status_events where student_id = $1 and changed_to = 'waiting' and source = 'admin'",
+      [id],
+    );
+    return res.rows[0].n;
+  }
+
+  it("resets arrived students at 8 PM Pacific in daylight time and logs each", async () => {
+    const arrived = await insertStudent("NightlyDst", "arrived");
+    const waiting = await insertStudent("NightlyDstWaiting");
+
+    // Monday 2026-10-12 20:00 PDT == 03:00 UTC on the 13th.
+    const res = await nightly("2026-10-13T03:00:00Z");
+
+    expect(res.rows[0].n).toBeGreaterThanOrEqual(1);
+    expect(await statusOf(arrived)).toBe("waiting");
+    expect((await readStudent(arrived)).arrived_at).toBeNull();
+    expect(await adminResetRows(arrived)).toBe(1);
+    // A child who was already waiting is neither touched nor audited.
+    expect(await adminResetRows(waiting)).toBe(0);
+  });
+
+  it("still fires at 8 PM Pacific in standard time (04:00 UTC)", async () => {
+    const id = await insertStudent("NightlyPst", "arrived");
+    // Monday 2026-12-07 20:00 PST == 04:00 UTC on the 8th.
+    await nightly("2026-12-08T04:00:00Z");
+    expect(await statusOf(id)).toBe("waiting");
+  });
+
+  it("does nothing at the UTC hour that is not 8 PM Pacific", async () => {
+    const summer = await insertStudent("NightlyWrongHourSummer", "arrived");
+    // 04:00 UTC in daylight time is 9 PM Pacific.
+    expect((await nightly("2026-10-13T04:00:00Z")).rows[0].n).toBeNull();
+    expect(await statusOf(summer)).toBe("arrived");
+
+    // 03:00 UTC in standard time is 7 PM Pacific.
+    expect((await nightly("2026-12-08T03:00:00Z")).rows[0].n).toBeNull();
+    expect(await statusOf(summer)).toBe("arrived");
+  });
+
+  it("skips Saturday night but runs Friday and Sunday", async () => {
+    const id = await insertStudent("NightlySaturday", "arrived");
+
+    // Saturday 2026-10-17 20:00 PDT == 03:00 UTC Sunday the 18th.
+    expect((await nightly("2026-10-18T03:00:00Z")).rows[0].n).toBeNull();
+    expect(await statusOf(id)).toBe("arrived");
+
+    // Friday 2026-10-16 20:00 PDT == 03:00 UTC Saturday the 17th.
+    await nightly("2026-10-17T03:00:00Z");
+    expect(await statusOf(id)).toBe("waiting");
+
+    // Sunday 2026-10-11 20:00 PDT == 03:00 UTC Monday the 12th.
+    await db.query(
+      "update public.students set status = 'arrived' where id = $1",
+      [id],
+    );
+    await nightly("2026-10-12T03:00:00Z");
+    expect(await statusOf(id)).toBe("waiting");
+  });
+
+  it("is a no-op, writing no audit rows, when nobody is arrived", async () => {
+    await db.exec("update public.students set status = 'waiting'");
+    const before = await db.query<{ n: number }>(
+      "select count(*)::int as n from public.status_events",
+    );
+    const res = await nightly("2026-10-13T03:00:00Z");
+    const after = await db.query<{ n: number }>(
+      "select count(*)::int as n from public.status_events",
+    );
+    expect(res.rows[0].n).toBe(0);
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+  });
+
+  it("cannot be called by anon or authenticated", async () => {
+    for (const role of ["anon", "authenticated"]) {
+      await asRole(role, async () => {
+        expect(
+          await isDenied("select public.reset_board_to_waiting()"),
+          `${role} reached reset_board_to_waiting`,
+        ).toBe(true);
+        expect(
+          await isDenied("select public.nightly_reset_board()"),
+          `${role} reached nightly_reset_board`,
+        ).toBe(true);
+      });
+    }
+  });
+});
