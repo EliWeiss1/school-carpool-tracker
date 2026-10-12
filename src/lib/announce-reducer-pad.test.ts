@@ -13,6 +13,8 @@ const pick = (state: AnnounceState, classGroup: string, studentId: string) =>
   announceReducer(state, { type: "pad/toggleStudent", classGroup, studentId });
 const narrow = (state: AnnounceState, classGroup: string) =>
   announceReducer(state, { type: "filter/toggleClass", classGroup });
+const prompt = (state: AnnounceState, studentId: string) =>
+  announceReducer(state, { type: "pad/promptCarpool", studentId });
 
 describe("class drawer", () => {
   it("opens, switches class, and closes without losing picks", () => {
@@ -86,14 +88,11 @@ describe("class drawer", () => {
       studentIds: ["a", "b"],
       changedIds: ["a", "b"],
       displayName: "Maya Cohen, Elias Kohen",
-      carpoolId: null,
       logged: 2,
-      confirmedAt: 1,
     });
 
     expect(state.pad.selection).toEqual({ K1: ["c"] });
     expect(state.pad.openClass).toBe("K1");
-    expect(state.undo?.studentIds).toEqual(["a", "b"]);
   });
 
   it("a failed announce keeps every pick so the retry is one tap", () => {
@@ -104,5 +103,66 @@ describe("class drawer", () => {
     });
 
     expect(state.pad.selection).toEqual({ K1: ["a"] });
+  });
+});
+
+describe("carpool prompt", () => {
+  it("opens with everyone ticked", () => {
+    const state = prompt(open(initialAnnounceState(), "K1"), "a");
+
+    expect(state.pad.carpoolPrompt).toEqual({ studentId: "a", unchecked: [] });
+  });
+
+  it("un-ticks and re-ticks a member", () => {
+    let state = prompt(initialAnnounceState(), "a");
+    state = announceReducer(state, { type: "pad/promptToggle", studentId: "b" });
+    expect(state.pad.carpoolPrompt?.unchecked).toEqual(["b"]);
+
+    state = announceReducer(state, { type: "pad/promptToggle", studentId: "b" });
+    expect(state.pad.carpoolPrompt?.unchecked).toEqual([]);
+  });
+
+  it("toggling with no prompt open does nothing", () => {
+    const before = initialAnnounceState();
+    expect(
+      announceReducer(before, { type: "pad/promptToggle", studentId: "b" }),
+    ).toBe(before);
+  });
+
+  it("cancelling selects nobody", () => {
+    let state = prompt(initialAnnounceState(), "a");
+    state = announceReducer(state, { type: "pad/promptCancel" });
+
+    expect(state.pad.carpoolPrompt).toBeNull();
+    expect(state.pad.selection).toEqual({});
+  });
+
+  it("confirming adds every pick, across classes, and closes the prompt", () => {
+    let state = pick(initialAnnounceState(), "K1", "a");
+    state = prompt(state, "b");
+    state = announceReducer(state, {
+      type: "pad/selectMany",
+      picks: [
+        { classGroup: "K1", studentId: "a" },
+        { classGroup: "K1", studentId: "b" },
+        { classGroup: "3rd", studentId: "c" },
+      ],
+    });
+
+    expect(state.pad.carpoolPrompt).toBeNull();
+    // "a" was already picked and is not doubled.
+    expect(state.pad.selection).toEqual({ K1: ["a", "b"], "3rd": ["c"] });
+  });
+
+  it("closing the drawer, searching, or narrowing dismisses the prompt", () => {
+    const withPrompt = () => prompt(open(initialAnnounceState(), "K1"), "a");
+
+    expect(
+      announceReducer(withPrompt(), { type: "pad/close" }).pad.carpoolPrompt,
+    ).toBeNull();
+    expect(
+      announceReducer(withPrompt(), { type: "resolve/start" }).pad.carpoolPrompt,
+    ).toBeNull();
+    expect(narrow(withPrompt(), "K1").pad.carpoolPrompt).toBeNull();
   });
 });

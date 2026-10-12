@@ -33,7 +33,7 @@ export function useClassRoster(): UseClassRoster {
     try {
       const { data, error: queryError } = await getBrowserClient()
         .from("students")
-        .select("id, first_name, last_name, class_group, status");
+        .select("id, first_name, last_name, class_group, status, carpool_id");
       if (!mounted.current) return;
       if (queryError) throw new Error(queryError.message);
       setRoster((data ?? []) as PadStudent[]);

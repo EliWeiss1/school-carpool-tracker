@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   type PadStudent,
+  addSelected,
   announceLabel,
+  carpoolMembers,
+  promptPicks,
+  tapAction,
   countStatuses,
   narrowedLabel,
   pruneSelection,
@@ -21,12 +25,14 @@ const s = (
   last: string,
   classGroup: string | null,
   status: PadStudent["status"] = "waiting",
+  carpoolId: string | null = null,
 ): PadStudent => ({
   id,
   first_name: first,
   last_name: last,
   class_group: classGroup,
   status,
+  carpool_id: carpoolId,
 });
 
 const ROSTER = [
@@ -148,5 +154,97 @@ describe("narrowedLabel", () => {
     expect(narrowedLabel(["K1", "K2", "1st", "2nd"])).toBe(
       "Narrowed to 4 classes",
     );
+  });
+});
+
+describe("addSelected", () => {
+  it("adds picks across classes and skips anyone already picked", () => {
+    const next = addSelected({ K1: ["1"] }, [
+      { classGroup: "K1", studentId: "1" },
+      { classGroup: "K1", studentId: "3" },
+      { classGroup: "2nd", studentId: "4" },
+    ]);
+
+    expect(next).toEqual({ K1: ["1", "3"], "2nd": ["4"] });
+  });
+
+  it("returns the selection untouched for no picks", () => {
+    const before = { K1: ["1"] };
+    expect(addSelected(before, [])).toBe(before);
+  });
+});
+
+describe("carpools", () => {
+  // Weiss siblings in three classes, one of whom has already arrived, plus a
+  // lone Katz in a carpool of one, and a student with no carpool at all.
+  const FAMILY = [
+    s("w1", "Dan", "Weiss", "K1", "waiting", "weiss"),
+    s("w2", "Ava", "Weiss", "3rd", "waiting", "weiss"),
+    s("w3", "Sam", "Weiss", "5th", "arrived", "weiss"),
+    s("k1", "Eli", "Katz", "2nd", "waiting", "katz"),
+    s("solo", "Noa", "Alone", "2nd"),
+  ];
+
+  describe("carpoolMembers", () => {
+    it("finds waiting mates across classes, A to Z, leaving out anyone already here", () => {
+      expect(carpoolMembers(FAMILY, FAMILY[0]).map((x) => x.id)).toEqual([
+        "w2",
+        "w1",
+      ]);
+    });
+
+    it("is just the student when they have no carpool", () => {
+      expect(carpoolMembers(FAMILY, FAMILY[4]).map((x) => x.id)).toEqual([
+        "solo",
+      ]);
+    });
+
+    it("is just the student when every mate has already arrived", () => {
+      const lone = [
+        s("a", "A", "Lone", "K1", "waiting", "c"),
+        s("b", "B", "Lone", "K1", "arrived", "c"),
+      ];
+      expect(carpoolMembers(lone, lone[0])).toHaveLength(1);
+    });
+  });
+
+  describe("tapAction", () => {
+    it("sends an arrived student back", () => {
+      expect(tapAction(FAMILY, {}, FAMILY[2])).toBe("unannounce");
+    });
+
+    it("un-picks a picked student without asking again", () => {
+      expect(tapAction(FAMILY, { K1: ["w1"] }, FAMILY[0])).toBe("deselect");
+    });
+
+    it("asks who is riding when waiting carpool-mates exist", () => {
+      expect(tapAction(FAMILY, {}, FAMILY[0])).toBe("prompt");
+    });
+
+    it("just picks someone with no waiting carpool-mates", () => {
+      expect(tapAction(FAMILY, {}, FAMILY[3])).toBe("select");
+      expect(tapAction(FAMILY, {}, FAMILY[4])).toBe("select");
+    });
+  });
+
+  describe("promptPicks", () => {
+    const members = [FAMILY[1], FAMILY[0]];
+
+    it("takes everyone by default, filed under their own class", () => {
+      expect(promptPicks(members, [])).toEqual([
+        { classGroup: "3rd", studentId: "w2" },
+        { classGroup: "K1", studentId: "w1" },
+      ]);
+    });
+
+    it("leaves out whoever was un-ticked", () => {
+      expect(promptPicks(members, ["w2"])).toEqual([
+        { classGroup: "K1", studentId: "w1" },
+      ]);
+    });
+
+    it("is empty when everyone is un-ticked", () => {
+      expect(promptPicks(members, ["w1", "w2"])).toEqual([]);
+    });
   });
 });

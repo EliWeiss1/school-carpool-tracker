@@ -15,7 +15,14 @@ import { type PadStudent, countStatuses } from "@/lib/class-roster";
  * nothing is written until the one "Announce N" button is pressed, so a
  * mis-tap with a gloved thumb costs nothing. That keeps CLAUDE.md's rule --
  * a human always taps to confirm -- while still letting several names go out
- * in a single call and a single undo.
+ * in a single call.
+ *
+ * A green name is the reverse: tapping it sends that student back to waiting.
+ * That is the only way to take an announcement back -- there is no timed undo
+ * banner -- so it works at any time, for any student.
+ *
+ * Tapping a waiting name that has carpool-mates raises `prompt` over the
+ * drawer (the screen decides when; this component only hosts it).
  *
  * Presentational: it renders what it is handed. `announce-screen.tsx` owns the
  * state and the write.
@@ -26,10 +33,12 @@ export function ClassDrawer({
   pickedIds,
   totalPicked,
   announcing,
+  busy,
   loading,
   error,
   feedback,
-  onToggle,
+  prompt,
+  onTap,
   onClear,
   onAnnounce,
   onClose,
@@ -42,12 +51,17 @@ export function ClassDrawer({
   pickedIds: string[];
   /** Picks across every class -- what the Announce button will send. */
   totalPicked: number;
+  /** True while the Announce button's own request is in flight. */
   announcing: boolean;
+  /** True while any write is in flight; names are inert until it settles. */
+  busy: boolean;
   loading: boolean;
   error: string | null;
   /** Banners and the undo window, shown here because the page behind is covered. */
   feedback: ReactNode;
-  onToggle: (studentId: string) => void;
+  /** The carpool prompt, or null. Rendered over the drawer's own area. */
+  prompt: ReactNode;
+  onTap: (student: PadStudent) => void;
   onClear: () => void;
   onAnnounce: () => void;
   onClose: () => void;
@@ -135,8 +149,8 @@ export function ClassDrawer({
               <StudentRow
                 student={student}
                 selected={picked.has(student.id)}
-                disabled={announcing}
-                onToggle={() => onToggle(student.id)}
+                disabled={busy}
+                onTap={() => onTap(student)}
               />
             </li>
           ))}
@@ -151,7 +165,7 @@ export function ClassDrawer({
               variant="quiet"
               size="tap"
               className="shrink-0 !px-4 !text-base"
-              disabled={announcing}
+              disabled={busy}
               onClick={onClear}
             >
               Clear
@@ -162,7 +176,7 @@ export function ClassDrawer({
             size="tap"
             fullWidth
             className="!px-4 !text-base"
-            disabled={totalPicked === 0 || announcing}
+            disabled={totalPicked === 0 || busy}
             onClick={onAnnounce}
           >
             {announcing
@@ -173,6 +187,8 @@ export function ClassDrawer({
           </Button>
         </div>
       </footer>
+
+      {prompt}
     </section>
   );
 }
@@ -181,30 +197,32 @@ function StudentRow({
   student,
   selected,
   disabled,
-  onToggle,
+  onTap,
 }: {
   student: PadStudent;
   selected: boolean;
   disabled: boolean;
-  onToggle: () => void;
+  onTap: () => void;
 }) {
   const here = student.status === "arrived";
+  const fullName = `${student.first_name} ${student.last_name}`;
 
   return (
     <button
       type="button"
-      // An arrived student is not a candidate: announcing them again would
-      // change nothing and log nothing, so the row is shown but inert.
-      disabled={here || disabled}
-      aria-pressed={here ? undefined : selected}
-      onClick={onToggle}
+      disabled={disabled}
+      // A green row is the already-announced state, and tapping it reverses
+      // that, so it reads as "here" to a screen reader and says what a tap does.
+      aria-pressed={here ? true : selected}
+      aria-label={here ? `${fullName}, here. Tap to send back to waiting.` : fullName}
+      onClick={onTap}
       className={cn(
         "focus-ring flex min-h-tap w-full touch-manipulation items-center gap-3 rounded-xl border-2 px-3 text-left",
         "transition-[transform,background-color,border-color] duration-150 ease-spring",
+        "active:scale-[0.98] disabled:opacity-60",
         here
-          ? "border-arrived-border bg-arrived-soft"
+          ? "border-arrived-border bg-arrived-soft active:bg-arrived-border [@media(hover:hover)]:hover:bg-arrived-border"
           : cn(
-              "active:scale-[0.98] disabled:opacity-60",
               selected
                 ? "border-marigold-500 bg-marigold-50"
                 : "border-curb-200 bg-white active:bg-curb-100 [@media(hover:hover)]:hover:border-curb-300 [@media(hover:hover)]:hover:bg-curb-50",
@@ -238,7 +256,7 @@ function StudentRow({
 
       <span
         className="min-w-0 flex-1 truncate"
-        title={`${student.first_name} ${student.last_name}`}
+        title={fullName}
       >
         <span
           className={cn(

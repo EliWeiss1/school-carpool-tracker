@@ -974,3 +974,39 @@ classes, picks persist across classes, one `set-status` carried ids from two
 classes with `source: "manual"`. **Not checked: a physical iPhone or Android
 phone.** Port 3000 on this machine is a different project's dev server; this
 app was run on 3100.
+
+### Follow-up: no undo banner, carpool prompt, tap-to-send-back
+
+Three changes after the first cut, asked for in one message:
+
+- **The 2-minute undo banner is gone** (`announce-undo.ts`, `undo-banner.tsx`,
+  the reducer's `undo` state and `undo/*` actions). Taking someone back is now
+  the reverse of announcing: tap their **green** name in the drawer and that one
+  student goes back to waiting immediately (`set-status` `waiting`, source
+  `manual`). No confirmation step, deliberately -- it works for anyone, any time,
+  including students announced by voice. After a drawer announce the confirmation
+  is the names turning green; the calm status line is not shown inside the
+  drawer, only errors are.
+- **Carpools in the drawer.** Tapping a *waiting* name whose carpool has other
+  waiting members raises a small "Select the carpool" prompt over the drawer:
+  everyone ticked by default (mirrors how a carpool is announced by voice),
+  untick anyone not riding, then "Select all N" / "Select N" adds them to the
+  picks. It only selects -- the drawer's Announce button still does the write.
+  Members are found across the whole roster (siblings are often in different
+  classes) from `students.carpool_id`, which the anon key can read; the carpool's
+  *name* is not readable (that table has no public access), so the prompt lists
+  names and classes instead. Carpool-mates who have already arrived are left
+  out. The decision of what a tap does lives in `class-roster.ts` (`tapAction`,
+  `carpoolMembers`, `promptPicks`), tested without rendering.
+- **A known gap:** picks from a carpool-mate in a class that is not on the rail
+  (because the filter is narrowed) are still sent by "Announce N" -- the prompt
+  shows their class so it is visible when picked -- but narrowing the filter
+  afterwards drops those picks, since picks are pruned to the offered classes.
+
+**Why 6th/7th/8th appeared on `/display` but not in the class lists:**
+`/display` builds its sections from the `class_group` text on the students
+themselves; `/announce` and `/admin` pickers read the separate `class_groups`
+table, which the migration seeded only up to 5th. Students with other class
+text still show on the board. To remove them from the board, delete those
+students in `/admin` (the roster table has row checkboxes, shift-click range
+select, and "Delete N selected").

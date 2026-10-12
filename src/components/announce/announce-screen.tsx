@@ -6,16 +6,15 @@ import {
   useMemo,
   useReducer,
   useRef,
-  useState,
 } from "react";
 
 import { CandidateList } from "@/components/announce/candidate-list";
+import { CarpoolPrompt } from "@/components/announce/carpool-prompt";
 import { ClassDrawer } from "@/components/announce/class-drawer";
 import { ClassRail } from "@/components/announce/class-rail";
 import { PushToTalkButton } from "@/components/announce/push-to-talk-button";
 import { RosterFilter } from "@/components/announce/roster-filter";
 import { SearchFallback } from "@/components/announce/search-fallback";
-import { UndoBanner } from "@/components/announce/undo-banner";
 import {
   Button,
   EmptyState,
@@ -33,16 +32,19 @@ import {
   initialAnnounceState,
 } from "@/lib/announce-reducer";
 import { expiresAt, isFresh } from "@/lib/announce-token";
-import { formatRemaining, remainingMs } from "@/lib/announce-undo";
 import { ApiError, api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
+  type PadStudent,
   announceLabel,
+  carpoolMembers,
+  promptPicks,
   railClasses,
   scopeKey,
   selectedCountIn,
   selectedIds,
   studentsInClass,
+  tapAction,
 } from "@/lib/class-roster";
 import { publicEnv } from "@/lib/env";
 import { useClassGroups } from "@/lib/use-class-groups";
@@ -74,7 +76,7 @@ interface ConfirmAudit {
   transcript?: string;
 }
 
-type ErrorActionType = "resolve/error" | "confirm/error" | "undo/error";
+type ErrorActionType = "resolve/error" | "confirm/error";
 
 /** A press that released before the (async-created) speech source existed. */
 interface MicSession {
@@ -109,24 +111,6 @@ export function AnnounceScreen() {
   const speechSourceRef = useRef<{ token: string; source: SpeechSource } | null>(
     null,
   );
-  const [undoPending, setUndoPending] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
-
-  // Ticks once a second only while there is something to count down —
-  // /announce otherwise never re-renders on a timer, which matters on the
-  // slow hardware this runs on outdoors.
-  useEffect(() => {
-    if (!state.undo) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [state.undo]);
-
-  useEffect(() => {
-    if (state.undo && remainingMs(state.undo, now) <= 0) {
-      dispatch({ type: "undo/expire", studentIds: state.undo.studentIds });
-    }
-  }, [state.undo, now]);
-
   // A press that outlives the component (navigated away mid-listen) must not
   // keep a timer alive or, worse, resolve into a dispatch on an unmounted tree.
   const unmountedRef = useRef(false);
@@ -363,9 +347,7 @@ export function AnnounceScreen() {
         studentIds,
         changedIds: response.changed,
         displayName,
-        carpoolId,
         logged: response.logged,
-        confirmedAt: Date.now(),
       });
       void classRoster.refresh();
     } catch (error) {
@@ -432,35 +414,61 @@ export function AnnounceScreen() {
     );
   }
 
-  async function handleUndo() {
+  /**
+   * The reverse of announcing: a green name tapped in the drawer goes back to
+   * waiting. There is deliberately no timed undo banner -- this is the one way
+   * to take an announcement back, available any time, for any student.
+   */
+  async function handleUnannounce(student: PadStudent) {
     const creds = session.credentials();
-    if (!creds || !state.undo) return;
+    if (!creds || state.confirmingKey) return;
 
-    const { studentIds } = state.undo;
-    dispatch({ type: "undo/start" });
-    setUndoPending(true);
+    dispatch({ type: "confirm/start", key: `unannounce:${student.id}` });
+
     try {
       await api.setStatus({
         ...creds,
-        studentIds,
+        studentIds: [student.id],
         status: "waiting",
         source: "manual",
       });
-      dispatch({ type: "undo/success" });
+      dispatch({
+        type: "unannounce/settled",
+        displayName: `${student.first_name} ${student.last_name}`,
+      });
       void classRoster.refresh();
     } catch (error) {
       if (isPinError(error)) {
         session.lock();
         return;
       }
-      reportError(error, "undo/error");
-    } finally {
-      setUndoPending(false);
+      reportError(error, "confirm/error");
     }
   }
 
-  const undoRemaining = state.undo ? remainingMs(state.undo, now) : 0;
-  const showUndo = state.undo !== null && undoRemaining > 0;
+  /** Routes a tap on a name in the drawer; the rules live in `tapAction`. */
+  function handleTapStudent(student: PadStudent) {
+    const action = tapAction(classRoster.roster, state.pad.selection, student);
+    const classGroup = student.class_group ?? "";
+
+    switch (action) {
+      case "unannounce":
+        void handleUnannounce(student);
+        return;
+      case "prompt":
+        dispatch({ type: "pad/promptCarpool", studentId: student.id });
+        return;
+      case "select":
+      case "deselect":
+        dispatch({
+          type: "pad/toggleStudent",
+          classGroup,
+          studentId: student.id,
+        });
+        return;
+    }
+  }
+
   // Mock mode needs no real capability check. Otherwise this reflects what
   // the browser can actually do, not which speech backend is configured --
   // a real Deepgram client now backs this, so "disabled" should mean "this
@@ -475,6 +483,13 @@ export function AnnounceScreen() {
   const railVisible = railList.length > 0;
   const openClass = state.pad.openClass;
   const pickedTotal = selectedIds(state.pad.selection).length;
+  const promptStudent = state.pad.carpoolPrompt
+    ? classRoster.roster.find((s) => s.id === state.pad.carpoolPrompt?.studentId)
+    : undefined;
+  const promptMembers = useMemo(
+    () => (promptStudent ? carpoolMembers(classRoster.roster, promptStudent) : []),
+    [classRoster.roster, promptStudent],
+  );
   const drawerStudents = useMemo(
     () =>
       openClass === null
@@ -484,10 +499,11 @@ export function AnnounceScreen() {
   );
 
   /**
-   * Banners, the undo window and the calm status line. They sit at the top of
-   * the page normally, but the drawer covers the top of the page, so while it
-   * is open the same nodes render inside it -- an announce must never succeed
-   * (or fail) out of sight.
+   * Banners and the calm status line. They sit at the top of the page
+   * normally, but the drawer covers the top of the page, so while it is open
+   * errors render inside it -- an announce must never fail out of sight. The
+   * calm line stays out of the drawer: the names turning green is the
+   * confirmation, and a sentence there would only take height from the list.
    */
   const renderFeedback = (inDrawer: boolean) => (
     <>
@@ -495,23 +511,11 @@ export function AnnounceScreen() {
         <ErrorBanner tone={state.banner.tone} message={state.banner.message} />
       )}
 
-      {showUndo && state.undo && (
-        <UndoBanner
-          displayName={state.undo.displayName}
-          remainingLabel={formatRemaining(undoRemaining)}
-          pending={undoPending}
-          compact={inDrawer}
-          onUndo={handleUndo}
-        />
-      )}
-
-      {/* The undo banner already says who arrived; repeating it in the cramped
-          drawer would push the list off the screen. */}
-      {!state.banner && state.info && !(inDrawer && showUndo) && (
+      {!inDrawer && !state.banner && state.info && (
         <p
           role="status"
           aria-live="polite"
-          className="rounded-xl bg-curb-50 px-4 py-3 text-curb-700"
+          className="rounded-xl bg-white px-4 py-3 text-curb-700 shadow-card"
         >
           {state.info}
         </p>
@@ -642,21 +646,37 @@ export function AnnounceScreen() {
             students={drawerStudents}
             pickedIds={state.pad.selection[openClass] ?? []}
             totalPicked={pickedTotal}
-            announcing={state.confirmingKey !== null}
+            announcing={state.confirmingKey === "pad"}
+            busy={state.confirmingKey !== null}
             loading={classRoster.loading}
             error={classRoster.error}
             feedback={renderFeedback(true)}
-            onToggle={(studentId) =>
-              dispatch({
-                type: "pad/toggleStudent",
-                classGroup: openClass,
-                studentId,
-              })
-            }
+            onTap={handleTapStudent}
             onClear={() => dispatch({ type: "pad/clearSelection" })}
             onAnnounce={handleAnnouncePicked}
             onClose={() => dispatch({ type: "pad/close" })}
             onRetry={() => void classRoster.refresh()}
+            prompt={
+              promptStudent && state.pad.carpoolPrompt ? (
+                <CarpoolPrompt
+                  members={promptMembers}
+                  unchecked={state.pad.carpoolPrompt.unchecked}
+                  onToggle={(studentId) =>
+                    dispatch({ type: "pad/promptToggle", studentId })
+                  }
+                  onConfirm={() =>
+                    dispatch({
+                      type: "pad/selectMany",
+                      picks: promptPicks(
+                        promptMembers,
+                        state.pad.carpoolPrompt?.unchecked ?? [],
+                      ),
+                    })
+                  }
+                  onCancel={() => dispatch({ type: "pad/promptCancel" })}
+                />
+              ) : null
+            }
           />
         )}
       </div>

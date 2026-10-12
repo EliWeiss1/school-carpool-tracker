@@ -15,10 +15,10 @@
  *   `set-status` result the caller already received.
  * - A student absent from `changedIds` is reported calmly (`info`), never as
  *   a `banner` — it is not a failure, someone else just got there first.
- * - `logged < changedIds.length` is a quiet `warning`-tone banner and never
- *   touches `undo` — the status change itself is never in question.
- * - `undo/expire` carries the `studentIds` it is expiring so a stale timer
- *   from a superseded confirmation can never clobber a newer one.
+ * - `logged < changedIds.length` is a quiet `warning`-tone banner — the status
+ *   change itself is never in question.
+ * - There is no undo window. Sending someone back to waiting is the drawer's
+ *   job: tapping a green name there is the reverse of announcing it.
  * - Multi-select is opt-in and defaults off: a tap on a single candidate
  *   confirms it immediately, exactly as it always has. Turning "Announce
  *   several" on is what makes a tap a checkbox instead of a confirm.
@@ -26,7 +26,9 @@
 
 import type { CandidateStudent, MatchTier, MatchedVia } from "@/lib/api";
 import {
+  type PadPick,
   type PadSelection,
+  addSelected,
   pruneSelection,
   removeIds,
   toggleSelected,
@@ -76,6 +78,13 @@ export interface RosterPad {
   openClass: string | null;
   /** Survives closing the drawer and switching classes; see `PadSelection`. */
   selection: PadSelection;
+  /**
+   * Set while the "who is riding?" prompt is up for a tapped student who has
+   * carpool-mates. Everyone starts ticked; `unchecked` is who the staff member
+   * has since un-ticked. The members themselves are derived from the roster at
+   * render time, so this never holds stale names.
+   */
+  carpoolPrompt: { studentId: string; unchecked: string[] } | null;
 }
 
 export interface AnnounceResults {
@@ -88,14 +97,6 @@ export interface AnnounceResults {
 export interface AnnounceBanner {
   tone: "error" | "warning";
   message: string;
-}
-
-export interface UndoState {
-  studentIds: string[];
-  displayName: string;
-  carpoolId: string | null;
-  /** `Date.now()` when `set-status` reported at least one changed id. */
-  confirmedAt: number;
 }
 
 export interface AnnounceState {
@@ -125,13 +126,12 @@ export interface AnnounceState {
   banner: AnnounceBanner | null;
   /** A calm, non-error message: "already arrived", "nothing heard", etc. */
   info: string | null;
-  undo: UndoState | null;
 }
 
 export function initialAnnounceState(): AnnounceState {
   return {
     filter: { classGroups: [] },
-    pad: { openClass: null, selection: {} },
+    pad: { openClass: null, selection: {}, carpoolPrompt: null },
     searchText: "",
     micStatus: "idle",
     resolving: false,
@@ -142,7 +142,6 @@ export function initialAnnounceState(): AnnounceState {
     confirmingKey: null,
     banner: null,
     info: null,
-    undo: null,
   };
 }
 
@@ -169,6 +168,10 @@ export type AnnounceAction =
   | { type: "pad/close" }
   | { type: "pad/toggleStudent"; classGroup: string; studentId: string }
   | { type: "pad/clearSelection" }
+  | { type: "pad/promptCarpool"; studentId: string }
+  | { type: "pad/promptToggle"; studentId: string }
+  | { type: "pad/promptCancel" }
+  | { type: "pad/selectMany"; picks: PadPick[] }
   | { type: "search/change"; value: string }
   | { type: "mic/status"; status: SpeechStatus }
   | { type: "mic/nothingHeard" }
@@ -190,15 +193,10 @@ export type AnnounceAction =
       studentIds: string[];
       changedIds: string[];
       displayName: string;
-      carpoolId: string | null;
       logged: number;
-      confirmedAt: number;
     }
   | { type: "confirm/error"; banner: AnnounceBanner }
-  | { type: "undo/start" }
-  | { type: "undo/success" }
-  | { type: "undo/error"; banner: AnnounceBanner }
-  | { type: "undo/expire"; studentIds: string[] }
+  | { type: "unannounce/settled"; displayName: string }
   | { type: "banner/dismiss" }
   | { type: "info/dismiss" };
 
@@ -227,6 +225,7 @@ function narrow(state: AnnounceState, classGroups: string[]): AnnounceState {
       selection: everyClass
         ? state.pad.selection
         : pruneSelection(state.pad.selection, classGroups),
+      carpoolPrompt: null,
     },
     results: null,
     selectedKeys: [],
@@ -256,7 +255,10 @@ export function announceReducer(
       return { ...state, pad: { ...state.pad, openClass: action.classGroup } };
 
     case "pad/close":
-      return { ...state, pad: { ...state.pad, openClass: null } };
+      return {
+        ...state,
+        pad: { ...state.pad, openClass: null, carpoolPrompt: null },
+      };
 
     case "pad/toggleStudent":
       return {
@@ -273,6 +275,46 @@ export function announceReducer(
 
     case "pad/clearSelection":
       return { ...state, pad: { ...state.pad, selection: {} } };
+
+    case "pad/promptCarpool":
+      return {
+        ...state,
+        pad: {
+          ...state.pad,
+          carpoolPrompt: { studentId: action.studentId, unchecked: [] },
+        },
+      };
+
+    case "pad/promptToggle": {
+      const prompt = state.pad.carpoolPrompt;
+      if (!prompt) return state;
+      const isOff = prompt.unchecked.includes(action.studentId);
+      return {
+        ...state,
+        pad: {
+          ...state.pad,
+          carpoolPrompt: {
+            ...prompt,
+            unchecked: isOff
+              ? prompt.unchecked.filter((id) => id !== action.studentId)
+              : [...prompt.unchecked, action.studentId],
+          },
+        },
+      };
+    }
+
+    case "pad/promptCancel":
+      return { ...state, pad: { ...state.pad, carpoolPrompt: null } };
+
+    case "pad/selectMany":
+      return {
+        ...state,
+        pad: {
+          ...state.pad,
+          selection: addSelected(state.pad.selection, action.picks),
+          carpoolPrompt: null,
+        },
+      };
 
     case "search/change":
       return { ...state, searchText: action.value };
@@ -295,7 +337,7 @@ export function announceReducer(
         ...state,
         // Results render in the page behind the drawer, so it steps aside.
         // The picks stay: coming back to the drawer should not lose them.
-        pad: { ...state.pad, openClass: null },
+        pad: { ...state.pad, openClass: null, carpoolPrompt: null },
         resolving: true,
         banner: null,
         info: null,
@@ -377,19 +419,12 @@ export function announceReducer(
 
       if (changedCount === 0) {
         // Somebody else already confirmed everyone here. True and calm, not
-        // an error — and no new undo window, because nothing changed here.
+        // an error.
         return {
           ...settled,
           info: `${action.displayName} ${pluralize(total, "was", "were")} already marked arrived.`,
         };
       }
-
-      const undo: UndoState = {
-        studentIds: action.changedIds,
-        displayName: action.displayName,
-        carpoolId: action.carpoolId,
-        confirmedAt: action.confirmedAt,
-      };
 
       const partial = changedCount < total;
       const baseMessage = partial
@@ -397,11 +432,10 @@ export function announceReducer(
         : `${action.displayName} ${subject} marked arrived.`;
 
       if (action.logged < changedCount) {
-        // The status change stands regardless — see status.ts — so the undo
-        // window is real. Only some audit rows are missing, surfaced quietly.
+        // The status change stands regardless — see status.ts. Only some audit
+        // rows are missing, surfaced quietly.
         return {
           ...settled,
-          undo,
           banner: {
             tone: "warning",
             message: `${baseMessage.replace(/\.$/, "")}, but the confirmation was not fully logged.`,
@@ -409,35 +443,18 @@ export function announceReducer(
         };
       }
 
-      return { ...settled, undo, info: baseMessage };
+      return { ...settled, info: baseMessage };
     }
 
     case "confirm/error":
       return { ...state, confirmingKey: null, banner: action.banner };
 
-    case "undo/start":
-      return { ...state, banner: null };
-
-    case "undo/success":
+    case "unannounce/settled":
       return {
         ...state,
-        undo: null,
-        info: state.undo
-          ? `Undo confirmed — ${state.undo.displayName} ${pluralize(state.undo.studentIds.length, "is", "are")} back to waiting.`
-          : "Undo confirmed.",
+        confirmingKey: null,
+        info: `${action.displayName} is back to waiting.`,
       };
-
-    case "undo/error":
-      return { ...state, banner: action.banner };
-
-    case "undo/expire":
-      // Only clear the window if it still belongs to the confirmation the
-      // timer was set for — a stale timer must never clobber a newer one.
-      return state.undo &&
-        state.undo.studentIds.length === action.studentIds.length &&
-        state.undo.studentIds.every((id) => action.studentIds.includes(id))
-        ? { ...state, undo: null }
-        : state;
 
     case "banner/dismiss":
       return { ...state, banner: null };

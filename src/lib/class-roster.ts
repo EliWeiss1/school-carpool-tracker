@@ -16,6 +16,8 @@ export interface PadStudent {
   last_name: string;
   class_group: string | null;
   status: StudentStatus;
+  /** Students sharing a carpool_id ride together; null means no carpool. */
+  carpool_id: string | null;
 }
 
 /**
@@ -27,6 +29,12 @@ export interface PadStudent {
  * announce someone the staff member cannot see.
  */
 export type PadSelection = Record<string, string[]>;
+
+/** One student picked, with the class they are filed under. */
+export interface PadPick {
+  classGroup: string;
+  studentId: string;
+}
 
 /** Stable sort so a name never jumps position between renders. */
 function byName(a: PadStudent, b: PadStudent): number {
@@ -136,6 +144,75 @@ function withClass(
   if (ids.length === 0) delete next[classGroup];
   else next[classGroup] = ids;
   return next;
+}
+
+/** Adds picks, skipping anyone already picked, so a repeat is harmless. */
+export function addSelected(
+  selection: PadSelection,
+  picks: readonly PadPick[],
+): PadSelection {
+  let next = selection;
+  for (const { classGroup, studentId } of picks) {
+    if (!(next[classGroup] ?? []).includes(studentId)) {
+      next = toggleSelected(next, classGroup, studentId);
+    }
+  }
+  return next;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Carpools                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Everyone who could be announced together with `student`: their carpool's
+ * members who are still waiting, the student included, A to Z. A carpool
+ * member who has already arrived is left out -- announcing them again would
+ * change nothing -- and a student with no carpool gets just themselves.
+ *
+ * Members are found across the whole roster, not one class: siblings are often
+ * in different classes.
+ */
+export function carpoolMembers(
+  roster: readonly PadStudent[],
+  student: PadStudent,
+): PadStudent[] {
+  if (student.carpool_id === null) return [student];
+  return roster
+    .filter((s) => s.carpool_id === student.carpool_id && s.status === "waiting")
+    .sort(byName);
+}
+
+export type TapAction = "unannounce" | "deselect" | "prompt" | "select";
+
+/**
+ * What tapping a name in the drawer does. Kept here, not in the component, so
+ * the rules are tested:
+ * - a green (arrived) name is the reverse of announcing -- send them back;
+ * - a picked name is simply un-picked;
+ * - a waiting name with waiting carpool-mates asks who is riding first;
+ * - anyone else is just picked.
+ */
+export function tapAction(
+  roster: readonly PadStudent[],
+  selection: PadSelection,
+  student: PadStudent,
+): TapAction {
+  if (student.status === "arrived") return "unannounce";
+  const picked = (selection[student.class_group ?? ""] ?? []).includes(student.id);
+  if (picked) return "deselect";
+  return carpoolMembers(roster, student).length > 1 ? "prompt" : "select";
+}
+
+/** The picks a confirmed prompt adds: every member except the un-ticked ones. */
+export function promptPicks(
+  members: readonly PadStudent[],
+  unchecked: readonly string[],
+): PadPick[] {
+  const off = new Set(unchecked);
+  return members
+    .filter((m) => !off.has(m.id))
+    .map((m) => ({ classGroup: m.class_group ?? "", studentId: m.id }));
 }
 
 /* -------------------------------------------------------------------------- */

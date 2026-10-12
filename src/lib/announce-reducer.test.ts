@@ -56,7 +56,7 @@ describe("candidateKey / candidateLabel", () => {
 });
 
 describe("initialAnnounceState", () => {
-  it("starts idle, with no results, no banner, no undo, empty filter and search text", () => {
+  it("starts idle, with no results, no banner, empty filter and search text", () => {
     const state = initialAnnounceState();
 
     expect(state.micStatus).toBe("idle");
@@ -65,9 +65,12 @@ describe("initialAnnounceState", () => {
     expect(state.confirmingKey).toBeNull();
     expect(state.banner).toBeNull();
     expect(state.info).toBeNull();
-    expect(state.undo).toBeNull();
     expect(state.filter).toEqual({ classGroups: [] });
-    expect(state.pad).toEqual({ openClass: null, selection: {} });
+    expect(state.pad).toEqual({
+      openClass: null,
+      selection: {},
+      carpoolPrompt: null,
+    });
     expect(state.searchText).toBe("");
     expect(state.multiSelect).toBe(false);
     expect(state.selectedKeys).toEqual([]);
@@ -341,9 +344,7 @@ describe("carpool member exclusion", () => {
       studentIds: ["s1"],
       changedIds: ["s1"],
       displayName: "Weiss Carpool",
-      carpoolId: "weiss",
       logged: 1,
-      confirmedAt: 0,
     });
 
     expect(state.excludedMemberIds).toEqual({});
@@ -359,7 +360,7 @@ describe("confirming a candidate", () => {
     expect(state.banner).toBeNull();
   });
 
-  it("a changed confirmation clears results, starts the undo window, and stops the in-flight flag", () => {
+  it("a changed confirmation clears results and stops the in-flight flag", () => {
     let state = initialAnnounceState();
     state = announceReducer(state, {
       type: "resolve/success",
@@ -374,24 +375,16 @@ describe("confirming a candidate", () => {
       studentIds: ["s1"],
       changedIds: ["s1"],
       displayName: "Maya Cohen",
-      carpoolId: null,
       logged: 1,
-      confirmedAt: 1_000,
     });
 
     expect(state.confirmingKey).toBeNull();
     expect(state.results).toBeNull();
-    expect(state.undo).toEqual({
-      studentIds: ["s1"],
-      displayName: "Maya Cohen",
-      carpoolId: null,
-      confirmedAt: 1_000,
-    });
     expect(state.info).toMatch(/Maya Cohen/);
     expect(state.banner).toBeNull();
   });
 
-  it("no changed ids is reported calmly and does not start an undo window", () => {
+  it("no changed ids is reported calmly", () => {
     let state = initialAnnounceState();
     state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
     state = announceReducer(state, {
@@ -399,17 +392,14 @@ describe("confirming a candidate", () => {
       studentIds: ["s1"],
       changedIds: [],
       displayName: "Maya Cohen",
-      carpoolId: null,
       logged: 0,
-      confirmedAt: 1_000,
     });
 
-    expect(state.undo).toBeNull();
     expect(state.banner).toBeNull();
     expect(state.info).toMatch(/already/i);
   });
 
-  it("logged fewer than changed surfaces a quiet warning but keeps the undo window", () => {
+  it("logged fewer than changed surfaces a quiet warning", () => {
     let state = initialAnnounceState();
     state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
     state = announceReducer(state, {
@@ -417,28 +407,23 @@ describe("confirming a candidate", () => {
       studentIds: ["s1"],
       changedIds: ["s1"],
       displayName: "Maya Cohen",
-      carpoolId: null,
       logged: 0,
-      confirmedAt: 1_000,
     });
 
-    expect(state.undo).not.toBeNull();
     expect(state.banner).toEqual({
       tone: "warning",
       message: expect.stringMatching(/log/i),
     });
   });
 
-  it("confirm/error stops the in-flight flag and shows the banner without touching any existing undo state", () => {
+  it("confirm/error stops the in-flight flag and shows the banner", () => {
     let state = initialAnnounceState();
     state = announceReducer(state, {
       type: "confirm/settled",
       studentIds: ["s0"],
       changedIds: ["s0"],
       displayName: "Earlier Kid",
-      carpoolId: null,
       logged: 1,
-      confirmedAt: 500,
     });
     state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
     state = announceReducer(state, {
@@ -448,7 +433,6 @@ describe("confirming a candidate", () => {
 
     expect(state.confirmingKey).toBeNull();
     expect(state.banner?.message).toBe("Too many requests just now.");
-    expect(state.undo?.studentIds).toEqual(["s0"]);
   });
 
   describe("a whole carpool confirmed in one tap", () => {
@@ -459,97 +443,53 @@ describe("confirming a candidate", () => {
         studentIds: ["s1", "s2"],
         changedIds: ["s1", "s2"],
         displayName: "Weiss Carpool",
-        carpoolId: "weiss",
         logged: 2,
-        confirmedAt: 1_000,
       });
 
-      expect(state.undo).toEqual({
-        studentIds: ["s1", "s2"],
-        displayName: "Weiss Carpool",
-        carpoolId: "weiss",
-        confirmedAt: 1_000,
-      });
       expect(state.info).toMatch(/Weiss Carpool/);
       expect(state.info).toMatch(/are marked arrived/);
     });
 
-    it("a partial confirmation (one member already arrived) is calm, not an error, and still opens undo for the ones that changed", () => {
+    it("a partial confirmation (one member already arrived) is calm, not an error", () => {
       let state = initialAnnounceState();
       state = announceReducer(state, {
         type: "confirm/settled",
         studentIds: ["s1", "s2"],
         changedIds: ["s2"],
         displayName: "Weiss Carpool",
-        carpoolId: "weiss",
         logged: 1,
-        confirmedAt: 1_000,
       });
 
       expect(state.banner).toBeNull();
       expect(state.info).toMatch(/1 of 2/);
-      expect(state.undo?.studentIds).toEqual(["s2"]);
     });
   });
 });
 
-describe("undo", () => {
-  function withUndo() {
+describe("sending someone back to waiting", () => {
+  it("unannounce/settled clears the in-flight flag and says so calmly", () => {
     let state = initialAnnounceState();
+    state = announceReducer(state, { type: "confirm/start", key: "unannounce:s1" });
     state = announceReducer(state, {
-      type: "confirm/settled",
-      studentIds: ["s1"],
-      changedIds: ["s1"],
+      type: "unannounce/settled",
       displayName: "Maya Cohen",
-      carpoolId: null,
-      logged: 1,
-      confirmedAt: 1_000,
     });
-    return state;
-  }
 
-  it("undo/success clears the undo window and confirms in a calm info message", () => {
-    let state = withUndo();
-    state = announceReducer(state, { type: "undo/success" });
-
-    expect(state.undo).toBeNull();
-    expect(state.info).toMatch(/undo|waiting/i);
+    expect(state.confirmingKey).toBeNull();
+    expect(state.banner).toBeNull();
+    expect(state.info).toBe("Maya Cohen is back to waiting.");
   });
 
-  it("undo/error keeps the undo window (nothing was undone) and shows the banner", () => {
-    let state = withUndo();
+  it("a failed attempt keeps everything and shows the banner", () => {
+    let state = initialAnnounceState();
+    state = announceReducer(state, { type: "confirm/start", key: "unannounce:s1" });
     state = announceReducer(state, {
-      type: "undo/error",
+      type: "confirm/error",
       banner: { tone: "error", message: "Could not connect." },
     });
 
-    expect(state.undo).not.toBeNull();
+    expect(state.confirmingKey).toBeNull();
     expect(state.banner?.message).toBe("Could not connect.");
-  });
-
-  it("undo/expire silently clears an undo window whose time has run out", () => {
-    let state = withUndo();
-    state = announceReducer(state, { type: "undo/expire", studentIds: ["s1"] });
-
-    expect(state.undo).toBeNull();
-    expect(state.banner).toBeNull();
-  });
-
-  it("undo/expire is a no-op if a newer confirmation has already replaced the one that expired", () => {
-    let state = withUndo();
-    // A stale timer for s1 fires after s2 has already been confirmed.
-    state = announceReducer(state, {
-      type: "confirm/settled",
-      studentIds: ["s2"],
-      changedIds: ["s2"],
-      displayName: "Elias Kohen",
-      carpoolId: null,
-      logged: 1,
-      confirmedAt: 2_000,
-    });
-    state = announceReducer(state, { type: "undo/expire", studentIds: ["s1"] });
-
-    expect(state.undo?.studentIds).toEqual(["s2"]);
   });
 });
 

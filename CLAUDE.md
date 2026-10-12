@@ -262,9 +262,10 @@ Notes phase 4 will need:
   flash — true individually, so confirming a 3-member carpool where one
   already arrived still moves and logs the other two.
 - `arrived_at` is ignored if a client sends it; a database trigger derives it.
-- Undo is just `set-status` with `status: "waiting"` and the same id(s). The
-  ~2-minute window is a client-side affordance — the server does not enforce
-  it (see judgment calls).
+- Taking an announcement back is just `set-status` with `status: "waiting"`
+  and the same id(s). `/announce` no longer has a timed undo banner: a green
+  name tapped in the class drawer is the reverse of announcing it, available
+  any time. The server never enforced a window either way.
 - `source` is **required** (`voice` | `manual` | `admin`). It is not defaulted:
   a client that omitted it used to log a voice confirmation as hand-picked,
   dropping the transcript and score that `status_events` exists to collect.
@@ -691,7 +692,7 @@ boxes.
 - [x] Push-to-talk with an unmistakable listening state
 - [x] Top 2–3 candidates as large tap targets; nothing auto-commits
 - [x] Searchable/typeable roster fallback always available
-- [x] Undo window (~2 minutes) after a confirm
+- [x] ~~Undo window (~2 minutes) after a confirm~~ — replaced: tap a green name in the class drawer to send it back to waiting
 - [x] Works end to end with `NEXT_PUBLIC_MOCK_SPEECH=true` — **verified live**,
       driven with real PointerEvents against the deployed functions: PIN gate →
       hold-to-talk (CONNECTING → LISTENING captions confirmed) → release →
@@ -717,7 +718,7 @@ are all unit-tested with no DOM and no network. `speech-mock.ts` implements the
 also implements — `announce-screen.tsx` only ever picks which one to call,
 based on `NEXT_PUBLIC_MOCK_SPEECH` — and a test on the mock stubs `fetch` and
 `WebSocket` to throw and asserts they are never touched, so mock mode cannot
-leak a real Deepgram call. `announce-undo.ts` and `announce-token.ts` take an
+leak a real Deepgram call. `announce-token.ts` takes an
 injected `now`. On top of that, the whole PIN → mic → candidates → confirm
 path has been run against the deployed `deepgram-token`, `resolve-name` and
 `set-status` functions and the live seeded roster (see `HANDOFF.md`) — with
@@ -817,7 +818,7 @@ flow — it proves the wire protocol and the PCM math, not that
 is the one thing that needs a human holding the hardware.
 
 Two writes exist in the whole screen, both in user-triggered handlers
-(`handleConfirm`, `handleUndo`). There is no code path from a transcript to a
+(`handleConfirm`, and the class drawer's announce / tap-to-send-back). There is no code path from a transcript to a
 status change that does not pass through a tap.
 
 One defensive fix came out of the live run: `setPointerCapture` /
