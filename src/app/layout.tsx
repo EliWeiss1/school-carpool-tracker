@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Archivo, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
 /**
@@ -35,6 +36,13 @@ const mono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Carpool Pickup Board",
   description: "Live pickup-line status board for the school carpool queue.",
+  // iOS ignores most of the web manifest, so the home screen icon and the
+  // full-screen launch are declared here as well.
+  icons: {
+    icon: { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    apple: { url: "/icons/apple-touch-icon.png", sizes: "180x180" },
+  },
+  appleWebApp: { capable: true, title: "Pickup", statusBarStyle: "black" },
 };
 
 export const viewport: Viewport = {
@@ -52,7 +60,10 @@ export default function RootLayout({
       lang="en"
       className={`${display.variable} ${body.variable} ${mono.variable}`}
     >
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <PwaRegister />
+        {children}
+      </body>
     </html>
   );
 }

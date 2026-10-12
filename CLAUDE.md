@@ -133,8 +133,10 @@ Supabase CLI is intentionally not a project dependency — use `npx`:
 ```
 src/
   app/
-    page.tsx            landing page linking to the three screens
-    layout.tsx          root layout, light-only color scheme
+    page.tsx            landing page linking to the three screens, plus the
+                        bottom-pinned install card (components/home/)
+    manifest.ts         the PWA web app manifest (installable on Android/iOS)
+    layout.tsx          root layout, light-only color scheme, registers sw.js
     globals.css         Tailwind entry + reduced-motion guard
     announce/           phase 4 — mic capture, candidate confirm, search fallback
     display/            phase 5 — realtime status grid, flash + chime
@@ -148,6 +150,11 @@ src/
                         down the right edge opens a drawer of that class's
                         students to tap and announce (state in the reducer's
                         `pad`, pure logic in lib/class-roster.ts)
+    home/               install-card.tsx: the "add to home screen" prompt on /
+                        (logic in lib/install-prompt.ts, hook in
+                        lib/use-install-prompt.ts; sw.js in public/ caches
+                        nothing on purpose -- it only satisfies Chrome's
+                        install criteria and shows an offline page)
     display/            class-filter.tsx + section-heading.tsx group the board
                         by class, on top of the per-section grid + tile pieces
     admin/              carpool-manager.tsx (create/edit/delete a carpool,
@@ -198,6 +205,7 @@ supabase/
   seed/roster.ts        sample dev roster, deliberately full of confusable surnames
 scripts/seed.ts         loads the sample roster (refuses non-local without --allow-remote)
 scripts/screenshot.mjs  Puppeteer: URL + viewport -> PNG (npm run screenshot)
+scripts/generate-icons.mjs  renders public/icons/*.png (PWA + apple-touch icons)
 .claude/agents/         subagent definitions (see Model delegation)
 ```
 

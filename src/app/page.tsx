@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { InstallCard } from "@/components/home/install-card";
 import { HazardRule } from "@/components/ui";
 
 /**
@@ -89,6 +90,9 @@ export default function HomePage() {
           ))}
         </ul>
       </nav>
+
+      {/* Last child of the flex column, so it can stick to the bottom edge. */}
+      <InstallCard />
     </main>
   );
 }

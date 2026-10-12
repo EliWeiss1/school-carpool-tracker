@@ -32,6 +32,28 @@ Prompting.
 See [CLAUDE.md](CLAUDE.md) for the full architecture, conventions, and phase
 checklist.
 
+## Installing on a phone
+
+The site is an installable PWA, so staff can keep it on a phone's home screen
+instead of using an app store. The landing page (`/`) shows an "add to home
+screen" card at the bottom, on phones and tablets only:
+
+- **Android (Chrome):** the card has an **Install** button that opens the
+  browser's own install dialog.
+- **iPhone / iPad:** iOS has no install API, so the card shows the steps instead
+  — tap **Share**, then **Add to Home Screen**.
+
+The card stays away once the app is installed, and for two weeks after **Not
+now** (remembered per device in `localStorage`).
+
+What makes it installable: `src/app/manifest.ts` (name, colours, icons, a
+long-press shortcut per screen), the icons in `public/icons/` (regenerate with
+`node scripts/generate-icons.mjs`), and `public/sw.js`, registered in production
+only. The service worker **caches nothing** — it exists because Chrome requires
+one to offer the install prompt, and to show a "No connection" page instead of
+the browser's error. Live data and Edge Function calls always go straight to the
+network, so an installed copy can never show a stale board.
+
 ## Local setup
 
 ```bash
