@@ -880,10 +880,10 @@ are not worth the complexity for a single-building board.
 - [x] "Reset all to waiting" with a confirmation step
 - [x] Scheduled reset — built as a `pg_cron` job, not an Edge Function
       (`20261011120000_nightly_board_reset.sql`, applied live). Resets every
-      `arrived` student to `waiting` at 8 PM Pacific, Sun–Fri, writing one
+      `arrived` student to `waiting` at 8 PM Pacific, Sun–Thu (Fri and Sat nights skipped; guard replaced in `20261011130000_nightly_reset_skip_friday.sql`), writing one
       `source: 'admin'` audit row each. `pg_cron` is UTC-only, so it fires at
       both 03:00 and 04:00 UTC and `nightly_reset_board()` checks the Pacific
-      wall clock (hour 20, not Saturday) — that is what keeps it correct across
+      wall clock (hour 20, not Friday or Saturday) — that is what keeps it correct across
       daylight saving. Both functions are revoked from anon/authenticated (they
       are reachable as RPC otherwise). `pg_cron` isn't in PGlite, so the
       schedule `do` block is guarded and only the functions are unit-tested;

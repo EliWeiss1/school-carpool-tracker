@@ -641,15 +641,19 @@ describe("nightly board reset", () => {
     expect(await statusOf(summer)).toBe("arrived");
   });
 
-  it("skips Saturday night but runs Friday and Sunday", async () => {
-    const id = await insertStudent("NightlySaturday", "arrived");
+  it("skips Friday and Saturday night but runs Sunday through Thursday", async () => {
+    const id = await insertStudent("NightlyWeekend", "arrived");
+
+    // Friday 2026-10-16 20:00 PDT == 03:00 UTC Saturday the 17th.
+    expect((await nightly("2026-10-17T03:00:00Z")).rows[0].n).toBeNull();
+    expect(await statusOf(id)).toBe("arrived");
 
     // Saturday 2026-10-17 20:00 PDT == 03:00 UTC Sunday the 18th.
     expect((await nightly("2026-10-18T03:00:00Z")).rows[0].n).toBeNull();
     expect(await statusOf(id)).toBe("arrived");
 
-    // Friday 2026-10-16 20:00 PDT == 03:00 UTC Saturday the 17th.
-    await nightly("2026-10-17T03:00:00Z");
+    // Thursday 2026-10-15 20:00 PDT == 03:00 UTC Friday the 16th.
+    await nightly("2026-10-16T03:00:00Z");
     expect(await statusOf(id)).toBe("waiting");
 
     // Sunday 2026-10-11 20:00 PDT == 03:00 UTC Monday the 12th.

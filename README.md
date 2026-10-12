@@ -13,9 +13,9 @@ Three screens:
 - **`/admin`** — roster management and a manual "Reset all to waiting". PIN-protected.
 
 The board also clears itself: a `pg_cron` job in Supabase sends every arrived
-student back to waiting at **8:00 PM Pacific, Sunday through Friday** (Saturday
-night is skipped). It runs inside the database, so it works even if Vercel or
-the Edge Functions are down. See `supabase/migrations/20261011120000_nightly_board_reset.sql`.
+student back to waiting at **8:00 PM Pacific, Sunday through Thursday** (Friday and Saturday
+nights are skipped). It runs inside the database, so it works even if Vercel or
+the Edge Functions are down. See `supabase/migrations/20261011120000_nightly_board_reset.sql` and `20261011130000_nightly_reset_skip_friday.sql`.
 
 > **Note:** this README is the developer setup guide. A separate day-to-day
 > guide written for school staff lands in phase 7.
