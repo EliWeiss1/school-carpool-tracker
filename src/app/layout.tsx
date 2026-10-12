@@ -34,7 +34,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Carpool Pickup Board",
+  title: "CarpoolCaller",
   description: "Live pickup-line status board for the school carpool queue.",
   // iOS ignores most of the web manifest, so the home screen icon and the
   // full-screen launch are declared here as well.
@@ -42,7 +42,11 @@ export const metadata: Metadata = {
     icon: { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
     apple: { url: "/icons/apple-touch-icon.png", sizes: "180x180" },
   },
-  appleWebApp: { capable: true, title: "Pickup", statusBarStyle: "black" },
+  appleWebApp: {
+    capable: true,
+    title: "CarpoolCaller",
+    statusBarStyle: "black",
+  },
 };
 
 export const viewport: Viewport = {

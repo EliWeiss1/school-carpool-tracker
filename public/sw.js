@@ -37,7 +37,7 @@ const OFFLINE_PAGE = `<!doctype html>
 <body>
   <p class="eyebrow">Pickup line</p>
   <h1>No connection</h1>
-  <p>The pickup board needs a connection to show who has arrived. Check your wifi or signal, then try again.</p>
+  <p>CarpoolCaller needs a connection to show who has arrived. Check your wifi or signal, then try again.</p>
   <div><button type="button" onclick="location.reload()">Try again</button></div>
 </body>
 </html>`;

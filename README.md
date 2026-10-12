@@ -1,4 +1,4 @@
-# Carpool Pickup Board
+# CarpoolCaller
 
 A small internal web app for a school's carpool pickup line. Someone outside
 speaks a student's last name into a phone; after a one-tap confirmation the

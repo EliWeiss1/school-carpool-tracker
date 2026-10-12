@@ -74,7 +74,7 @@ export function PinGate({
           Staff only
         </p>
         <h1 className="mt-1 font-display text-3xl font-extrabold tracking-display">
-          Carpool Pickup Board
+          CarpoolCaller
         </h1>
       </div>
       <HazardRule />

@@ -42,10 +42,17 @@ export default function HomePage() {
           <p className="font-mono text-xs uppercase tracking-eyebrow text-marigold-400">
             Pickup line
           </p>
-          <h1 className="mt-3 font-display text-5xl font-extrabold tracking-display sm:text-6xl">
-            Carpool
-            <br />
-            Pickup Board
+          {/* One word, set on two lines so it fits a phone at text-5xl; the
+              label keeps assistive tech reading it as the single name. */}
+          <h1
+            aria-label="CarpoolCaller"
+            className="mt-3 font-display text-5xl font-extrabold tracking-display sm:text-6xl"
+          >
+            <span aria-hidden="true">
+              Carpool
+              <br />
+              Caller
+            </span>
           </h1>
           <p className="mt-4 max-w-md text-lg text-curb-300">
             Pick the screen for where you are standing.

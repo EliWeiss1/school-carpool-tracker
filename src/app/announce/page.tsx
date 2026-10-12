@@ -4,7 +4,7 @@ import { AnnounceScreen } from "@/components/announce/announce-screen";
 import { PinGate } from "@/components/ui";
 
 export const metadata: Metadata = {
-  title: "Announce — Carpool Pickup Board",
+  title: "Announce — CarpoolCaller",
 };
 
 /**

@@ -51,7 +51,7 @@ export function InstallCard() {
                 id={headingId}
                 className="font-display text-lg font-bold leading-tight text-curb-900"
               >
-                Keep the pickup board on your home screen
+                Keep CarpoolCaller on your home screen
               </h2>
               {mode === "native" ? (
                 <p className="mt-1 text-sm text-curb-600">

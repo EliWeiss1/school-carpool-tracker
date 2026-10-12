@@ -11,8 +11,8 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Carpool Pickup Board",
-    short_name: "Pickup",
+    name: "CarpoolCaller",
+    short_name: "CarpoolCaller",
     description: "Live pickup-line status board for the school carpool queue.",
     start_url: "/",
     scope: "/",
