@@ -12,7 +12,7 @@ Three screens:
   number of classes, and a button per class down the right edge opens a
   drawer of that class's students to tap and announce without speaking or
   typing. PIN-protected.
-- **`/display`** — inside, on the big screen. Live red/green grid. No login.
+- **`/display`** — inside, on the big screen. Live blue (waiting) / white (arrived) grid. No login.
 - **`/admin`** — roster management and a manual "Reset all to waiting". PIN-protected.
 
 The board also clears itself: a `pg_cron` job in Supabase sends every arrived

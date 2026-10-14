@@ -12,7 +12,7 @@ export function SectionHeading({ section }: { section: DisplaySection }) {
         {section.label}
       </h2>
       <p className="whitespace-nowrap font-mono text-xs text-white/60">
-        <span className="text-waiting-screen">{section.waiting} waiting</span>
+        <span className="text-waiting-lift">{section.waiting} waiting</span>
       </p>
     </div>
   );

@@ -383,7 +383,7 @@ export function DisplayBoard({
             {soundBlocked && <SoundToggle onEnable={enableSound} />}
             {!configError && (
               <p className="whitespace-nowrap font-mono text-xs">
-                <span className="text-waiting-screen">
+                <span className="text-waiting-lift">
                   {grouped.totals.waiting} waiting
                 </span>
                 <span className="text-white/40"> · </span>

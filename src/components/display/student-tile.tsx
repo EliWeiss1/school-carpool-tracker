@@ -28,16 +28,19 @@ export function StudentTile({
   return (
     <li
       className={cn(
-        "tile-surface relative flex max-h-[20rem] min-h-[6rem] flex-col justify-between overflow-hidden rounded-2xl p-2.5 text-white sm:min-h-[9rem] sm:p-4",
+        "tile-surface relative flex max-h-[20rem] min-h-[6rem] flex-col justify-between overflow-hidden rounded-2xl p-2.5 sm:min-h-[9rem] sm:p-4",
         "animate-tile-in",
+        // Arrived is a white tile, so its text flips to ink.
         arrived
-          ? "bg-arrived-screen shadow-tile-arrived"
-          : "bg-waiting-screen shadow-tile-waiting",
+          ? "bg-arrived-screen text-ink shadow-tile-arrived"
+          : "bg-waiting-screen text-white shadow-tile-waiting",
         flashing && "animate-arrival-flash",
       )}
     >
-      {/* The arrival glow: a white layer that flashes in and fades, over the
-          tile's own colour. Opacity-only so it costs nothing to composite.
+      {/* The arrival glow: a light-blue layer that flashes in and fades, over
+          the tile's own colour. It is blue rather than white because an
+          arrived tile is already white, so a white flash would be invisible.
+          Opacity-only so it costs nothing to composite.
 
           `opacity-0` stays applied at all times, flashing or not -- it is the
           resting value the animation's own `fill: none` default reverts to
@@ -53,12 +56,17 @@ export function StudentTile({
       <span
         aria-hidden="true"
         className={cn(
-          "pointer-events-none absolute inset-0 bg-white opacity-0",
+          "pointer-events-none absolute inset-0 bg-waiting-lift opacity-0",
           flashing && "animate-arrival-glow",
         )}
       />
 
-      <p className="tile-label relative truncate font-mono uppercase tracking-eyebrow text-white/75">
+      <p
+        className={cn(
+          "tile-label relative truncate font-mono uppercase tracking-eyebrow",
+          arrived ? "text-ink/75" : "text-white/95",
+        )}
+      >
         {meta || " "}
       </p>
 
@@ -73,14 +81,24 @@ export function StudentTile({
         <p className="tile-surname line-clamp-2 break-words font-display font-extrabold leading-tight tracking-display">
           {student.last_name}
         </p>
-        <p className="tile-given-name truncate font-medium leading-tight text-white/85">
+        <p
+          className={cn(
+            "tile-given-name truncate font-medium leading-tight",
+            arrived ? "text-ink/80" : "text-white/95",
+          )}
+        >
           {student.first_name}
         </p>
       </div>
 
       {/* Not decoration and not redundant: it is the whole signal for anyone
-          in the room who cannot separate the red from the green. */}
-      <p className="tile-label relative font-mono uppercase tracking-eyebrow text-white/85">
+          in the room who cannot separate the blue from the white. */}
+      <p
+        className={cn(
+          "tile-label relative font-mono uppercase tracking-eyebrow",
+          arrived ? "text-ink/85" : "text-white/95",
+        )}
+      >
         {arrived ? "Arrived" : "Waiting"}
       </p>
     </li>

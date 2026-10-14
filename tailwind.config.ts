@@ -24,14 +24,19 @@ const config: Config = {
           DEFAULT: "#b91c1c",
           soft: "#fef2f2",
           border: "#fecaca",
-          screen: "#f04438",
+          // /display only: waiting is cobalt blue (arrived is white).
+          screen: "#2262e8",
+          // A lighter blue for small text and the arrival glow on ink, where
+          // `screen` is too dark to read (about 3:1 against the ground).
+          lift: "#8db8ff",
           deep: "#7f1d1d",
         },
         arrived: {
           DEFAULT: "#15803d",
           soft: "#f0fdf4",
           border: "#bbf7d0",
-          screen: "#12b76a",
+          // /display only: arrived is white, with ink text on the tile.
+          screen: "#fbfcff",
           deep: "#14532d",
         },
 
@@ -89,9 +94,9 @@ const config: Config = {
         press: "inset 0 2px 4px rgb(16 21 31 / 0.14)",
         // /display only: the tile lifts off the ink ground with its own colour.
         "tile-waiting":
-          "0 1px 0 0 rgb(255 255 255 / 0.06) inset, 0 8px 24px -12px rgb(240 68 56 / 0.55)",
+          "0 1px 0 0 rgb(255 255 255 / 0.06) inset, 0 8px 24px -12px rgb(34 98 232 / 0.6)",
         "tile-arrived":
-          "0 1px 0 0 rgb(255 255 255 / 0.06) inset, 0 8px 32px -10px rgb(18 183 106 / 0.65)",
+          "0 1px 0 0 rgb(255 255 255 / 0.06) inset, 0 8px 32px -10px rgb(251 252 255 / 0.4)",
       },
 
       transitionTimingFunction: {

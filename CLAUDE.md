@@ -445,12 +445,13 @@ distance, to people who are not looking directly at it.
 | `marigold-400` / `600`           | `#ffc24d` `#d9860b`           | Primary hover / active. `400` for text on ink         |
 | `marigold-50`                    | `#fff7e6`                     | Warning banner ground                                 |
 | `waiting`                        | `#b91c1c`                     | Waiting, on light surfaces                            |
-| `waiting-screen`                 | `#f04438`                     | Waiting, **only** on the `/display` ink ground        |
+| `waiting-screen`                 | `#2262e8` (blue)              | Waiting, **only** on `/display`; white text on the tile |
+| `waiting-lift`                   | `#8db8ff`                     | Small waiting text + arrival glow on `/display` ink   |
 | `arrived`                        | `#15803d`                     | Arrived, on light surfaces                            |
-| `arrived-screen`                 | `#12b76a`                     | Arrived, **only** on the `/display` ink ground        |
+| `arrived-screen`                 | `#fbfcff` (white)             | Arrived, **only** on `/display`; ink text on the tile |
 | `*-soft` / `*-border` / `*-deep` | see config                    | Status banner fills, borders, pressed states          |
 
-**The one inviolable rule: red and green mean waiting and arrived, and nothing
+**The one inviolable rule: red and green mean waiting and arrived on every light-surface screen (`/announce`, `/admin`), and nothing
 else, anywhere in the app.** No red delete buttons outside a genuine
 back-to-waiting action, no green success toasts. That is why the brand colour is
 marigold — it is unmistakable against both at twenty feet. Marigold never fills a
