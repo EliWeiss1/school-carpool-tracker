@@ -9,9 +9,11 @@ import { Button } from "@/components/ui";
  * all times, not just after the mic fails — so it renders unconditionally in
  * `announce-screen.tsx`, never behind an error state.
  *
- * Submits explicitly rather than searching on every keystroke: `resolve-name`
- * has its own per-device rate limit, and a name mid-typing is not yet worth a
- * request.
+ * Two speeds. Every keystroke shows suggestions straight away, matched in the
+ * browser against the roster already loaded (`typeahead.ts`) -- no request.
+ * Search sends the text to `resolve-name` for what prefix matching cannot do,
+ * misspellings and sound-alikes; that call has its own per-device rate limit,
+ * which is why it waits for an explicit submit.
  */
 export function SearchFallback({
   value,
@@ -35,16 +37,19 @@ export function SearchFallback({
         htmlFor={inputId}
         className="block font-mono text-xs uppercase tracking-eyebrow text-curb-500"
       >
-        Or type the last name
+        Or type a name or carpool
       </label>
       <div className="mt-2 flex gap-2">
         <input
           id={inputId}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="e.g. Cohen"
+          placeholder="e.g. Cohen, or Miriam"
           autoCapitalize="words"
           autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          enterKeyHint="search"
           className="focus-ring min-h-tap w-0 flex-1 rounded-lg border border-curb-300 bg-curb-50 px-4 text-lg text-curb-900 placeholder:text-curb-400"
         />
         <Button

@@ -92,6 +92,12 @@ export interface AnnounceResults {
   tier: MatchTier;
   transcript: string;
   candidates: ResolveCandidateLike[];
+  /**
+   * True for suggestions drawn from the local roster while typing, false or
+   * absent for an answer from `resolve-name`. Only changes the wording: a
+   * suggestion with no match still has Search's fuzzy matching to try.
+   */
+  live?: boolean;
 }
 
 export interface AnnounceBanner {
@@ -172,7 +178,15 @@ export type AnnounceAction =
   | { type: "pad/promptToggle"; studentId: string }
   | { type: "pad/promptCancel" }
   | { type: "pad/selectMany"; picks: PadPick[] }
-  | { type: "search/change"; value: string }
+  | {
+      type: "search/change";
+      value: string;
+      /**
+       * Live suggestions for `value`, computed by the caller from the local
+       * roster (`typeahead.ts`). Omitted, only the text changes.
+       */
+      suggestions?: { tier: MatchTier; candidates: ResolveCandidateLike[] };
+    }
   | { type: "mic/status"; status: SpeechStatus }
   | { type: "mic/nothingHeard" }
   | { type: "resolve/start" }
@@ -230,6 +244,48 @@ function narrow(state: AnnounceState, classGroups: string[]): AnnounceState {
     results: null,
     selectedKeys: [],
     excludedMemberIds: {},
+  };
+}
+
+/**
+ * Typing replaces whatever typed result is showing with live suggestions.
+ * A voice result is left alone until there is something typed to replace it
+ * with -- clearing the box must not throw away what the mic just heard.
+ * Picks and carpool exclusions survive a keystroke for every candidate still
+ * on screen, so refining the query never silently unticks someone.
+ */
+function searchChanged(
+  state: AnnounceState,
+  value: string,
+  suggestions: { tier: MatchTier; candidates: ResolveCandidateLike[] } | undefined,
+): AnnounceState {
+  const next = { ...state, searchText: value };
+  if (!suggestions) return next;
+
+  const query = value.trim();
+  if (query === "") {
+    if (state.results?.origin !== "manual") return next;
+    return { ...next, results: null, selectedKeys: [], excludedMemberIds: {} };
+  }
+
+  const shown = new Set(suggestions.candidates.map(candidateKey));
+  const excludedMemberIds: Record<string, string[]> = {};
+  for (const [key, ids] of Object.entries(state.excludedMemberIds)) {
+    if (shown.has(key)) excludedMemberIds[key] = ids;
+  }
+
+  return {
+    ...next,
+    info: null,
+    results: {
+      origin: "manual",
+      tier: suggestions.tier,
+      transcript: query,
+      candidates: suggestions.candidates,
+      live: true,
+    },
+    selectedKeys: state.selectedKeys.filter((key) => shown.has(key)),
+    excludedMemberIds,
   };
 }
 
@@ -317,7 +373,7 @@ export function announceReducer(
       };
 
     case "search/change":
-      return { ...state, searchText: action.value };
+      return searchChanged(state, action.value, action.suggestions);
 
     case "mic/status":
       return { ...state, micStatus: action.status };
@@ -409,6 +465,8 @@ export function announceReducer(
         },
         confirmingKey: null,
         results: null,
+        // Ready for the next name rather than re-suggesting the last one.
+        searchText: "",
         selectedKeys: [],
         excludedMemberIds: {},
       };

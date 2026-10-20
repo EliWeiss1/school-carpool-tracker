@@ -168,6 +168,13 @@ src/
                         Edge Functions /admin calls
     announce-reducer.ts /announce's state machine: candidates carry
                         `students[]` + `carpool`, multi-select is opt-in
+    typeahead.ts        /announce's live search suggestions: prefix-matches
+                        first/last name, aliases and carpool names against
+                        the roster already in memory, collapsing siblings
+                        into their carpool. No request per keystroke; carpool
+                        names come once from PIN-gated roster-list, lazily
+                        on the first keystroke (use-announce-carpools.ts),
+                        because carpools have no public read
     display-sections.ts pure grouping + per-viewer class filter for /display
     pin-session.ts      the PIN store: memory only, no React
     use-pin-session.ts  the React hook over it

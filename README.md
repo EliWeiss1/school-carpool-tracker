@@ -8,7 +8,10 @@ inside, with a flash and a chime.
 Three screens:
 
 - **`/announce`** — outside, on a phone or tablet. Push-to-talk, confirm the
-  matched name, or search the roster by hand. "Narrow by class" takes any
+  matched name, or search the roster by hand: suggestions appear as you
+  type a first name, last name, nickname or carpool name (matched in the
+  browser, no request per keystroke), and Search adds fuzzy, sound-alike
+  matching for misspellings. "Narrow by class" takes any
   number of classes, and a button per class down the right edge opens a
   drawer of that class's students to tap and announce without speaking or
   typing. PIN-protected.

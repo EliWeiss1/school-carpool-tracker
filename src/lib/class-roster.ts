@@ -18,6 +18,8 @@ export interface PadStudent {
   status: StudentStatus;
   /** Students sharing a carpool_id ride together; null means no carpool. */
   carpool_id: string | null;
+  /** Nicknames, so the search box's suggestions find them too. */
+  aliases?: string[];
 }
 
 /**

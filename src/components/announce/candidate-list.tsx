@@ -72,8 +72,15 @@ export function CandidateList({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3 px-1">
         <p className="text-sm text-curb-600">
-          Heard <span className="font-semibold text-curb-900">&ldquo;{results.transcript}&rdquo;</span>
-          {results.tier === "ambiguous" && " — more than one close match:"}
+          {results.live
+            ? "Matching"
+            : results.origin === "voice"
+              ? "Heard"
+              : "Closest to"}{" "}
+          <span className="font-semibold text-curb-900">&ldquo;{results.transcript}&rdquo;</span>
+          {!results.live &&
+            results.tier === "ambiguous" &&
+            " — more than one close match:"}
         </p>
         {showMultiSelectToggle && (
           <button

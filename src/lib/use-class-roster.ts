@@ -14,8 +14,9 @@ export interface UseClassRoster {
 }
 
 /**
- * The roster the class drawer lists, read straight from Postgres with the anon
- * key -- `students` is publicly readable (it is what /display shows), so this
+ * The roster the class drawer lists and the search box suggests from, read
+ * straight from Postgres with the anon key -- `students` is publicly readable
+ * (it is what /display shows), so this
  * needs no PIN and no Edge Function. Only the write goes through the PIN.
  *
  * Fetched once up front so the drawer opens instantly, then re-fetched by the
@@ -33,7 +34,9 @@ export function useClassRoster(): UseClassRoster {
     try {
       const { data, error: queryError } = await getBrowserClient()
         .from("students")
-        .select("id, first_name, last_name, class_group, status, carpool_id");
+        .select(
+          "id, first_name, last_name, class_group, status, carpool_id, aliases",
+        );
       if (!mounted.current) return;
       if (queryError) throw new Error(queryError.message);
       setRoster((data ?? []) as PadStudent[]);

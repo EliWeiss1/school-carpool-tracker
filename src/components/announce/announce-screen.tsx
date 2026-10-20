@@ -47,6 +47,8 @@ import {
   tapAction,
 } from "@/lib/class-roster";
 import { publicEnv } from "@/lib/env";
+import { buildTypeaheadIndex, suggest } from "@/lib/typeahead";
+import { useAnnounceCarpools } from "@/lib/use-announce-carpools";
 import { useClassGroups } from "@/lib/use-class-groups";
 import { useClassRoster } from "@/lib/use-class-roster";
 import {
@@ -95,6 +97,15 @@ export function AnnounceScreen() {
   );
   const narrowedTo = state.filter.classGroups;
   const narrowedScope = scopeKey(narrowedTo);
+  const { carpools, ensureLoaded: ensureCarpools } = useAnnounceCarpools(
+    session.credentials,
+    session.lock,
+  );
+  // Rebuilt only when the roster or carpool list changes, never per keystroke.
+  const typeaheadIndex = useMemo(
+    () => buildTypeaheadIndex(classRoster.roster, carpools),
+    [classRoster.roster, carpools],
+  );
 
   const tokenCacheRef = useRef<TokenCache | null>(null);
   const micSessionRef = useRef<MicSession | null>(null);
@@ -301,6 +312,33 @@ export function AnnounceScreen() {
     micSessionRef.current = null;
     await finishMicRelease(mic.source);
   }
+
+  function handleSearchChange(value: string) {
+    ensureCarpools();
+    dispatch({
+      type: "search/change",
+      value,
+      suggestions: suggest(typeaheadIndex, value, narrowedTo),
+    });
+  }
+
+  // Keeps typed suggestions current when what they are drawn from changes
+  // under them: the carpool names landing after the first keystroke, a roster
+  // refresh, or the class narrowing (which clears results). An answer from
+  // resolve-name (voice or Search) on screen is left alone.
+  const searchText = state.searchText;
+  const showingResolved = state.results !== null && !state.results.live;
+  useEffect(() => {
+    if (searchText.trim() === "" || showingResolved) return;
+    dispatch({
+      type: "search/change",
+      value: searchText,
+      suggestions: suggest(typeaheadIndex, searchText, narrowedTo),
+    });
+    // searchText is deliberately absent: a keystroke already dispatched its
+    // own suggestions in handleSearchChange.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeaheadIndex, narrowedScope]);
 
   function handleSearchSubmit(event: FormEvent) {
     event.preventDefault();
@@ -560,6 +598,13 @@ export function AnnounceScreen() {
               onClear={() => dispatch({ type: "filter/clear" })}
             />
 
+            <SearchFallback
+              value={state.searchText}
+              onChange={handleSearchChange}
+              onSubmit={handleSearchSubmit}
+              disabled={state.resolving}
+            />
+
             {state.resolving && (
               <LoadingState label="Matching the name…" rows={2} />
             )}
@@ -596,7 +641,13 @@ export function AnnounceScreen() {
               state.results.tier === "none" && (
                 <EmptyState
                   title="No match on the roster"
-                  hint={`Heard "${state.results.transcript}." Type the name below instead.`}
+                  hint={
+                    state.results.live
+                      ? `No name starts with "${state.results.transcript}". Tap Search to check similar spellings.`
+                      : state.results.origin === "manual"
+                        ? `Nothing on the roster is close to "${state.results.transcript}." Check the spelling and try again.`
+                        : `Heard "${state.results.transcript}." Type the name above instead.`
+                  }
                 />
               )}
 
@@ -608,18 +659,12 @@ export function AnnounceScreen() {
                   title="Ready when you are"
                   hint={
                     railVisible
-                      ? "Hold the button below and say the last name, type it, or tap a class on the right to pick names."
-                      : "Hold the button below and say the last name, or type it below."
+                      ? "Hold the button below and say the last name, type a name above, or tap a class on the right to pick names."
+                      : "Hold the button below and say the last name, or type a name above."
                   }
                 />
               )}
 
-            <SearchFallback
-              value={state.searchText}
-              onChange={(value) => dispatch({ type: "search/change", value })}
-              onSubmit={handleSearchSubmit}
-              disabled={state.resolving}
-            />
           </div>
         </div>
 

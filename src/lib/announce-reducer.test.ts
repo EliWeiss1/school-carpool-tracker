@@ -127,6 +127,102 @@ describe("filter and search text", () => {
   });
 });
 
+describe("live search suggestions", () => {
+  const suggestions = (...candidates: ResolveCandidateLike[]) => ({
+    tier: candidates.length === 1 ? ("clear" as const) : ("ambiguous" as const),
+    candidates,
+  });
+
+  it("shows suggestions as a live, typed result", () => {
+    const state = announceReducer(initialAnnounceState(), {
+      type: "search/change",
+      value: " Coh ",
+      suggestions: suggestions(candidate("s1"), candidate("s2")),
+    });
+    expect(state.searchText).toBe(" Coh ");
+    expect(state.results).toMatchObject({
+      origin: "manual",
+      tier: "ambiguous",
+      transcript: "Coh",
+      live: true,
+    });
+    expect(state.results?.candidates).toHaveLength(2);
+  });
+
+  it("keeps picks and carpool exclusions only for candidates still shown", () => {
+    const carpool = carpoolCandidate("c1", "Cohen Carpool", ["s2", "s3"]);
+    let state = announceReducer(initialAnnounceState(), {
+      type: "search/change",
+      value: "Co",
+      suggestions: suggestions(candidate("s1"), carpool),
+    });
+    state = announceReducer(state, { type: "multiSelect/toggle" });
+    state = announceReducer(state, { type: "candidate/toggleSelect", key: "student:s1" });
+    state = announceReducer(state, { type: "candidate/toggleSelect", key: "carpool:c1" });
+    state = announceReducer(state, {
+      type: "candidate/toggleMember",
+      candidateKey: "carpool:c1",
+      studentId: "s3",
+    });
+
+    state = announceReducer(state, {
+      type: "search/change",
+      value: "Coh",
+      suggestions: suggestions(carpool),
+    });
+
+    expect(state.selectedKeys).toEqual(["carpool:c1"]);
+    expect(state.excludedMemberIds).toEqual({ "carpool:c1": ["s3"] });
+  });
+
+  it("clears typed suggestions when the box is emptied", () => {
+    let state = announceReducer(initialAnnounceState(), {
+      type: "search/change",
+      value: "Co",
+      suggestions: suggestions(candidate("s1")),
+    });
+    state = announceReducer(state, {
+      type: "search/change",
+      value: "",
+      suggestions: { tier: "none", candidates: [] },
+    });
+    expect(state.results).toBeNull();
+  });
+
+  it("does not throw away a voice result when the box is emptied", () => {
+    let state = announceReducer(initialAnnounceState(), {
+      type: "resolve/success",
+      origin: "voice",
+      tier: "clear",
+      transcript: "Cohen",
+      candidates: [candidate("s1")],
+    });
+    state = announceReducer(state, {
+      type: "search/change",
+      value: "",
+      suggestions: { tier: "none", candidates: [] },
+    });
+    expect(state.results?.origin).toBe("voice");
+  });
+
+  it("empties the box after a confirm, ready for the next name", () => {
+    let state = announceReducer(initialAnnounceState(), {
+      type: "search/change",
+      value: "Cohen",
+      suggestions: suggestions(candidate("s1")),
+    });
+    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
+    state = announceReducer(state, {
+      type: "confirm/settled",
+      studentIds: ["s1"],
+      changedIds: ["s1"],
+      displayName: "Maya Cohen",
+      logged: 1,
+    });
+    expect(state.searchText).toBe("");
+  });
+});
+
 describe("mic status", () => {
   it("reflects connecting/listening/processing as reported by the speech source", () => {
     let state = initialAnnounceState();
