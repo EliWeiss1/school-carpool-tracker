@@ -11,7 +11,6 @@ export type Student = {
   first_name: string;
   last_name: string;
   aliases: string[];
-  class_group: string | null;
   status: StudentStatus;
   /** Derived by a trigger from the status transition — never set by a caller. */
   arrived_at: string | null;
@@ -28,13 +27,27 @@ export type Carpool = {
   updated_at: string;
 };
 
+/**
+ * A student as the app uses them: the DB row plus the names of the classes
+ * they belong to, in class order. A student can be in several classes, so the
+ * row itself carries none -- `student_classes` holds the links, and
+ * `withClassNames` (lib/student-classes.ts) flattens them onto this shape.
+ */
+export type StudentWithClasses = Student & { class_groups: string[] };
+
 /** A class students can be assigned to. Publicly readable, like students --
- *  see the class_groups migration. class_group on Student itself stays free
- *  text; this is only the admin-editable list of suggestions. */
+ *  see the class_groups migration. Membership lives in `student_classes`. */
 export type ClassGroup = {
   id: string;
   name: string;
   sort_order: number;
+  created_at: string;
+};
+
+/** One student-in-one-class link. Deleting either side cascades the link. */
+export type StudentClass = {
+  student_id: string;
+  class_group_id: string;
   created_at: string;
 };
 
@@ -59,6 +72,12 @@ export type CarpoolInsert = Pick<Carpool, "name"> &
 
 export type ClassGroupInsert = Pick<ClassGroup, "name" | "sort_order"> &
   Partial<Omit<ClassGroup, "name" | "sort_order">>;
+
+export type StudentClassInsert = Pick<
+  StudentClass,
+  "student_id" | "class_group_id"
+> &
+  Partial<Omit<StudentClass, "student_id" | "class_group_id">>;
 
 export type StatusEventInsert = Pick<StatusEvent, "changed_to" | "source"> &
   Partial<Omit<StatusEvent, "changed_to" | "source">>;
@@ -88,6 +107,12 @@ export type Database = {
         Row: ClassGroup;
         Insert: ClassGroupInsert;
         Update: Partial<ClassGroup>;
+        Relationships: [];
+      };
+      student_classes: {
+        Row: StudentClass;
+        Insert: StudentClassInsert;
+        Update: Partial<StudentClass>;
         Relationships: [];
       };
     };

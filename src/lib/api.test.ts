@@ -136,7 +136,7 @@ describe("successful responses", () => {
               id: "s1",
               first_name: "Maya",
               last_name: "Cohen",
-              class_group: "3rd",
+              class_groups: ["3rd"],
               status: "waiting",
             },
           ],

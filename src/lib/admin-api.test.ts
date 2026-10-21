@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "./api";
-import { createAdminApiClient } from "./admin-api";
+import { classDeleteDecision, createAdminApiClient } from "./admin-api";
 
 const BASE = "https://example.test/functions/v1";
 const CREDENTIALS = { pin: "123456", deviceId: "device-a" };
@@ -78,6 +78,7 @@ describe("createStudent", () => {
       first_name: "Theo",
       last_name: "Ng",
       aliases: ["Eng"],
+      class_groups: ["1st", "Choir"],
     });
     const sent = firstRequest(fetchImpl);
 
@@ -89,13 +90,28 @@ describe("createStudent", () => {
       aliases: ["Eng"],
     });
   });
+
+  it("createStudent sends class_groups", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ student: { id: "s1" }, created: true }),
+    );
+
+    await client.createStudent({
+      ...CREDENTIALS,
+      first_name: "Theo",
+      last_name: "Ng",
+      class_groups: ["1st", "Choir"],
+    });
+
+    expect(firstRequest(fetchImpl).body.class_groups).toEqual(["1st", "Choir"]);
+  });
 });
 
 describe("updateStudent", () => {
   it("posts only the fields that were actually passed", async () => {
     const { client, fetchImpl } = clientReturning(
       jsonResponse({
-        student: { id: "cohen", class_group: "2nd" },
+        student: { id: "cohen", class_groups: ["2nd"] },
         created: false,
       }),
     );
@@ -103,36 +119,50 @@ describe("updateStudent", () => {
     await client.updateStudent({
       ...CREDENTIALS,
       studentId: "cohen",
-      class_group: "2nd",
+      class_groups: ["2nd"],
     });
     const sent = firstRequest(fetchImpl);
 
     expect(sent.body).toEqual({
       ...CREDENTIALS,
       studentId: "cohen",
-      class_group: "2nd",
+      class_groups: ["2nd"],
     });
     expect(sent.body).not.toHaveProperty("first_name");
     expect(sent.body).not.toHaveProperty("aliases");
   });
 
-  it("sends an explicit null to clear the class, unlike an omitted field", async () => {
-    // compact() (used elsewhere in this client) drops null along with
-    // undefined, which would make "clear this field" indistinguishable from
-    // "don't touch it" -- updateStudent deliberately does not use it.
+  it("omits class_groups when undefined but sends [] to clear every class", async () => {
+    // compact() drops empty-looking values; updateStudent builds its body by
+    // hand so "leave the classes alone" (omit) and "remove them all" ([])
+    // stay distinguishable.
     const { client, fetchImpl } = clientReturning(
+      jsonResponse({ student: { id: "cohen" }, created: false }),
       jsonResponse({ student: { id: "cohen" }, created: false }),
     );
 
     await client.updateStudent({
       ...CREDENTIALS,
       studentId: "cohen",
-      class_group: null,
+      first_name: "Maya",
     });
-    const sent = firstRequest(fetchImpl);
+    await client.updateStudent({
+      ...CREDENTIALS,
+      studentId: "cohen",
+      class_groups: [],
+    });
+    const calls = fetchImpl.mock.calls as [string, RequestInit][];
+    const first = JSON.parse(String(calls[0][1].body)) as Record<
+      string,
+      unknown
+    >;
+    const second = JSON.parse(String(calls[1][1].body)) as Record<
+      string,
+      unknown
+    >;
 
-    expect(sent.body.class_group).toBeNull();
-    expect("class_group" in sent.body).toBe(true);
+    expect("class_groups" in first).toBe(false);
+    expect(second.class_groups).toEqual([]);
   });
 });
 
@@ -290,6 +320,118 @@ describe("carpools", () => {
 
     expect(sent.body).toMatchObject({ action: "delete", carpoolId: "weiss" });
     expect(result.deleted).toBe(true);
+  });
+});
+
+describe("class membership", () => {
+  it("deleteClass sends moveToClassId and force", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ deleted: true, movedCount: 4 }),
+    );
+
+    const result = await client.deleteClass({
+      ...CREDENTIALS,
+      classId: "c1",
+      moveToClassId: "c2",
+      force: true,
+    });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.url).toBe(BASE + "/classes-write");
+    expect(sent.body).toEqual({
+      ...CREDENTIALS,
+      action: "delete",
+      classId: "c1",
+      moveToClassId: "c2",
+      force: true,
+    });
+    expect(result).toEqual({ deleted: true, movedCount: 4 });
+  });
+
+  it("deleteClass leaves moveToClassId and force off the wire when unset", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ deleted: true, movedCount: 0 }),
+    );
+
+    await client.deleteClass({ ...CREDENTIALS, classId: "c1" });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.body).not.toHaveProperty("moveToClassId");
+    expect(sent.body).not.toHaveProperty("force");
+  });
+
+  it("deleteClass 409 rejects with the decision payload", async () => {
+    const decision = {
+      memberCount: 5,
+      soleMemberCount: 2,
+      soleMembers: [
+        { id: "s1", first_name: "Maya", last_name: "Cohen" },
+        { id: "s2", first_name: "Theo", last_name: "Ng" },
+      ],
+    };
+    const { client } = clientReturning(
+      jsonResponse(
+        { error: "2 students are only in this class.", ...decision },
+        409,
+      ),
+    );
+
+    const error = (await client
+      .deleteClass({ ...CREDENTIALS, classId: "c1" })
+      .catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.kind).toBe("conflict");
+    expect(error.status).toBe(409);
+    expect(error.message).toBe("2 students are only in this class.");
+    expect(error.details).toEqual(decision);
+  });
+
+  it("classDeleteDecision reads the payload back, and rejects anything else", () => {
+    const decision = { memberCount: 1, soleMemberCount: 0, soleMembers: [] };
+    const conflict = new ApiError("conflict", 409, "x", null, decision);
+    expect(classDeleteDecision(conflict)).toEqual(decision);
+    expect(classDeleteDecision(new ApiError("conflict", 409, "x"))).toBeNull();
+    expect(classDeleteDecision(new ApiError("pin", 401, "x"))).toBeNull();
+    expect(classDeleteDecision(new Error("x"))).toBeNull();
+  });
+
+  it("a 409 without a decision payload still rejects, with no details", async () => {
+    const { client } = clientReturning(
+      jsonResponse({ error: 'A class named "K1" already exists.' }, 409),
+    );
+
+    const error = (await client
+      .createClass({ ...CREDENTIALS, name: "K1" })
+      .catch((caught: unknown) => caught)) as ApiError;
+
+    expect(error.kind).toBe("conflict");
+    expect(error.message).toBe('A class named "K1" already exists.');
+    expect(error.details).toBeNull();
+  });
+
+  it('changeClassMembers posts to classes-write with action "members"', async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ memberCount: 7, ignoredIds: ["ghost"] }),
+    );
+
+    const result = await client.changeClassMembers({
+      ...CREDENTIALS,
+      classId: "c1",
+      addStudentIds: ["s1"],
+      removeStudentIds: ["s2"],
+    });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.url).toBe(BASE + "/classes-write");
+    expect(sent.body).toEqual({
+      ...CREDENTIALS,
+      action: "members",
+      classId: "c1",
+      addStudentIds: ["s1"],
+      removeStudentIds: ["s2"],
+    });
+    expect(result).toEqual({ memberCount: 7, ignoredIds: ["ghost"] });
   });
 });
 

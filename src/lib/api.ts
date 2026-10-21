@@ -34,7 +34,8 @@ export interface CandidateStudent {
   id: string;
   first_name: string;
   last_name: string;
-  class_group: string | null;
+  /** Class names in class order; empty when the student has no class. */
+  class_groups: string[];
   status: StudentStatus;
 }
 
@@ -91,7 +92,13 @@ export interface SetStatusResponse {
  * else means fall back to the typed search and show the message.
  */
 export type ApiErrorKind =
-  "pin" | "throttled" | "speech" | "unavailable" | "request" | "network";
+  | "pin"
+  | "throttled"
+  | "speech"
+  | "unavailable"
+  | "request"
+  | "network"
+  | "conflict";
 
 export class ApiError extends Error {
   readonly kind: ApiErrorKind;
@@ -99,18 +106,28 @@ export class ApiError extends Error {
   readonly status: number;
   /** Seconds from a `retry-after` header, when the server sent a usable one. */
   readonly retryAfterSeconds: number | null;
+  /**
+   * Every field of an error body other than `error` itself, for a `conflict`
+   * that carries more than a sentence (deleting a class returns who would be
+   * left classless, so the admin can decide). Untyped here because this is the
+   * shared transport; the endpoint's client narrows it. Null when the body had
+   * nothing extra.
+   */
+  readonly details: Readonly<Record<string, unknown>> | null;
 
   constructor(
     kind: ApiErrorKind,
     status: number,
     message: string,
     retryAfterSeconds: number | null = null,
+    details: Readonly<Record<string, unknown>> | null = null,
   ) {
     super(message);
     this.name = "ApiError";
     this.kind = kind;
     this.status = status;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.details = details;
   }
 
   /** True when re-entering the PIN is the remedy. */
@@ -127,6 +144,9 @@ export class ApiError extends Error {
 function kindForStatus(status: number): ApiErrorKind {
   if (status === 401 || status === 403) return "pin";
   if (status === 429) return "throttled";
+  // 409 means "the server understood and needs a decision or a different
+  // value", not "the request was malformed" -- callers branch on it.
+  if (status === 409) return "conflict";
   if (status === 502) return "speech";
   if (status >= 500) return "unavailable";
   return "request";
@@ -142,6 +162,8 @@ const FALLBACK_MESSAGE: Record<ApiErrorKind, string> = {
   speech: "Speech recognition is unavailable. Type the name instead.",
   unavailable: "The board is not reachable right now. Type the name instead.",
   request: "That request could not be completed. Type the name instead.",
+  conflict:
+    "That change clashes with what is already there. Reload and try again.",
   network:
     "Could not connect. Check the wifi, then try again or type the name instead.",
 };
@@ -154,19 +176,33 @@ function retryAfterFrom(response: Response): number | null {
   return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null;
 }
 
-async function readErrorMessage(response: Response): Promise<string | null> {
+interface ErrorBody {
+  message: string | null;
+  /** The body minus `error`; null when nothing else was sent. */
+  details: Record<string, unknown> | null;
+}
+
+async function readErrorBody(response: Response): Promise<ErrorBody> {
   try {
     const parsed: unknown = await response.json();
-    if (typeof parsed === "object" && parsed !== null) {
-      const message = (parsed as Record<string, unknown>).error;
-      if (typeof message === "string" && message.trim() !== "") {
-        return message.trim();
-      }
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      const { error, ...rest } = parsed as Record<string, unknown>;
+      return {
+        message:
+          typeof error === "string" && error.trim() !== ""
+            ? error.trim()
+            : null,
+        details: Object.keys(rest).length > 0 ? rest : null,
+      };
     }
   } catch {
     // A non-JSON body is a proxy or gateway talking, not our function.
   }
-  return null;
+  return { message: null, details: null };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -331,12 +367,13 @@ export function createEdgeFunctionPost(options: ApiClientOptions = {}) {
 
     if (!response.ok) {
       const kind = kindForStatus(response.status);
-      const message = await readErrorMessage(response);
+      const { message, details } = await readErrorBody(response);
       throw new ApiError(
         kind,
         response.status,
         message ?? fallback[kind],
         retryAfterFrom(response),
+        details,
       );
     }
 

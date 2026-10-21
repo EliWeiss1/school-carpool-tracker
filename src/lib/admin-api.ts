@@ -14,11 +14,12 @@
  */
 
 import {
+  ApiError,
   type ApiClientOptions,
   compact,
   createEdgeFunctionPost,
 } from "@/lib/api";
-import type { Carpool, ClassGroup, Student } from "@/types/db";
+import type { Carpool, ClassGroup, StudentWithClasses } from "@/types/db";
 import type { CsvImportStudent } from "@/lib/csv-import";
 
 /* -------------------------------------------------------------------------- */
@@ -45,7 +46,8 @@ export interface StudentFields {
   first_name: string;
   last_name: string;
   aliases?: string[];
-  class_group?: string | null;
+  /** Class names. On update, omit to leave classes alone; `[]` removes them all. */
+  class_groups?: string[];
   carpool_id?: string | null;
   /** Up to two parent/guardian names, for admin identification and voice-match resolution. Stored separately from every other student field -- see the parent_names migration. */
   parent1_name?: string | null;
@@ -58,7 +60,7 @@ export interface StudentFields {
  * `candidateStudent()`), only to the PIN-gated roster-list/roster-write
  * responses this type describes.
  */
-export type RosterStudent = Student & {
+export type RosterStudent = StudentWithClasses & {
   parent1_name: string | null;
   parent2_name: string | null;
 };
@@ -72,6 +74,8 @@ export type RosterListInput = Credentials & RosterScope & RequestOptions;
 export interface RosterListResponse {
   students: RosterStudent[];
   carpools: Carpool[];
+  /** Class id -> how many students are in it. A class with none may be absent. */
+  classMemberCounts: Record<string, number>;
 }
 
 export type RosterCreateInput = Credentials & RequestOptions & StudentFields;
@@ -120,7 +124,7 @@ export type RosterImportInput = Credentials &
 
 export interface RosterImportResponse {
   created: number;
-  students: Student[];
+  students: StudentWithClasses[];
 }
 
 export type RosterResetInput = Credentials & RequestOptions;
@@ -159,7 +163,7 @@ export type CarpoolDeleteInput = Credentials &
 
 export interface CarpoolWriteResponse {
   carpool: Carpool;
-  members: Student[];
+  members: StudentWithClasses[];
   created: boolean;
 }
 
@@ -179,6 +183,10 @@ export type ClassCreateInput = Credentials &
 export type ClassDeleteInput = Credentials &
   RequestOptions & {
     classId: string;
+    /** Every member joins this class first, so nobody is left classless. */
+    moveToClassId?: string;
+    /** Delete anyway; students only in this class end up with no class. */
+    force?: boolean;
   };
 
 export type ClassReorderInput = Credentials &
@@ -192,7 +200,59 @@ export interface ClassWriteResponse {
 }
 
 export interface ClassDeleteResponse {
-  deleted: boolean;
+  deleted: true;
+  /** How many students were moved to `moveToClassId` (0 when none was given). */
+  movedCount: number;
+}
+
+/**
+ * The 409 body from deleting a class that would leave students classless.
+ * `deleteClass` rejects with an `ApiError` of kind "conflict" whose `details`
+ * has this shape; `classDeleteDecision` reads it back out type-safely.
+ */
+export interface ClassDeleteNeedsDecision {
+  memberCount: number;
+  soleMemberCount: number;
+  soleMembers: { id: string; first_name: string; last_name: string }[];
+}
+
+/**
+ * Narrows an error to the class-delete decision payload, or null for any other
+ * failure (wrong PIN, class already gone...). Checks the shape rather than
+ * casting, because `details` is whatever the server sent.
+ */
+export function classDeleteDecision(
+  error: unknown,
+): ClassDeleteNeedsDecision | null {
+  if (!(error instanceof ApiError) || error.kind !== "conflict") return null;
+  const d = error.details;
+  if (
+    d === null ||
+    typeof d.memberCount !== "number" ||
+    typeof d.soleMemberCount !== "number" ||
+    !Array.isArray(d.soleMembers)
+  ) {
+    return null;
+  }
+  return {
+    memberCount: d.memberCount,
+    soleMemberCount: d.soleMemberCount,
+    soleMembers: d.soleMembers as ClassDeleteNeedsDecision["soleMembers"],
+  };
+}
+
+export type ClassMembersInput = Credentials &
+  RequestOptions & {
+    classId: string;
+    addStudentIds?: string[];
+    removeStudentIds?: string[];
+  };
+
+export interface ClassMembersResponse {
+  /** Students in the class after the change. */
+  memberCount: number;
+  /** Ids that were not students (already deleted); never a reason to fail. */
+  ignoredIds: string[];
 }
 
 export interface ClassReorderResponse {
@@ -217,6 +277,7 @@ export interface AdminApiClient {
   createClass(input: ClassCreateInput): Promise<ClassWriteResponse>;
   deleteClass(input: ClassDeleteInput): Promise<ClassDeleteResponse>;
   reorderClasses(input: ClassReorderInput): Promise<ClassReorderResponse>;
+  changeClassMembers(input: ClassMembersInput): Promise<ClassMembersResponse>;
 }
 
 /**
@@ -259,7 +320,7 @@ export function createAdminApiClient(
       first_name,
       last_name,
       aliases,
-      class_group,
+      class_groups,
       carpool_id,
       parent1_name,
       parent2_name,
@@ -273,7 +334,7 @@ export function createAdminApiClient(
           first_name,
           last_name,
           aliases,
-          class_group,
+          class_groups,
           carpool_id,
           parent1_name,
           parent2_name,
@@ -289,7 +350,7 @@ export function createAdminApiClient(
       first_name,
       last_name,
       aliases,
-      class_group,
+      class_groups,
       carpool_id,
       parent1_name,
       parent2_name,
@@ -300,12 +361,13 @@ export function createAdminApiClient(
       // an explicit null, distinct from "leave it alone" by omitting the key
       // entirely. roster-write.ts's handler keys its partial-update logic off
       // which fields are *present* in the body, so `undefined` (not sent) and
-      // `null` (sent, meaning clear) have to stay distinguishable here too.
+      // an explicit value (`null`, or `[]` for class_groups) have to stay
+      // distinguishable here too.
       const body: Record<string, unknown> = { pin, deviceId, studentId };
       if (first_name !== undefined) body.first_name = first_name;
       if (last_name !== undefined) body.last_name = last_name;
       if (aliases !== undefined) body.aliases = aliases;
-      if (class_group !== undefined) body.class_group = class_group;
+      if (class_groups !== undefined) body.class_groups = class_groups;
       if (carpool_id !== undefined) body.carpool_id = carpool_id;
       if (parent1_name !== undefined) body.parent1_name = parent1_name;
       if (parent2_name !== undefined) body.parent2_name = parent2_name;
@@ -397,10 +459,19 @@ export function createAdminApiClient(
       );
     },
 
-    deleteClass({ pin, deviceId, classId, signal }) {
+    deleteClass({ pin, deviceId, classId, moveToClassId, force, signal }) {
+      // compact() drops undefined/null, so an unset moveToClassId or force
+      // never reaches the wire.
       return post<ClassDeleteResponse>(
         "classes-write",
-        compact({ pin, deviceId, action: "delete", classId }),
+        compact({
+          pin,
+          deviceId,
+          action: "delete",
+          classId,
+          moveToClassId,
+          force,
+        }),
         signal,
       );
     },
@@ -409,6 +480,28 @@ export function createAdminApiClient(
       return post<ClassReorderResponse>(
         "classes-write",
         compact({ pin, deviceId, action: "reorder", orderedIds }),
+        signal,
+      );
+    },
+
+    changeClassMembers({
+      pin,
+      deviceId,
+      classId,
+      addStudentIds,
+      removeStudentIds,
+      signal,
+    }) {
+      return post<ClassMembersResponse>(
+        "classes-write",
+        compact({
+          pin,
+          deviceId,
+          action: "members",
+          classId,
+          addStudentIds,
+          removeStudentIds,
+        }),
         signal,
       );
     },
