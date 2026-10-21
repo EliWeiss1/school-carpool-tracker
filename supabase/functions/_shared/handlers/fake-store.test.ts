@@ -151,6 +151,46 @@ describe("fake store multi-class membership", () => {
     expect(bulk.class_groups).toEqual(["K1"]);
   });
 
+  it("throws, like the foreign key, when a write names a class that does not exist", async () => {
+    // The real database fails the junction insert with a foreign-key error;
+    // silently dropping the id here would let a handler test pass on something
+    // production rejects.
+    const store = build([makeStudent({ id: "a", class_groups: ["K1"] })]);
+    const unknown =
+      "One of those classes no longer exists. Reload the page and try again.";
+    const input = {
+      first_name: "A",
+      last_name: "B",
+      aliases: [],
+      class_group_ids: ["k1", "ghost"],
+      carpool_id: null,
+      parent1_name: null,
+      parent2_name: null,
+    };
+
+    await expect(store.createStudent(input)).rejects.toThrow(unknown);
+    await expect(store.bulkCreateStudents([input])).rejects.toThrow(unknown);
+    await expect(
+      store.updateStudent("a", { class_group_ids: ["ghost"] }),
+    ).rejects.toThrow(unknown);
+
+    // A failed write leaves the roster as it was.
+    expect(store.rows()).toHaveLength(1);
+    expect((await store.get("a"))?.class_groups).toEqual(["K1"]);
+  });
+
+  it("breaks class sort_order ties by name", async () => {
+    const store = createFakeStore(
+      [makeStudent({ id: "a", class_groups: ["Zed", "Alpha"] })],
+      [],
+      [
+        makeClassGroup({ id: "zed", name: "Zed", sort_order: 0 }),
+        makeClassGroup({ id: "alpha", name: "Alpha", sort_order: 0 }),
+      ],
+    );
+    expect((await store.get("a"))?.class_groups).toEqual(["Alpha", "Zed"]);
+  });
+
   it("deleting a student removes only their links", async () => {
     const store = build([
       makeStudent({ id: "a", class_groups: ["K1"] }),

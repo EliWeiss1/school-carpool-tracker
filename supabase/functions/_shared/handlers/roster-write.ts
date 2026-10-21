@@ -10,6 +10,12 @@
  * than rejected. Status changes are audited elsewhere (/set-status,
  * /roster-reset); this endpoint would otherwise be a second, unaudited way to
  * flip a child to `arrived`.
+ *
+ * Classes arrive as `class_groups`, an array of class *names*, resolved to ids
+ * here against the live class list. A name that is not a class is a 422 naming
+ * it, never a silently created class. On update the field is optional: absent
+ * leaves a student's classes alone, `[]` clears them. The retired singular
+ * `class_group` is refused outright (see `OUT_OF_DATE_MESSAGE`).
  */
 
 import {
@@ -20,12 +26,28 @@ import {
   withStoreErrors,
 } from "../http.ts";
 import type { RosterStore, StudentWriteInput } from "../ports.ts";
+import {
+  OUT_OF_DATE_MESSAGE,
+  readClassNames,
+  sendsLegacyClassGroup,
+  unknownClassMessage,
+} from "./class-input.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
-import { nameKey, nameTooLong, readAliases } from "./roster-input.ts";
+import {
+  nameKey,
+  nameTooLong,
+  readAliases,
+  resolveClassNames,
+} from "./roster-input.ts";
 
 export interface RosterWriteHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "createStudent" | "updateStudent" | "list">;
+  store: Pick<
+    RosterStore,
+    "createStudent" | "updateStudent" | "list" | "listClassGroups"
+  >;
 }
+
+const BAD_CLASS_LIST = "class_groups must be a list of class names.";
 
 export function createRosterWriteHandler(deps: RosterWriteHandlerDeps) {
   return async function handle(request: Request): Promise<Response> {
@@ -34,6 +56,10 @@ export function createRosterWriteHandler(deps: RosterWriteHandlerDeps) {
 
     const guard = await guardRequest(request, deps);
     if (!guard.ok) return guard.response;
+
+    if (sendsLegacyClassGroup(guard.body)) {
+      return errorResponse(400, OUT_OF_DATE_MESSAGE);
+    }
 
     const studentId = readString(guard.body, "studentId");
 
@@ -46,6 +72,32 @@ export function createRosterWriteHandler(deps: RosterWriteHandlerDeps) {
   };
 }
 
+/**
+ * The class ids a request names, or the response that refuses it. `ids` is
+ * undefined when the request says nothing about classes.
+ */
+async function classIdsFrom(
+  deps: RosterWriteHandlerDeps,
+  body: Record<string, unknown>,
+): Promise<{ ids: string[] | undefined } | { response: Response }> {
+  const read = readClassNames(body);
+  if (read.kind === "invalid") {
+    return { response: errorResponse(400, BAD_CLASS_LIST) };
+  }
+  if (read.kind === "absent") return { ids: undefined };
+
+  const resolved = resolveClassNames(
+    read.names,
+    await deps.store.listClassGroups(),
+  );
+  if (!resolved.ok) {
+    return {
+      response: errorResponse(422, unknownClassMessage(resolved.unknown)),
+    };
+  }
+  return { ids: resolved.ids };
+}
+
 async function create(
   deps: RosterWriteHandlerDeps,
   body: Record<string, unknown>,
@@ -56,16 +108,18 @@ async function create(
     return errorResponse(400, "A student needs a first and last name.");
   }
 
-  const classGroup = readString(body, "class_group");
   const carpoolId = readString(body, "carpool_id");
   const parent1Name = readString(body, "parent1_name");
   const parent2Name = readString(body, "parent2_name");
-  if (nameTooLong(firstName, lastName, classGroup, parent1Name, parent2Name)) {
+  if (nameTooLong(firstName, lastName, parent1Name, parent2Name)) {
     return errorResponse(
       400,
       "One of those entries is far too long to be a name. Check the row for a stray quotation mark.",
     );
   }
+
+  const classes = await classIdsFrom(deps, body);
+  if ("response" in classes) return classes.response;
 
   // Adding the same child twice is what a double-tapped Add button does, and a
   // duplicated roster row breaks the matcher rather than merely cluttering it:
@@ -88,7 +142,7 @@ async function create(
     first_name: firstName,
     last_name: lastName,
     aliases: readAliases(body),
-    class_group: classGroup,
+    class_group_ids: classes.ids ?? [],
     carpool_id: carpoolId,
     parent1_name: parent1Name,
     parent2_name: parent2Name,
@@ -125,8 +179,6 @@ async function update(
   }
 
   if ("aliases" in body) patch.aliases = readAliases(body);
-  if ("class_group" in body)
-    patch.class_group = readString(body, "class_group");
   if ("carpool_id" in body) patch.carpool_id = readString(body, "carpool_id");
   if ("parent1_name" in body)
     patch.parent1_name = readString(body, "parent1_name");
@@ -137,7 +189,6 @@ async function update(
     nameTooLong(
       patch.first_name ?? null,
       patch.last_name ?? null,
-      patch.class_group ?? null,
       patch.parent1_name ?? null,
       patch.parent2_name ?? null,
     )
@@ -147,6 +198,10 @@ async function update(
       "One of those entries is far too long to be a name. Check the row for a stray quotation mark.",
     );
   }
+
+  const classes = await classIdsFrom(deps, body);
+  if ("response" in classes) return classes.response;
+  if (classes.ids !== undefined) patch.class_group_ids = classes.ids;
 
   const student = await deps.store.updateStudent(studentId, patch);
   if (student === null) {

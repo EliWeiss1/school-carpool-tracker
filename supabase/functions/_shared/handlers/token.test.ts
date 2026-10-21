@@ -11,13 +11,13 @@ const ROSTER = [
     id: "a",
     last_name: "Cohen",
     aliases: ["Kohen"],
-    class_group: "K-Alvarez",
+    class_groups: ["K-Alvarez"],
   }),
-  makeStudent({ id: "b", last_name: "Nguyen", class_group: "4-Espinoza" }),
+  makeStudent({ id: "b", last_name: "Nguyen", class_groups: ["4-Espinoza"] }),
   makeStudent({
     id: "c",
     last_name: "Brooks",
-    class_group: "K-Alvarez",
+    class_groups: ["K-Alvarez"],
     status: "arrived",
   }),
 ];

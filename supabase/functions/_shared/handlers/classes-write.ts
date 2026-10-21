@@ -1,18 +1,26 @@
 /**
- * POST /classes-write — add, remove or reorder a class on the admin-editable
- * class list.
+ * POST /classes-write — manage the admin-editable class list and who is in it.
  *
- * One endpoint for all three actions, selected by an explicit `action`
- * field, the same way /carpool-write covers create/update/delete. Replaces
- * the old hardcoded `CLASS_GROUPS` array in `src/lib/classes.ts`: an admin
- * (often a parent volunteer who doesn't know the school's exact class names
- * ahead of time, e.g. an early-childhood program's own section names) can
- * now add a class from /admin instead of needing a code change.
+ * One endpoint for every action, selected by an explicit `action` field, the
+ * same way /carpool-write covers create/update/delete. It is the only home for
+ * these because `pin-budget.test.ts` sums the wrong-PIN allowance across every
+ * deployed function: a separate function per action would spend budget for no
+ * security gain. An admin (often a parent volunteer who doesn't know the
+ * school's exact class names ahead of time) adds a class here instead of
+ * needing a code change.
  *
- * Never touches a student's `class_group` value: that column stays free
- * text (see the class_groups migration), so removing a class here only
- * removes it from future pickers -- a student already carrying that value
- * keeps it exactly as before.
+ * Classes are linked to students many-to-many, so two actions do reach
+ * students -- but only their class *links*, never the students themselves:
+ *
+ * - `delete` retires a class. A student in another class simply loses this
+ *   one. If some students would be left with no class at all, nothing is
+ *   deleted and the answer is a 409 describing them, so the admin decides:
+ *   resend with `moveToClassId` (every member, sole or not, joins that class
+ *   first) or with `force` (sole members end up classless).
+ * - `members` bulk-adds and bulk-removes students from one class, so putting a
+ *   whole group into a class never means opening each student.
+ *
+ * Neither touches `status`, `arrived_at` or any other student column.
  */
 
 import {
@@ -29,15 +37,24 @@ import { MAX_NAME_LENGTH, nameTooLong } from "./roster-input.ts";
 export interface ClassesWriteHandlerDeps extends GuardDeps {
   store: Pick<
     RosterStore,
-    "listClassGroups" | "createClassGroup" | "removeClassGroup" | "reorderClassGroups"
+    | "listClassGroups"
+    | "createClassGroup"
+    | "removeClassGroup"
+    | "changeClassMembers"
+    | "reorderClassGroups"
   >;
 }
 
-const ACTIONS = ["create", "delete", "reorder"] as const;
+const ACTIONS = ["create", "delete", "reorder", "members"] as const;
 type ClassAction = (typeof ACTIONS)[number];
 
 /** A class list longer than this is almost certainly a mistake. */
 const MAX_CLASSES = 100;
+
+/** The most student ids one `members` list may carry. */
+const MAX_MEMBER_IDS = 500;
+
+const CLASS_GONE = "That class no longer exists.";
 
 function readAction(value: unknown): ClassAction | null {
   return typeof value === "string" &&
@@ -59,6 +76,28 @@ function readOrderedIds(body: Record<string, unknown>): string[] | null {
   return out.length === 0 ? null : out;
 }
 
+/**
+ * One list of student ids for a `members` call: blank and non-string entries
+ * are dropped, repeats collapsed. Null when the list is over the cap -- a
+ * silent truncation would apply half an edit, so the whole request is refused.
+ */
+function readStudentIds(
+  body: Record<string, unknown>,
+  field: string,
+): string[] | null {
+  const raw = body[field];
+  if (!Array.isArray(raw)) return [];
+  if (raw.length > MAX_MEMBER_IDS) return null;
+
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (trimmed !== "") seen.add(trimmed);
+  }
+  return [...seen];
+}
+
 export function createClassesWriteHandler(deps: ClassesWriteHandlerDeps) {
   return async function handle(request: Request): Promise<Response> {
     const options = preflight(request);
@@ -69,12 +108,16 @@ export function createClassesWriteHandler(deps: ClassesWriteHandlerDeps) {
 
     const action = readAction(guard.body.action);
     if (action === null) {
-      return errorResponse(400, 'action must be "create", "delete" or "reorder".');
+      return errorResponse(
+        400,
+        'action must be "create", "delete", "reorder" or "members".',
+      );
     }
 
     return await withStoreErrors(async () => {
       if (action === "delete") return await remove(deps, guard.body);
       if (action === "reorder") return await reorder(deps, guard.body);
+      if (action === "members") return await changeMembers(deps, guard.body);
       return await create(deps, guard.body);
     });
   };
@@ -106,10 +149,7 @@ async function create(
     (group) => group.name.toLowerCase() === name.toLowerCase(),
   );
   if (alreadyExists) {
-    return errorResponse(
-      409,
-      `A class named "${name}" already exists.`,
-    );
+    return errorResponse(409, `A class named "${name}" already exists.`);
   }
 
   const classGroup = await deps.store.createClassGroup({ name });
@@ -125,11 +165,72 @@ async function remove(
     return errorResponse(400, "No class was chosen to remove.");
   }
 
-  const removed = await deps.store.removeClassGroup(classId);
-  if (!removed) {
-    return errorResponse(404, "That class no longer exists.");
+  const moveToClassId = readString(body, "moveToClassId");
+  const outcome = await deps.store.removeClassGroup(classId, {
+    ...(moveToClassId !== null ? { moveToClassId } : {}),
+    // Only a literal true forces; a truthy string from a sloppy client must
+    // not strip students of their class.
+    force: body.force === true,
+  });
+
+  switch (outcome.status) {
+    case "deleted":
+      return jsonResponse({ deleted: true, movedCount: outcome.movedCount });
+    case "needs-decision": {
+      const count = outcome.soleMemberCount;
+      return jsonResponse(
+        {
+          error:
+            count === 1
+              ? "1 student is only in this class."
+              : `${count} students are only in this class.`,
+          memberCount: outcome.memberCount,
+          soleMemberCount: count,
+          soleMembers: outcome.soleMembers,
+        },
+        409,
+      );
+    }
+    case "bad-target":
+      return errorResponse(400, "Choose a different class to move them to.");
+    case "not-found":
+      return errorResponse(404, CLASS_GONE);
   }
-  return jsonResponse({ deleted: true });
+}
+
+async function changeMembers(
+  deps: ClassesWriteHandlerDeps,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const classId = readString(body, "classId");
+  if (classId === null) {
+    return errorResponse(400, "No class was chosen.");
+  }
+
+  const addIds = readStudentIds(body, "addStudentIds");
+  const removeIds = readStudentIds(body, "removeStudentIds");
+  if (addIds === null || removeIds === null) {
+    return errorResponse(
+      400,
+      `That is too many students at once (max ${MAX_MEMBER_IDS} per list). Do it in smaller groups.`,
+    );
+  }
+  if (addIds.length === 0 && removeIds.length === 0) {
+    return errorResponse(400, "Choose at least one student to add or remove.");
+  }
+
+  const outcome = await deps.store.changeClassMembers(
+    classId,
+    addIds,
+    removeIds,
+  );
+  if (outcome === null) {
+    return errorResponse(404, CLASS_GONE);
+  }
+  return jsonResponse({
+    memberCount: outcome.memberCount,
+    ignoredIds: outcome.ignoredIds,
+  });
 }
 
 async function reorder(

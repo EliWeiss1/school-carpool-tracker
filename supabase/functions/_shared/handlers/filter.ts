@@ -6,9 +6,13 @@
  * names to weigh.
  *
  * Two wire spellings are accepted and merged: `classGroups` (an array, what
- * /announce sends now) and `classGroup` (a single string, what /admin and any
- * client built before multi-class narrowing still send). Keeping the old one
- * means a stale browser tab never breaks mid-deploy.
+ * /announce sends now) and `classGroup` (a single string, what any client built
+ * before multi-class narrowing still sends). Keeping the old one means a stale
+ * browser tab never breaks mid-deploy. This only narrows a read: a student
+ * matches when ANY of their classes is named, and an empty filter means every
+ * student, classless ones included -- the store applies that rule. (Writes are
+ * stricter: the singular `class_group` on a write is refused, see
+ * class-input.ts.)
  */
 
 import { readString } from "../http.ts";

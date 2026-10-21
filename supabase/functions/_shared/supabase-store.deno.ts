@@ -749,8 +749,11 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // Supabase by default, so tally the links here. Ordered by the primary
       // key so pages neither overlap nor skip, and paged because one response
       // is capped at max_rows -- a silent cap would under-count a big class.
+      // A hosted project may cap below PAGE_SIZE, so a short page does not mean
+      // the last page: keep going (advancing by what actually came back, so no
+      // row is skipped) until a page is empty.
       const counts: Record<string, number> = {};
-      for (let from = 0; ; from += PAGE_SIZE) {
+      for (let from = 0; ; ) {
         const { data, error } = await client
           .from("student_classes")
           .select("class_group_id")
@@ -764,7 +767,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
         for (const row of rows) {
           counts[row.class_group_id] = (counts[row.class_group_id] ?? 0) + 1;
         }
-        if (rows.length < PAGE_SIZE) break;
+        if (rows.length === 0) break;
+        from += rows.length;
       }
       return counts;
     },

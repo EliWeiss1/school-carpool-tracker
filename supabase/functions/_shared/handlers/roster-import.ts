@@ -7,6 +7,11 @@
  * here regardless: every row is re-validated the same way a single
  * /roster-write create is, and the whole request is rejected rather than
  * silently dropping one bad row from a school roster.
+ *
+ * Each row's classes arrive as `class_groups`, names resolved to ids here
+ * exactly as /roster-write does. The first name that is not a class fails the
+ * whole import (422) before anything -- including a new carpool -- is written.
+ * The retired singular `class_group` on any row is a 400.
  */
 
 import {
@@ -17,61 +22,112 @@ import {
   withStoreErrors,
 } from "../http.ts";
 import type { RosterStore, StudentWriteInput } from "../ports.ts";
+import {
+  OUT_OF_DATE_MESSAGE,
+  readClassNames,
+  sendsLegacyClassGroup,
+  unknownClassMessage,
+} from "./class-input.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
-import { nameKey, nameTooLong, readAliases } from "./roster-input.ts";
+import {
+  nameKey,
+  nameTooLong,
+  readAliases,
+  resolveClassNames,
+} from "./roster-input.ts";
 
 export interface RosterImportHandlerDeps extends GuardDeps {
   store: Pick<
     RosterStore,
-    "bulkCreateStudents" | "list" | "listCarpools" | "createCarpool"
+    | "bulkCreateStudents"
+    | "list"
+    | "listCarpools"
+    | "createCarpool"
+    | "listClassGroups"
   >;
 }
 
 /** Comfortably above any real school roster; a stop against a malformed body. */
 const MAX_IMPORT_ROWS = 1000;
 
-/** A row from the client, before its carpool name is resolved to an id. */
-interface ImportRow extends Omit<StudentWriteInput, "carpool_id"> {
+const NO_VALID_STUDENTS =
+  "No valid students were sent to import. Re-check the file and try again.";
+
+/** A row from the client, before its carpool and class names become ids. */
+interface ParsedRow extends Omit<
+  StudentWriteInput,
+  "carpool_id" | "class_group_ids"
+> {
   /** The carpool name as typed in the file, or null for no carpool. */
+  carpool: string | null;
+  /** Class names as typed in the file; empty for no class. */
+  classNames: string[];
+}
+
+/** A row with its classes resolved, still carrying its typed carpool name. */
+interface ImportRow extends Omit<StudentWriteInput, "carpool_id"> {
   carpool: string | null;
 }
 
-function readStudentsInput(body: Record<string, unknown>): ImportRow[] | null {
-  const raw = body.students;
-  if (!Array.isArray(raw)) return null;
+type ParseResult =
+  { ok: true; rows: ParsedRow[] } | { ok: false; message: string };
 
-  const out: ImportRow[] = [];
+function readStudentsInput(body: Record<string, unknown>): ParseResult {
+  const malformed: ParseResult = { ok: false, message: NO_VALID_STUDENTS };
+  const raw = body.students;
+  if (!Array.isArray(raw)) return malformed;
+
+  const out: ParsedRow[] = [];
   for (const entry of raw) {
-    if (typeof entry !== "object" || entry === null) return null;
+    if (typeof entry !== "object" || entry === null) return malformed;
     const row = entry as Record<string, unknown>;
+
+    // A stale client says so up front rather than being told its rows are bad.
+    if (sendsLegacyClassGroup(row)) {
+      return { ok: false, message: OUT_OF_DATE_MESSAGE };
+    }
 
     const firstName = readString(row, "first_name");
     const lastName = readString(row, "last_name");
-    if (firstName === null || lastName === null) return null;
+    if (firstName === null || lastName === null) return malformed;
     const parent1Name = readString(row, "parent1_name");
     const parent2Name = readString(row, "parent2_name");
-    if (
-      nameTooLong(
-        firstName,
-        lastName,
-        readString(row, "class_group"),
-        parent1Name,
-        parent2Name,
-      )
-    )
-      return null;
+    if (nameTooLong(firstName, lastName, parent1Name, parent2Name))
+      return malformed;
+
+    const classes = readClassNames(row);
+    if (classes.kind === "invalid") return malformed;
 
     out.push({
       first_name: firstName,
       last_name: lastName,
       aliases: readAliases(row),
-      class_group: readString(row, "class_group"),
+      classNames: classes.kind === "names" ? classes.names : [],
       carpool: readString(row, "carpool"),
       parent1_name: parent1Name,
       parent2_name: parent2Name,
     });
   }
-  return out;
+  return { ok: true, rows: out };
+}
+
+/**
+ * Resolves every row's class names to ids against the live class list. The
+ * first unknown name, in row order, refuses the whole import.
+ */
+async function resolveClasses(
+  store: RosterImportHandlerDeps["store"],
+  rows: ParsedRow[],
+): Promise<{ ok: true; rows: ImportRow[] } | { ok: false; unknown: string }> {
+  const classes = await store.listClassGroups();
+
+  const resolved: ImportRow[] = [];
+  for (const { classNames, ...rest } of rows) {
+    const result = resolveClassNames(classNames, classes);
+    if (!result.ok) return { ok: false, unknown: result.unknown };
+    resolved.push({ ...rest, class_group_ids: result.ids });
+  }
+  return { ok: true, rows: resolved };
 }
 
 /**
@@ -116,14 +172,12 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
     const guard = await guardRequest(request, deps);
     if (!guard.ok) return guard.response;
 
-    const students = readStudentsInput(guard.body);
-    if (students === null || students.length === 0) {
-      return errorResponse(
-        400,
-        "No valid students were sent to import. Re-check the file and try again.",
-      );
+    const parsed = readStudentsInput(guard.body);
+    if (!parsed.ok) return errorResponse(400, parsed.message);
+    if (parsed.rows.length === 0) {
+      return errorResponse(400, NO_VALID_STUDENTS);
     }
-    if (students.length > MAX_IMPORT_ROWS) {
+    if (parsed.rows.length > MAX_IMPORT_ROWS) {
       return errorResponse(
         400,
         `That is too many students for one import (max ${MAX_IMPORT_ROWS}). Split the file and import it in parts.`,
@@ -131,6 +185,12 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
     }
 
     return await withStoreErrors(async () => {
+      const withClasses = await resolveClasses(deps.store, parsed.rows);
+      if (!withClasses.ok) {
+        return errorResponse(422, unknownClassMessage(withClasses.unknown));
+      }
+      const students = withClasses.rows;
+
       // Reject the whole import if any child is already on the roster.
       //
       // The realistic trigger is not malice, it is a lost response: the insert

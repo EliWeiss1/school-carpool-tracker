@@ -12,20 +12,20 @@ const ROSTER = [
     first_name: "Maya",
     last_name: "Cohen",
     aliases: ["Kohen"],
-    class_group: "K1",
+    class_groups: ["K1"],
   }),
   makeStudent({
     id: "kohen",
     first_name: "Elias",
     last_name: "Kohen",
     aliases: ["Cohen"],
-    class_group: "K1",
+    class_groups: ["K1"],
   }),
   makeStudent({
     id: "marsh",
     first_name: "Ava",
     last_name: "Marsh",
-    class_group: "4th",
+    class_groups: ["4th"],
   }),
 ];
 
@@ -143,6 +143,84 @@ describe("createResolveHandler", () => {
     ).not.toContain("marsh");
   });
 
+  describe("students in several classes", () => {
+    const MULTI = [
+      makeStudent({
+        id: "dual",
+        first_name: "Dina",
+        last_name: "Rosen",
+        class_groups: ["K1", "4th"],
+      }),
+      makeStudent({
+        id: "firstonly",
+        first_name: "Omri",
+        last_name: "Gold",
+        class_groups: ["K1"],
+      }),
+      makeStudent({
+        id: "nobody",
+        first_name: "Noa",
+        last_name: "Weinberg",
+        class_groups: [],
+      }),
+    ];
+
+    function multiHandler() {
+      return createResolveHandler({
+        staffPin: STAFF_PIN,
+        rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
+        pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
+        store: createFakeStore(MULTI),
+      });
+    }
+
+    const ask = async (transcript: string, extra: Record<string, unknown>) =>
+      (await (
+        await multiHandler()(
+          post({ pin: STAFF_PIN, deviceId: "phone-1", transcript, ...extra }),
+        )
+      ).json()) as ResolveBody & {
+        candidates: Array<{ students: Array<{ class_groups: string[] }> }>;
+      };
+
+    const ids = (body: ResolveBody) =>
+      body.candidates.flatMap((candidate) =>
+        candidate.students.map((student) => student.id),
+      );
+
+    it("a student matches when any of their classes is in the filter", async () => {
+      const viaFirst = await ask("Rosen", { classGroups: ["K1"] });
+      const viaSecond = await ask("Rosen", { classGroups: ["4th", "2nd"] });
+      const miss = await ask("Rosen", { classGroups: ["2nd"] });
+
+      expect(ids(viaFirst)).toContain("dual");
+      expect(ids(viaSecond)).toContain("dual");
+      expect(ids(miss)).not.toContain("dual");
+    });
+
+    it("a student in two classes resolves to one candidate", async () => {
+      // Filtering to both of their classes must not list them twice.
+      const body = await ask("Rosen", { classGroups: ["K1", "4th"] });
+
+      expect(ids(body).filter((id) => id === "dual")).toHaveLength(1);
+      expect(body.tier).toBe("clear");
+      expect(body.candidates[0].students[0].class_groups).toEqual([
+        "K1",
+        "4th",
+      ]);
+    });
+
+    it("a student with no classes is excluded by any filter but included with none", async () => {
+      const filtered = await ask("Weinberg", { classGroups: ["K1", "4th"] });
+      const unfiltered = await ask("Weinberg", {});
+      const emptyFilter = await ask("Weinberg", { classGroups: [] });
+
+      expect(ids(filtered)).not.toContain("nobody");
+      expect(ids(unfiltered)).toContain("nobody");
+      expect(ids(emptyFilter)).toContain("nobody");
+    });
+  });
+
   it("asks for something to match when the transcript is empty", async () => {
     const { handle } = setup();
 
@@ -228,9 +306,10 @@ describe("createResolveHandler — carpools", () => {
       id: "weiss",
       name: "Weiss Carpool",
     });
-    expect(
-      body.candidates[0].students.map((s) => s.id).sort(),
-    ).toEqual(["cohen", "weiss-jr"]);
+    expect(body.candidates[0].students.map((s) => s.id).sort()).toEqual([
+      "cohen",
+      "weiss-jr",
+    ]);
   });
 
   it("resolving one member's own surname still surfaces the whole carpool", async () => {
@@ -269,8 +348,18 @@ describe("createResolveHandler — carpools", () => {
   it("does not collapse two different carpools that both plausibly match", async () => {
     const store = createFakeStore(
       [
-        makeStudent({ id: "a", first_name: "A", last_name: "Cohen", carpool_id: "c1" }),
-        makeStudent({ id: "b", first_name: "B", last_name: "Koen", carpool_id: "c2" }),
+        makeStudent({
+          id: "a",
+          first_name: "A",
+          last_name: "Cohen",
+          carpool_id: "c1",
+        }),
+        makeStudent({
+          id: "b",
+          first_name: "B",
+          last_name: "Koen",
+          carpool_id: "c2",
+        }),
       ],
       [
         makeCarpool({ id: "c1", name: "First Carpool" }),
@@ -290,7 +379,9 @@ describe("createResolveHandler — carpools", () => {
       )
     ).json()) as ResolveBody;
 
-    const carpoolIds = body.candidates.map((c) => c.carpool?.id).filter(Boolean);
+    const carpoolIds = body.candidates
+      .map((c) => c.carpool?.id)
+      .filter(Boolean);
     expect(new Set(carpoolIds).size).toBe(carpoolIds.length);
   });
 

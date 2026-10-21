@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { createFakeStore, makeStudent } from "./fake-store.ts";
+import { createFakeStore, makeClassGroup, makeStudent } from "./fake-store.ts";
 import { createRosterImportHandler } from "./roster-import.ts";
 
 const STAFF_PIN = "4821";
 
 function setup() {
-  const store = createFakeStore([
-    makeStudent({ id: "cohen", first_name: "Maya", last_name: "Cohen" }),
-  ]);
+  const store = createFakeStore(
+    [makeStudent({ id: "cohen", first_name: "Maya", last_name: "Cohen" })],
+    [],
+    [
+      makeClassGroup({ id: "k1", name: "K1", sort_order: 0 }),
+      makeClassGroup({ id: "first", name: "1st", sort_order: 1 }),
+      makeClassGroup({ id: "second", name: "2nd", sort_order: 2 }),
+    ],
+  );
   const handle = createRosterImportHandler({
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 5, windowMs: 60_000 }),
@@ -127,6 +133,94 @@ describe("createRosterImportHandler", () => {
   });
 });
 
+describe("createRosterImportHandler — classes", () => {
+  it("imports rows with multiple classes", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      imp([
+        { first_name: "Theo", last_name: "Ng", class_groups: ["2nd", "K1"] },
+        { first_name: "Nora", last_name: "Chen", class_groups: ["1st"] },
+        { first_name: "Sam", last_name: "Roe" },
+      ]),
+    );
+    const body = (await response.json()) as {
+      students: Array<{ last_name: string; class_groups: string[] }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.students.map((s) => s.class_groups)).toEqual([
+      ["K1", "2nd"],
+      ["1st"],
+      [],
+    ]);
+    expect(
+      store.rows().find((s) => s.last_name === "Ng")?.class_groups,
+    ).toEqual(["K1", "2nd"]);
+  });
+
+  it("unknown class name is 422 naming the first unknown, and imports nothing", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      imp([
+        { first_name: "Theo", last_name: "Ng", class_groups: ["K1"] },
+        {
+          first_name: "Nora",
+          last_name: "Chen",
+          class_groups: ["Art", "Chess"],
+        },
+        { first_name: "Sam", last_name: "Roe", class_groups: ["Chess"] },
+      ]),
+    );
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(422);
+    expect(body.error).toBe(
+      'There\'s no class called "Art". Add it under Classes first.',
+    );
+    expect(store.rows()).toHaveLength(1);
+    expect(await store.listCarpools()).toHaveLength(0);
+  });
+
+  it("duplicate and differently-cased names collapse", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      imp([
+        {
+          first_name: "Theo",
+          last_name: "Ng",
+          class_groups: ["k1", "K1", " 1ST ", "1st"],
+        },
+      ]),
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      store.rows().find((s) => s.last_name === "Ng")?.class_groups,
+    ).toEqual(["K1", "1st"]);
+  });
+
+  it("singular class_group is rejected 400 and imports nothing", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      imp([
+        { first_name: "Nora", last_name: "Chen", class_groups: ["K1"] },
+        { first_name: "Theo", last_name: "Ng", class_group: "K1" },
+      ]),
+    );
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(
+      "This page is out of date. Reload it and try again.",
+    );
+    expect(store.rows()).toHaveLength(1);
+  });
+});
+
 describe("createRosterImportHandler — carpools", () => {
   it("creates a new carpool named in the file and links its members", async () => {
     const { handle, store } = setup();
@@ -156,9 +250,7 @@ describe("createRosterImportHandler — carpools", () => {
     });
 
     await handle(
-      imp([
-        { first_name: "Theo", last_name: "Ng", carpool: "weiss carpool" },
-      ]),
+      imp([{ first_name: "Theo", last_name: "Ng", carpool: "weiss carpool" }]),
     );
 
     expect(await store.listCarpools()).toHaveLength(1);

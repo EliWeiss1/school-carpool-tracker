@@ -1,21 +1,30 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { createFakeStore, makeStudent } from "./fake-store.ts";
+import { createFakeStore, makeClassGroup, makeStudent } from "./fake-store.ts";
 import { createRosterWriteHandler } from "./roster-write.ts";
 
 const STAFF_PIN = "4821";
 
 function setup() {
-  const store = createFakeStore([
-    makeStudent({
-      id: "cohen",
-      first_name: "Maya",
-      last_name: "Cohen",
-      aliases: ["Kohen"],
-      class_group: "K1",
-    }),
-  ]);
+  const store = createFakeStore(
+    [
+      makeStudent({
+        id: "cohen",
+        first_name: "Maya",
+        last_name: "Cohen",
+        aliases: ["Kohen"],
+        class_groups: ["K1"],
+      }),
+    ],
+    [],
+    [
+      makeClassGroup({ id: "k1", name: "K1", sort_order: 0 }),
+      makeClassGroup({ id: "first", name: "1st", sort_order: 1 }),
+      makeClassGroup({ id: "second", name: "2nd", sort_order: 2 }),
+      makeClassGroup({ id: "third", name: "3rd", sort_order: 3 }),
+    ],
+  );
   const handle = createRosterWriteHandler({
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
@@ -43,7 +52,7 @@ describe("createRosterWriteHandler — create", () => {
         first_name: "Theo",
         last_name: "Ng",
         aliases: ["Eng", "Ang"],
-        class_group: "K1",
+        class_groups: ["K1"],
       }),
     );
     const body = (await response.json()) as {
@@ -70,7 +79,11 @@ describe("createRosterWriteHandler — create", () => {
       }),
     );
     const body = (await response.json()) as {
-      student: { id: string; parent1_name: string | null; parent2_name: string | null };
+      student: {
+        id: string;
+        parent1_name: string | null;
+        parent2_name: string | null;
+      };
     };
 
     expect(response.status).toBe(200);
@@ -82,7 +95,9 @@ describe("createRosterWriteHandler — create", () => {
   it("defaults parent names to null when omitted", async () => {
     const { handle } = setup();
 
-    const response = await handle(base({ first_name: "Theo", last_name: "Ng" }));
+    const response = await handle(
+      base({ first_name: "Theo", last_name: "Ng" }),
+    );
     const body = (await response.json()) as {
       student: { parent1_name: string | null; parent2_name: string | null };
     };
@@ -91,18 +106,96 @@ describe("createRosterWriteHandler — create", () => {
     expect(body.student.parent2_name).toBeNull();
   });
 
-  it("defaults aliases and class to empty/null", async () => {
+  it("defaults aliases and classes to empty", async () => {
     const { handle } = setup();
 
     const response = await handle(
       base({ first_name: "New", last_name: "Student" }),
     );
     const body = (await response.json()) as {
-      student: { aliases: string[]; class_group: string | null };
+      student: { aliases: string[]; class_groups: string[] };
     };
 
     expect(body.student.aliases).toEqual([]);
-    expect(body.student.class_group).toBeNull();
+    expect(body.student.class_groups).toEqual([]);
+  });
+
+  it("creates a student in several classes", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      base({
+        first_name: "Theo",
+        last_name: "Ng",
+        class_groups: ["3rd", "K1"],
+      }),
+    );
+    const body = (await response.json()) as {
+      student: { id: string; class_groups: string[] };
+    };
+
+    expect(response.status).toBe(200);
+    // Reported in the class list's own order, not the order they were typed.
+    expect(body.student.class_groups).toEqual(["K1", "3rd"]);
+    expect(store.row(body.student.id)?.class_groups).toEqual(["K1", "3rd"]);
+  });
+
+  it("unknown class name is 422 and writes nothing", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      base({
+        first_name: "Theo",
+        last_name: "Ng",
+        class_groups: ["K1", "Art"],
+      }),
+    );
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(422);
+    expect(body.error).toBe(
+      'There\'s no class called "Art". Add it under Classes first.',
+    );
+    expect(store.rows()).toHaveLength(1);
+  });
+
+  it("duplicate and differently-cased names collapse", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      base({
+        first_name: "Theo",
+        last_name: "Ng",
+        class_groups: ["k1", " K1 ", "K1", ""],
+      }),
+    );
+    const body = (await response.json()) as {
+      student: { id: string; class_groups: string[] };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.student.class_groups).toEqual(["K1"]);
+    expect(store.row(body.student.id)?.class_groups).toEqual(["K1"]);
+  });
+
+  it("singular class_group is rejected 400", async () => {
+    const { handle, store } = setup();
+
+    const created = await handle(
+      base({ first_name: "Theo", last_name: "Ng", class_group: "K1" }),
+    );
+    const edited = await handle(
+      base({ studentId: "cohen", class_group: "1st" }),
+    );
+
+    for (const response of [created, edited]) {
+      expect(response.status).toBe(400);
+      expect(((await response.json()) as { error: string }).error).toBe(
+        "This page is out of date. Reload it and try again.",
+      );
+    }
+    expect(store.rows()).toHaveLength(1);
+    expect(store.row("cohen")?.class_groups).toEqual(["K1"]);
   });
 
   it("drops blank and duplicate aliases", async () => {
@@ -142,7 +235,7 @@ describe("createRosterWriteHandler — create", () => {
 });
 
 describe("createRosterWriteHandler — update", () => {
-  it("edits an existing student's name, aliases and class", async () => {
+  it("edits an existing student's name, aliases and classes", async () => {
     const { handle, store } = setup();
 
     const response = await handle(
@@ -151,37 +244,85 @@ describe("createRosterWriteHandler — update", () => {
         first_name: "Maya",
         last_name: "Cohen",
         aliases: ["Kohen", "Cohn"],
-        class_group: "1st",
+        class_groups: ["1st", "2nd"],
       }),
     );
     const body = (await response.json()) as {
       created: boolean;
-      student: { class_group: string | null; aliases: string[] };
+      student: { class_groups: string[]; aliases: string[] };
     };
 
     expect(response.status).toBe(200);
     expect(body.created).toBe(false);
-    expect(body.student.class_group).toBe("1st");
+    expect(body.student.class_groups).toEqual(["1st", "2nd"]);
     expect(body.student.aliases).toEqual(["Kohen", "Cohn"]);
-    expect(store.row("cohen")?.class_group).toBe("1st");
+    expect(store.row("cohen")?.class_groups).toEqual(["1st", "2nd"]);
   });
 
   it("only touches fields that were actually sent", async () => {
     const { handle, store } = setup();
 
-    await handle(base({ studentId: "cohen", class_group: "2nd" }));
+    await handle(base({ studentId: "cohen", class_groups: ["2nd"] }));
 
     expect(store.row("cohen")?.first_name).toBe("Maya");
-    expect(store.row("cohen")?.class_group).toBe("2nd");
+    expect(store.row("cohen")?.class_groups).toEqual(["2nd"]);
     expect(store.row("cohen")?.aliases).toEqual(["Kohen"]);
   });
 
-  it("can clear the class back to null", async () => {
+  it("omitting class_groups on update leaves classes alone", async () => {
     const { handle, store } = setup();
 
-    await handle(base({ studentId: "cohen", class_group: null }));
+    const response = await handle(
+      base({ studentId: "cohen", first_name: "Maia" }),
+    );
 
-    expect(store.row("cohen")?.class_group).toBeNull();
+    expect(response.status).toBe(200);
+    expect(store.row("cohen")?.first_name).toBe("Maia");
+    expect(store.row("cohen")?.class_groups).toEqual(["K1"]);
+  });
+
+  it("empty array clears classes", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      base({ studentId: "cohen", class_groups: [] }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(store.row("cohen")?.class_groups).toEqual([]);
+  });
+
+  it("unknown class name on update is 422 and changes nothing", async () => {
+    const { handle, store } = setup();
+
+    const response = await handle(
+      base({ studentId: "cohen", first_name: "Maia", class_groups: ["Art"] }),
+    );
+
+    expect(response.status).toBe(422);
+    expect(store.row("cohen")?.first_name).toBe("Maya");
+    expect(store.row("cohen")?.class_groups).toEqual(["K1"]);
+  });
+
+  it("surfaces the store's sentence when a class vanishes mid-request", async () => {
+    // The class list was read, then another admin deleted the class before the
+    // write landed; the store fails the foreign key and the sentence reaches
+    // the screen with the usual retry hint.
+    const { handle, store } = setup();
+    store.updateStudent = () =>
+      Promise.reject(
+        new Error(
+          "One of those classes no longer exists. Reload the page and try again.",
+        ),
+      );
+
+    const response = await handle(
+      base({ studentId: "cohen", class_groups: ["1st"] }),
+    );
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(503);
+    expect(body.error).toContain("One of those classes no longer exists.");
   });
 
   it("sets and then clears a parent name", async () => {
@@ -198,7 +339,7 @@ describe("createRosterWriteHandler — update", () => {
     const { handle, store } = setup();
 
     await handle(base({ studentId: "cohen", parent1_name: "Rina Cohen" }));
-    await handle(base({ studentId: "cohen", class_group: "2nd" }));
+    await handle(base({ studentId: "cohen", class_groups: ["2nd"] }));
 
     expect(store.row("cohen")?.parent1_name).toBe("Rina Cohen");
   });
@@ -216,7 +357,7 @@ describe("createRosterWriteHandler — update", () => {
     const { handle } = setup();
 
     const response = await handle(
-      base({ studentId: "nobody", class_group: "3rd" }),
+      base({ studentId: "nobody", class_groups: ["3rd"] }),
     );
 
     expect(response.status).toBe(404);
@@ -267,7 +408,7 @@ describe("createRosterWriteHandler — bounds and duplicates", () => {
         studentId: "cohen",
         first_name: "Maya",
         last_name: "Cohen",
-        class_group: "1st",
+        class_groups: ["1st"],
       }),
     );
 

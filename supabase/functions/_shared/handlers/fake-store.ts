@@ -133,17 +133,33 @@ export function createFakeStore(
     ...student,
     class_groups: classGroups
       .filter((group) => links.get(student.id)?.has(group.id))
-      .sort((a, b) => a.sort_order - b.sort_order)
+      // Ties broken by name, the same rule as class-embed.ts flattenClassNames.
+      .sort(
+        (a, b) =>
+          a.sort_order - b.sort_order ||
+          (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+      )
       .map((group) => group.name),
   });
 
-  /** Replaces a student's classes; ids that are not classes are skipped. */
-  const setLinks = (studentId: string, classIds: readonly string[]): void => {
+  /**
+   * Mirrors the foreign key on student_classes.class_group_id: a write naming a
+   * class that is not there fails, and the real store maps that failure to this
+   * same sentence. Checked before anything is written, so a failed write
+   * changes nothing -- the real insert is atomic too.
+   */
+  const assertKnownClasses = (classIds: readonly string[]): void => {
     const known = new Set(classGroups.map((group) => group.id));
-    links.set(
-      studentId,
-      new Set(classIds.filter((classId) => known.has(classId))),
-    );
+    if (classIds.some((classId) => !known.has(classId))) {
+      throw new Error(
+        "One of those classes no longer exists. Reload the page and try again.",
+      );
+    }
+  };
+
+  /** Replaces a student's classes. Callers have run `assertKnownClasses`. */
+  const setLinks = (studentId: string, classIds: readonly string[]): void => {
+    links.set(studentId, new Set(classIds));
   };
 
   // Matches the cap in public.remove_class_group().
@@ -209,7 +225,8 @@ export function createFakeStore(
       return Promise.resolve(true);
     },
 
-    createStudent(input: StudentWriteInput): Promise<StudentRow> {
+    async createStudent(input: StudentWriteInput): Promise<StudentRow> {
+      assertKnownClasses(input.class_group_ids);
       counter++;
       const student: StudentRow = {
         id: `student-${counter}`,
@@ -229,12 +246,14 @@ export function createFakeStore(
       return Promise.resolve(snap(student));
     },
 
-    updateStudent(
+    async updateStudent(
       id: string,
       patch: Partial<StudentWriteInput>,
     ): Promise<StudentRow | null> {
       const found = students.find((student) => student.id === id);
       if (!found) return Promise.resolve(null);
+      if (patch.class_group_ids !== undefined)
+        assertKnownClasses(patch.class_group_ids);
 
       if (patch.first_name !== undefined) found.first_name = patch.first_name;
       if (patch.last_name !== undefined) found.last_name = patch.last_name;
@@ -272,7 +291,11 @@ export function createFakeStore(
       return Promise.resolve(removed);
     },
 
-    bulkCreateStudents(inputs: StudentWriteInput[]): Promise<StudentRow[]> {
+    async bulkCreateStudents(
+      inputs: StudentWriteInput[],
+    ): Promise<StudentRow[]> {
+      // All or nothing, like the real bulk insert.
+      for (const input of inputs) assertKnownClasses(input.class_group_ids);
       const created = inputs.map((input) => {
         counter++;
         const student: StudentRow = {
