@@ -86,12 +86,35 @@ h3 {
     container-type: size;
   }
 
+  /*
+   * Names are the one thing on the board read from across a room, so they take
+   * as much of the tile as they can. Tiles are a fixed ~115px wide whatever the
+   * roster size, which makes WIDTH the binding limit, not height: a flat
+   * `...cqi` size had to be small enough for "Rosenthal", so "Cohen" and "Berg"
+   * sat at the same small size in a tile with room to spare. Instead each name
+   * is fitted to its own length: `--name-chars` / `--given-chars` (set inline
+   * by StudentTile, floored at 5 so a two-letter name does not balloon) is how
+   * many average-width glyphs must share the tile's content width (`100cqi`),
+   * and the 0.68 / 0.6 divisors are those faces' em-width per glyph, padded for wide capitals like the C in "Cohen"
+   * (Archivo ExtraBold at -0.03em tracking; Plex Sans Medium). The height
+   * term and the clamp are unchanged in spirit: still the smaller of the two,
+   * still floored so the longest surname wraps (line-clamp-2) rather than
+   * shrinking to nothing. Tile size is untouched.
+   */
   .tile-surname {
-    font-size: clamp(1.05rem, min(23cqh, 15cqi), 3.25rem);
+    font-size: clamp(
+      1.05rem,
+      min(26cqh, calc(100cqi / (var(--name-chars, 5) * 0.68))),
+      5rem
+    );
   }
 
   .tile-given-name {
-    font-size: clamp(0.8rem, min(11cqh, 7cqi), 1.5rem);
+    font-size: clamp(
+      0.8rem,
+      min(13cqh, calc(100cqi / (var(--given-chars, 5) * 0.6))),
+      2.25rem
+    );
   }
 
   .tile-label {
