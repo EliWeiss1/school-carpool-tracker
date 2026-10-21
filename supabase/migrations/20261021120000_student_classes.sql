@@ -86,17 +86,19 @@ set search_path = ''
 as $$
 begin
   with wanted as (
-    select lower(trim(s.class_group)) as key,
-           min(trim(s.class_group)) as name
+    select lower(btrim(s.class_group, E' \t\r\n')) as key,
+           -- collate "C": byte order, so the chosen spelling does not depend
+           -- on the database's collation.
+           min(btrim(s.class_group, E' \t\r\n') collate "C") as name
       from public.students s
-     where nullif(trim(s.class_group), '') is not null
-     group by lower(trim(s.class_group))
+     where nullif(btrim(s.class_group, E' \t\r\n'), '') is not null
+     group by lower(btrim(s.class_group, E' \t\r\n'))
   ), missing as (
     select w.name
       from wanted w
      where not exists (
        select 1 from public.class_groups g
-        where lower(trim(g.name)) = w.key
+        where lower(btrim(g.name, E' \t\r\n')) = w.key
      )
   ), base as (
     select coalesce(max(sort_order), -1) as top from public.class_groups
@@ -116,11 +118,11 @@ begin
       -- surrounding whitespace (the unique index is on lower(name), untrimmed).
       select g.id
         from public.class_groups g
-       where lower(trim(g.name)) = lower(trim(s.class_group))
+       where lower(btrim(g.name, E' \t\r\n')) = lower(btrim(s.class_group, E' \t\r\n'))
        order by g.sort_order, g.id
        limit 1
     ) g on true
-   where nullif(trim(s.class_group), '') is not null
+   where nullif(btrim(s.class_group, E' \t\r\n'), '') is not null
   on conflict do nothing;
 end;
 $$;
@@ -150,7 +152,10 @@ as $$
 declare
   wanted uuid[];
 begin
-  perform 1 from public.students where id = p_student_id for update;
+  -- NO KEY UPDATE: still serializes concurrent calls for this student, but
+  -- does not conflict with the FK's KEY SHARE lock (no deadlock with
+  -- remove_class_group(..., move_to) inserting links for the same student).
+  perform 1 from public.students where id = p_student_id for no key update;
   if not found then
     raise exception 'Student % does not exist.', p_student_id
       using errcode = 'P0002';
@@ -178,6 +183,10 @@ comment on function public.set_student_classes(uuid, uuid[]) is
 -- change_class_members() -- bulk add/remove for one class
 -- ---------------------------------------------------------------------------
 
+-- No sole-member guard here: removing a student's last class through this
+-- call (or after a remove_class_group check has passed) can leave them with
+-- no class. That is accepted -- the guard covers one remove_class_group call.
+--
 -- Drives the bulk-assign UI. Removes are applied before adds, so an id in
 -- both lists ends up a member (never silently loses a class). Adding an
 -- existing member is a no-op; removing a non-member is a no-op. Ids that are
@@ -239,6 +248,10 @@ comment on function public.change_class_members(uuid, uuid[], uuid[]) is
 -- remove_class_group() -- retire a class without stranding students
 -- ---------------------------------------------------------------------------
 
+-- The sole-member guard applies to this call only: a separate, later
+-- change_class_members removal can still leave a student with no class, and
+-- that is accepted. NULL p_force means false; NULL p_move_to means absent.
+--
 -- A "sole member" is a student whose only class is this one. Outcomes:
 --   * no sole members, or p_force             -> delete the class
 --                                               {"deleted": true, "moved_count": 0}
@@ -313,7 +326,8 @@ begin
     return jsonb_build_object('deleted', true, 'moved_count', members);
   end if;
 
-  if not p_force then
+  -- coalesce: a NULL p_force must fail closed (keep the guard), not skip it.
+  if not coalesce(p_force, false) then
     select count(*) into sole_count
       from public.student_classes m
      where m.class_group_id = p_class_group_id

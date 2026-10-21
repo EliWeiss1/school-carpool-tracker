@@ -1084,6 +1084,21 @@ describe("student_classes", () => {
       expect(await classesOf(already)).toEqual([target]);
     });
 
+    it("treats a NULL p_force as false and keeps the sole-member guard", async () => {
+      const c = await insertClass();
+      const sole = await insertStudent("NullForceSole");
+      await link(sole, c);
+
+      const res = await db.query<{ r: RemoveResult }>(
+        "select public.remove_class_group($1::uuid, null, null) as r",
+        [c],
+      );
+      expect(res.rows[0].r.deleted).toBe(false);
+      expect(res.rows[0].r.sole_member_count).toBe(1);
+      expect(await classExists(c)).toBe(true);
+      expect(await classesOf(sole)).toEqual([c]);
+    });
+
     it("with p_force deletes and leaves the sole member with no links", async () => {
       const c = await insertClass();
       const sole = await insertStudent("ForceSole");
@@ -1196,6 +1211,8 @@ describe("student_classes", () => {
         const clubPadded = await ins("ClubPadded", " art club ");
         const blank = await ins("Blank", "");
         const spaces = await ins("Spaces", "   ");
+        const tabbed = await ins("Tabbed", "\t \r\n");
+        const tabPadded = await ins("TabPadded", "\t3rd\n");
         const none = await ins("None", null);
 
         const maxBefore = (
@@ -1218,9 +1235,15 @@ describe("student_classes", () => {
         expect(await linksOf(shouted)).toEqual(["3rd"]);
         expect(await linksOf(club)).toEqual(["Art Club"]);
         expect(await linksOf(clubPadded)).toEqual(["Art Club"]);
-        for (const id of [blank, spaces, none]) {
+        expect(await linksOf(tabPadded)).toEqual(["3rd"]);
+        for (const id of [blank, spaces, tabbed, none]) {
           expect(await linksOf(id)).toEqual([]);
         }
+        // Whitespace-only text (tabs/newlines included) never becomes a class.
+        const blankClasses = await old.query(
+          "select 1 from public.class_groups where btrim(name, E' \\t\\r\\n') = ''",
+        );
+        expect(blankClasses.rows).toHaveLength(0);
 
         const thirds = await old.query(
           "select 1 from public.class_groups where lower(name) = '3rd'",
