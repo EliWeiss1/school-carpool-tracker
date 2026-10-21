@@ -68,8 +68,8 @@ $$;
 -- backfill_student_classes() -- free-text class_group -> links
 -- ---------------------------------------------------------------------------
 
--- Idempotent: run by this migration and again by the contract migration, to
--- catch anything old code wrote during the deploy window.
+-- Idempotent. Run once by this migration; the contract migration deliberately
+-- does NOT run it again (it would resurrect classes an admin removed since).
 --
 -- 1. Any non-blank class_group with no case/whitespace-insensitive match in
 --    class_groups gets a new class_groups row, so no student loses a class.

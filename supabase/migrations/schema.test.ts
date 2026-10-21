@@ -164,7 +164,7 @@ describe("arrived_at is derived from the status transition", () => {
     const id = await insertStudent("Renamed", "arrived");
     const before = (await readStudent(id)).arrived_at;
     await db.query(
-      "update public.students set class_group = '4th' where id = $1",
+      "update public.students set last_name = 'Renamed Too' where id = $1",
       [id],
     );
     expect((await readStudent(id)).arrived_at?.getTime()).toBe(
@@ -1160,10 +1160,9 @@ describe("student_classes", () => {
       "select public.set_student_classes(gen_random_uuid(), '{}'::uuid[])",
       "select public.change_class_members(gen_random_uuid(), '{}'::uuid[], '{}'::uuid[])",
       "select public.remove_class_group(gen_random_uuid())",
-      "select public.backfill_student_classes()",
     ];
 
-    it("anon and authenticated cannot execute set_student_classes, change_class_members, remove_class_group, backfill_student_classes", async () => {
+    it("anon and authenticated cannot execute set_student_classes, change_class_members, remove_class_group", async () => {
       for (const role of ["anon", "authenticated"]) {
         for (const sql of calls) {
           const code = await asRole(role, () => errorCodeOf(sql));
@@ -1185,7 +1184,6 @@ describe("student_classes", () => {
           [c, [s]],
         );
         await db.query("select public.remove_class_group($1::uuid)", [c]);
-        await db.query("select public.backfill_student_classes()");
       });
       expect(await classExists(c)).toBe(false);
     });
@@ -1269,4 +1267,78 @@ describe("student_classes", () => {
       }
     }, 60_000);
   });
+});
+
+describe("contract migration: drop students.class_group", () => {
+  const CONTRACT_MIGRATION =
+    "20261021130000_drop_student_class_group_column.sql";
+  const STUDENT_CLASSES_MIGRATION = "20261021120000_student_classes.sql";
+  const CLASS_GROUPS_MIGRATION = "20260916010000_class_groups.sql";
+
+  it("students no longer has a class_group column", async () => {
+    const res = await db.query(
+      "select 1 from information_schema.columns where table_schema = 'public' and table_name = 'students' and column_name = 'class_group'",
+    );
+    expect(res.rows).toHaveLength(0);
+  });
+
+  it("students_class_group_idx no longer exists", async () => {
+    const res = await db.query(
+      "select 1 from pg_indexes where schemaname = 'public' and indexname = 'students_class_group_idx'",
+    );
+    expect(res.rows).toHaveLength(0);
+  });
+
+  it("backfill_student_classes no longer exists", async () => {
+    const res = await db.query(
+      "select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'backfill_student_classes'",
+    );
+    expect(res.rows).toHaveLength(0);
+  });
+
+  it("does not resurrect a class or membership an admin removed after the expand step", async () => {
+    const old = await PGlite.create();
+    try {
+      await old.exec(BOOTSTRAP);
+      await applyMigrations(old, CLASS_GROUPS_MIGRATION);
+      const student = (
+        await old.query<{ id: string }>(
+          "insert into public.students (first_name, last_name, class_group) values ('Old', 'Clubber', 'Art Club') returning id",
+        )
+      ).rows[0].id;
+
+      // Expand: the backfill creates the Art Club class and links the student.
+      await applyMigration(old, STUDENT_CLASSES_MIGRATION);
+      const club = await old.query<{ id: string }>(
+        "select id from public.class_groups where name = 'Art Club'",
+      );
+      expect(club.rows).toHaveLength(1);
+      const linked = await old.query(
+        "select 1 from public.student_classes where student_id = $1",
+        [student],
+      );
+      expect(linked.rows).toHaveLength(1);
+
+      // An admin retires the class after the deploy (force: sole member).
+      await old.query(
+        "select public.remove_class_group($1::uuid, null, true)",
+        [club.rows[0].id],
+      );
+
+      // Contract: must not re-run the backfill from the stale text.
+      await applyMigration(old, CONTRACT_MIGRATION);
+
+      const classes = await old.query(
+        "select 1 from public.class_groups where name = 'Art Club'",
+      );
+      expect(classes.rows).toHaveLength(0);
+      const links = await old.query(
+        "select 1 from public.student_classes where student_id = $1",
+        [student],
+      );
+      expect(links.rows).toHaveLength(0);
+    } finally {
+      await old.close();
+    }
+  }, 60_000);
 });
