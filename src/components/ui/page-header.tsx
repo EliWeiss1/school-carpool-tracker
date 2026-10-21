@@ -16,6 +16,7 @@ export function PageHeader({
   title,
   action,
   live = false,
+  dense = false,
   className,
 }: {
   /** Who this screen is for. Small caps, above the title. */
@@ -24,14 +25,30 @@ export function PageHeader({
   action?: ReactNode;
   /** Animates the hazard rule. /announce sets this while the mic is open. */
   live?: boolean;
+  /**
+   * One line on a phone: the eyebrow is dropped below `sm`. For a screen where
+   * the height under the header is the scarce thing (/announce), the route
+   * name alone is enough to say where you are.
+   */
+  dense?: boolean;
   className?: string;
 }) {
   return (
     <header className={cn("sticky top-0 z-20", className)}>
-      <div className="flex items-center gap-4 bg-curb-900 px-6 py-3 text-white">
+      <div
+        className={cn(
+          "flex items-center bg-curb-900 text-white",
+          dense
+            ? "gap-3 px-4 py-1 sm:gap-4 sm:px-6 sm:py-3"
+            : "gap-4 px-6 py-3",
+        )}
+      >
         <Link
           href="/"
-          className="focus-ring rounded-lg text-marigold-400 transition-opacity hover:opacity-80"
+          className={cn(
+            "focus-ring rounded-lg text-marigold-400 transition-opacity hover:opacity-80 active:opacity-60",
+            dense && "flex min-h-tap items-center",
+          )}
           aria-label="All screens"
         >
           <span
@@ -43,7 +60,12 @@ export function PageHeader({
         </Link>
 
         <div className="min-w-0 flex-1">
-          <p className="font-mono text-[0.6875rem] uppercase tracking-eyebrow text-marigold-400">
+          <p
+            className={cn(
+              "font-mono text-[0.6875rem] uppercase tracking-eyebrow text-marigold-400",
+              dense && "hidden sm:block",
+            )}
+          >
             {eyebrow}
           </p>
           <h1 className="truncate font-display text-xl font-bold text-white">

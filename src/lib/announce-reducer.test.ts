@@ -6,10 +6,14 @@ import {
   candidateLabel,
   effectiveMemberIds,
   initialAnnounceState,
+  RECENT_LIMIT,
   type ResolveCandidateLike,
 } from "./announce-reducer";
 
-const student = (id: string, overrides: Partial<ResolveCandidateLike["students"][number]> = {}) => ({
+const student = (
+  id: string,
+  overrides: Partial<ResolveCandidateLike["students"][number]> = {},
+) => ({
   id,
   first_name: "Maya",
   last_name: "Cohen",
@@ -157,8 +161,14 @@ describe("live search suggestions", () => {
       suggestions: suggestions(candidate("s1"), carpool),
     });
     state = announceReducer(state, { type: "multiSelect/toggle" });
-    state = announceReducer(state, { type: "candidate/toggleSelect", key: "student:s1" });
-    state = announceReducer(state, { type: "candidate/toggleSelect", key: "carpool:c1" });
+    state = announceReducer(state, {
+      type: "candidate/toggleSelect",
+      key: "student:s1",
+    });
+    state = announceReducer(state, {
+      type: "candidate/toggleSelect",
+      key: "carpool:c1",
+    });
     state = announceReducer(state, {
       type: "candidate/toggleMember",
       candidateKey: "carpool:c1",
@@ -211,7 +221,10 @@ describe("live search suggestions", () => {
       value: "Cohen",
       suggestions: suggestions(candidate("s1")),
     });
-    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
+    state = announceReducer(state, {
+      type: "confirm/start",
+      key: "student:s1",
+    });
     state = announceReducer(state, {
       type: "confirm/settled",
       studentIds: ["s1"],
@@ -226,7 +239,10 @@ describe("live search suggestions", () => {
 describe("mic status", () => {
   it("reflects connecting/listening/processing as reported by the speech source", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "mic/status", status: "connecting" });
+    state = announceReducer(state, {
+      type: "mic/status",
+      status: "connecting",
+    });
     expect(state.micStatus).toBe("connecting");
 
     state = announceReducer(state, { type: "mic/status", status: "listening" });
@@ -284,7 +300,10 @@ describe("resolving", () => {
     state = announceReducer(state, { type: "resolve/start" });
     state = announceReducer(state, {
       type: "resolve/error",
-      banner: { tone: "error", message: "The board is not reachable right now." },
+      banner: {
+        tone: "error",
+        message: "The board is not reachable right now.",
+      },
     });
 
     expect(state.resolving).toBe(false);
@@ -450,7 +469,10 @@ describe("carpool member exclusion", () => {
 describe("confirming a candidate", () => {
   it("confirm/start records which candidate key is in flight and clears the banner", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
+    state = announceReducer(state, {
+      type: "confirm/start",
+      key: "student:s1",
+    });
 
     expect(state.confirmingKey).toBe("student:s1");
     expect(state.banner).toBeNull();
@@ -465,7 +487,10 @@ describe("confirming a candidate", () => {
       transcript: "Cohen",
       candidates: [candidate("s1")],
     });
-    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
+    state = announceReducer(state, {
+      type: "confirm/start",
+      key: "student:s1",
+    });
     state = announceReducer(state, {
       type: "confirm/settled",
       studentIds: ["s1"],
@@ -482,7 +507,10 @@ describe("confirming a candidate", () => {
 
   it("no changed ids is reported calmly", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
+    state = announceReducer(state, {
+      type: "confirm/start",
+      key: "student:s1",
+    });
     state = announceReducer(state, {
       type: "confirm/settled",
       studentIds: ["s1"],
@@ -497,7 +525,10 @@ describe("confirming a candidate", () => {
 
   it("logged fewer than changed surfaces a quiet warning", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
+    state = announceReducer(state, {
+      type: "confirm/start",
+      key: "student:s1",
+    });
     state = announceReducer(state, {
       type: "confirm/settled",
       studentIds: ["s1"],
@@ -521,7 +552,10 @@ describe("confirming a candidate", () => {
       displayName: "Earlier Kid",
       logged: 1,
     });
-    state = announceReducer(state, { type: "confirm/start", key: "student:s1" });
+    state = announceReducer(state, {
+      type: "confirm/start",
+      key: "student:s1",
+    });
     state = announceReducer(state, {
       type: "confirm/error",
       banner: { tone: "error", message: "Too many requests just now." },
@@ -562,12 +596,64 @@ describe("confirming a candidate", () => {
   });
 });
 
+describe("recently announced", () => {
+  const settle = (
+    state: ReturnType<typeof initialAnnounceState>,
+    studentIds: string[],
+    changedIds: string[] = studentIds,
+  ) =>
+    announceReducer(state, {
+      type: "confirm/settled",
+      studentIds,
+      changedIds,
+      displayName: "Someone",
+      logged: changedIds.length,
+    });
+
+  it("lists only the students that actually moved, newest first", () => {
+    let state = initialAnnounceState();
+    state = settle(state, ["a"]);
+    state = settle(state, ["b", "c"], ["c"]);
+    expect(state.recentIds).toEqual(["c", "a"]);
+  });
+
+  it("moves a repeat to the front instead of listing it twice", () => {
+    let state = initialAnnounceState();
+    state = settle(state, ["a"]);
+    state = settle(state, ["b"]);
+    state = settle(state, ["a"]);
+    expect(state.recentIds).toEqual(["a", "b"]);
+  });
+
+  it(`keeps at most ${RECENT_LIMIT}`, () => {
+    let state = initialAnnounceState();
+    for (const id of ["a", "b", "c", "d", "e", "f", "g"]) {
+      state = settle(state, [id]);
+    }
+    expect(state.recentIds).toEqual(["g", "f", "e", "d", "c"]);
+  });
+
+  it("drops a student once they are sent back to waiting", () => {
+    let state = settle(initialAnnounceState(), ["a", "b"]);
+    state = announceReducer(state, {
+      type: "unannounce/settled",
+      studentId: "a",
+      displayName: "A",
+    });
+    expect(state.recentIds).toEqual(["b"]);
+  });
+});
+
 describe("sending someone back to waiting", () => {
   it("unannounce/settled clears the in-flight flag and says so calmly", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "confirm/start", key: "unannounce:s1" });
+    state = announceReducer(state, {
+      type: "confirm/start",
+      key: "unannounce:s1",
+    });
     state = announceReducer(state, {
       type: "unannounce/settled",
+      studentId: "s1",
       displayName: "Maya Cohen",
     });
 
@@ -578,7 +664,10 @@ describe("sending someone back to waiting", () => {
 
   it("a failed attempt keeps everything and shows the banner", () => {
     let state = initialAnnounceState();
-    state = announceReducer(state, { type: "confirm/start", key: "unannounce:s1" });
+    state = announceReducer(state, {
+      type: "confirm/start",
+      key: "unannounce:s1",
+    });
     state = announceReducer(state, {
       type: "confirm/error",
       banner: { tone: "error", message: "Could not connect." },

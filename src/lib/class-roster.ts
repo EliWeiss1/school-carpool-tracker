@@ -41,7 +41,9 @@ export interface PadPick {
 /** Stable sort so a name never jumps position between renders. */
 function byName(a: PadStudent, b: PadStudent): number {
   return (
-    a.last_name.localeCompare(b.last_name, undefined, { sensitivity: "base" }) ||
+    a.last_name.localeCompare(b.last_name, undefined, {
+      sensitivity: "base",
+    }) ||
     a.first_name.localeCompare(b.first_name, undefined, { sensitivity: "base" })
   );
 }
@@ -181,7 +183,9 @@ export function carpoolMembers(
 ): PadStudent[] {
   if (student.carpool_id === null) return [student];
   return roster
-    .filter((s) => s.carpool_id === student.carpool_id && s.status === "waiting")
+    .filter(
+      (s) => s.carpool_id === student.carpool_id && s.status === "waiting",
+    )
     .sort(byName);
 }
 
@@ -201,7 +205,9 @@ export function tapAction(
   student: PadStudent,
 ): TapAction {
   if (student.status === "arrived") return "unannounce";
-  const picked = (selection[student.class_group ?? ""] ?? []).includes(student.id);
+  const picked = (selection[student.class_group ?? ""] ?? []).includes(
+    student.id,
+  );
   if (picked) return "deselect";
   return carpoolMembers(roster, student).length > 1 ? "prompt" : "select";
 }
@@ -246,9 +252,96 @@ export function scopeKey(classGroups: readonly string[]): string {
   return JSON.stringify([...classGroups].sort());
 }
 
-/** The collapsed filter's label. */
-export function narrowedLabel(classGroups: readonly string[]): string {
-  if (classGroups.length === 0) return "Narrow by class";
-  if (classGroups.length <= 3) return `Narrowed to ${classGroups.join(", ")}`;
-  return `Narrowed to ${classGroups.length} classes`;
+/**
+ * The header's class-filter button. Short on purpose -- it shares one ink
+ * line with the title and the Lock button on a 320px phone.
+ */
+export function classFilterLabel(classGroups: readonly string[]): string {
+  if (classGroups.length === 0) return "All classes";
+  if (classGroups.length === 1) return classGroups[0];
+  return `${classGroups.length} classes`;
+}
+
+/** What a 56px-wide rail button can show: one or two short lines. */
+export interface RailLabel {
+  top: string;
+  bottom?: string;
+}
+
+/** A name this short fits the rail button whole. */
+const RAIL_WHOLE_MAX = 4;
+/** A leading word this short ("EC", "K1") is a prefix worth keeping as-is. */
+const RAIL_PREFIX_MAX = 3;
+/** Letters taken from a word to begin with, and the most ever taken. */
+const RAIL_ABBREV_MIN = 3;
+const RAIL_ABBREV_MAX = 6;
+
+/**
+ * Short rail labels for every class, keyed by the full name.
+ *
+ * The rail is 56px wide, so "EC Hummingbirds" truncated to "EC Hu…" and every
+ * button in a family of "EC …" classes read the same. Instead a short leading
+ * word stays as the top line and the rest is cut to its first few letters in
+ * caps ("EC" / "HUM"), the way a pigeonhole or a bus route is labelled. Letters
+ * are added until no two classes collide, so "Robins" and "Robots" become
+ * "ROBI" and "ROBO" rather than two "ROB"s. The full name is still the drawer's
+ * heading and the button's accessible name; this is only what fits.
+ */
+export function railLabels(
+  classGroups: readonly string[],
+): Map<string, RailLabel> {
+  const parts = classGroups.map((name) => {
+    const words = name.trim().split(/\s+/).filter(Boolean);
+    if (name.length <= RAIL_WHOLE_MAX) return { name, whole: true as const };
+    const hasPrefix = words.length > 1 && words[0].length <= RAIL_PREFIX_MAX;
+    return {
+      name,
+      whole: false as const,
+      prefix: hasPrefix ? words[0] : undefined,
+      rest: (hasPrefix ? words.slice(1) : words).join(""),
+    };
+  });
+
+  const labels = new Map<string, RailLabel>();
+  let length = RAIL_ABBREV_MIN;
+  let pending = parts;
+
+  // Widen only the colliding labels, one letter at a time, so a unique
+  // class keeps its shortest form.
+  while (pending.length > 0) {
+    const candidates = pending.map((part) =>
+      part.whole
+        ? { name: part.name, label: { top: part.name } }
+        : {
+            name: part.name,
+            label: part.prefix
+              ? {
+                  top: part.prefix,
+                  bottom: part.rest.slice(0, length).toUpperCase(),
+                }
+              : { top: part.rest.slice(0, length).toUpperCase() },
+          },
+    );
+    const key = (label: RailLabel) => `${label.top}|${label.bottom ?? ""}`;
+    const seen = new Map<string, number>();
+    for (const { label } of candidates) {
+      seen.set(key(label), (seen.get(key(label)) ?? 0) + 1);
+    }
+    for (const label of labels.values()) {
+      seen.set(key(label), (seen.get(key(label)) ?? 0) + 1);
+    }
+
+    const stillColliding = new Set<string>();
+    for (const { name, label } of candidates) {
+      if ((seen.get(key(label)) ?? 0) > 1 && length < RAIL_ABBREV_MAX) {
+        stillColliding.add(name);
+      } else {
+        labels.set(name, label);
+      }
+    }
+    pending = pending.filter((part) => stillColliding.has(part.name));
+    length += 1;
+  }
+
+  return labels;
 }

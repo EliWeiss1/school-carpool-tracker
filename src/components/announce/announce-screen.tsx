@@ -1,20 +1,14 @@
 "use client";
 
-import {
-  type FormEvent,
-  useEffect,
-  useMemo,
-  useReducer,
-  useRef,
-} from "react";
+import { type FormEvent, useEffect, useMemo, useReducer, useRef } from "react";
 
+import { AnnounceDock } from "@/components/announce/announce-dock";
 import { CandidateList } from "@/components/announce/candidate-list";
 import { CarpoolPrompt } from "@/components/announce/carpool-prompt";
 import { ClassDrawer } from "@/components/announce/class-drawer";
 import { ClassRail } from "@/components/announce/class-rail";
-import { PushToTalkButton } from "@/components/announce/push-to-talk-button";
+import { RecentAnnouncements } from "@/components/announce/recent-announcements";
 import { RosterFilter } from "@/components/announce/roster-filter";
-import { SearchFallback } from "@/components/announce/search-fallback";
 import {
   Button,
   EmptyState,
@@ -119,9 +113,10 @@ export function AnnounceScreen() {
    * what was said. Reuse it for as long as the token is valid; only build a
    * new one when a new token is actually minted.
    */
-  const speechSourceRef = useRef<{ token: string; source: SpeechSource } | null>(
-    null,
-  );
+  const speechSourceRef = useRef<{
+    token: string;
+    source: SpeechSource;
+  } | null>(null);
   // A press that outlives the component (navigated away mid-listen) must not
   // keep a timer alive or, worse, resolve into a dispatch on an unmounted tree.
   const unmountedRef = useRef(false);
@@ -427,13 +422,7 @@ export function AnnounceScreen() {
       selected.length === 1 ? (selected[0].carpool?.id ?? null) : null;
     const score = selected.length === 1 ? selected[0].score : null;
 
-    void confirmCandidates(
-      "multi",
-      studentIds,
-      displayName,
-      carpoolId,
-      score,
-    );
+    void confirmCandidates("multi", studentIds, displayName, carpoolId, score);
   }
 
   /** The class drawer's one write: every name picked, across classes, at once. */
@@ -472,6 +461,7 @@ export function AnnounceScreen() {
       });
       dispatch({
         type: "unannounce/settled",
+        studentId: student.id,
         displayName: `${student.first_name} ${student.last_name}`,
       });
       void classRoster.refresh();
@@ -515,24 +505,34 @@ export function AnnounceScreen() {
   const speechDisabledReason =
     publicEnv.mockSpeech || isDeepgramSpeechSupported()
       ? undefined
-      : "Voice capture isn't available on this device or browser. Use the search above.";
+      : "Voice capture isn't available on this device or browser. Type the name instead.";
 
   const railList = railClasses(classGroups, narrowedTo);
-  const railVisible = railList.length > 0;
   const openClass = state.pad.openClass;
   const pickedTotal = selectedIds(state.pad.selection).length;
+  // The rail steps aside while matches are on screen, so the candidates get
+  // the full width -- unless the drawer is open or picks are waiting in it,
+  // since its badges are what keep an unsent pick from being forgotten.
+  const railVisible =
+    railList.length > 0 &&
+    (state.results === null || openClass !== null || pickedTotal > 0);
+  const recentStudents = useMemo(() => {
+    const byId = new Map(classRoster.roster.map((s) => [s.id, s]));
+    return state.recentIds.flatMap((id) => byId.get(id) ?? []);
+  }, [classRoster.roster, state.recentIds]);
   const promptStudent = state.pad.carpoolPrompt
-    ? classRoster.roster.find((s) => s.id === state.pad.carpoolPrompt?.studentId)
+    ? classRoster.roster.find(
+        (s) => s.id === state.pad.carpoolPrompt?.studentId,
+      )
     : undefined;
   const promptMembers = useMemo(
-    () => (promptStudent ? carpoolMembers(classRoster.roster, promptStudent) : []),
+    () =>
+      promptStudent ? carpoolMembers(classRoster.roster, promptStudent) : [],
     [classRoster.roster, promptStudent],
   );
   const drawerStudents = useMemo(
     () =>
-      openClass === null
-        ? []
-        : studentsInClass(classRoster.roster, openClass),
+      openClass === null ? [] : studentsInClass(classRoster.roster, openClass),
     [classRoster.roster, openClass],
   );
 
@@ -562,19 +562,39 @@ export function AnnounceScreen() {
   );
 
   return (
-    // h-dvh (not min-h-screen) so the header and the mic bar stay put and the
+    // h-dvh (not min-h-screen) so the header and the dock stay put and the
     // middle scrolls: the rail and drawer are positioned against that middle,
     // and dvh tracks the collapsing address bar on iOS Safari and Android
-    // Chrome, where plain vh leaves the mic button hidden underneath it.
+    // Chrome, where plain vh leaves the dock hidden underneath it.
+    //
+    // Top to bottom: a one-line header (class filter + Lock), the matches,
+    // then the dock (search + mic). Everything that produces names sits at
+    // the bottom under the thumb, so the space between is all names.
     <main className="flex h-screen flex-col bg-curb-50 supports-[height:100dvh]:h-dvh">
       <PageHeader
+        dense
         eyebrow="Lane 01 · Outside"
         title="Announce"
         live={state.micStatus === "listening"}
         action={
-          <Button variant="quiet-ink" size="sm" onClick={() => session.lock()}>
-            Lock
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <RosterFilter
+              classGroups={classGroups}
+              narrowedTo={narrowedTo}
+              onToggle={(classGroup) =>
+                dispatch({ type: "filter/toggleClass", classGroup })
+              }
+              onClear={() => dispatch({ type: "filter/clear" })}
+            />
+            <Button
+              variant="quiet-ink"
+              size="md"
+              className="!px-3"
+              onClick={() => session.lock()}
+            >
+              Lock
+            </Button>
+          </div>
         }
       />
 
@@ -588,22 +608,6 @@ export function AnnounceScreen() {
         >
           <div className="flex w-full flex-col gap-4">
             {openClass === null && renderFeedback(false)}
-
-            <RosterFilter
-              classGroups={classGroups}
-              narrowedTo={narrowedTo}
-              onToggle={(classGroup) =>
-                dispatch({ type: "filter/toggleClass", classGroup })
-              }
-              onClear={() => dispatch({ type: "filter/clear" })}
-            />
-
-            <SearchFallback
-              value={state.searchText}
-              onChange={handleSearchChange}
-              onSubmit={handleSearchSubmit}
-              disabled={state.resolving}
-            />
 
             {state.resolving && (
               <LoadingState label="Matching the name…" rows={2} />
@@ -640,31 +644,41 @@ export function AnnounceScreen() {
               state.results &&
               state.results.tier === "none" && (
                 <EmptyState
+                  className="py-8"
                   title="No match on the roster"
                   hint={
                     state.results.live
                       ? `No name starts with "${state.results.transcript}". Tap Search to check similar spellings.`
                       : state.results.origin === "manual"
                         ? `Nothing on the roster is close to "${state.results.transcript}." Check the spelling and try again.`
-                        : `Heard "${state.results.transcript}." Type the name above instead.`
+                        : `Heard "${state.results.transcript}." Type the name below instead.`
                   }
                 />
               )}
 
-            {!state.resolving &&
-              !state.results &&
-              !state.info &&
-              !state.banner && (
-                <EmptyState
-                  title="Ready when you are"
-                  hint={
-                    railVisible
-                      ? "Hold the button below and say the last name, type a name above, or tap a class on the right to pick names."
-                      : "Hold the button below and say the last name, or type a name above."
+            {!state.resolving && !state.results && (
+              <>
+                {/* One quiet line, not a card: the controls it describes are
+                    right there below it. */}
+                {!state.banner && !state.info && (
+                  <p className="px-1 text-curb-600">
+                    {railVisible
+                      ? "Hold the mic and say a last name, type one below, or tap a class on the right."
+                      : "Hold the mic and say a last name, or type one below."}
+                  </p>
+                )}
+                <RecentAnnouncements
+                  students={recentStudents}
+                  busyId={
+                    state.confirmingKey?.startsWith("unannounce:")
+                      ? state.confirmingKey.slice("unannounce:".length)
+                      : null
                   }
+                  disabled={state.confirmingKey !== null}
+                  onSendBack={(student) => void handleUnannounce(student)}
                 />
-              )}
-
+              </>
+            )}
           </div>
         </div>
 
@@ -695,7 +709,7 @@ export function AnnounceScreen() {
             busy={state.confirmingKey !== null}
             loading={classRoster.loading}
             error={classRoster.error}
-            feedback={renderFeedback(true)}
+            feedback={state.banner ? renderFeedback(true) : null}
             onTap={handleTapStudent}
             onClear={() => dispatch({ type: "pad/clearSelection" })}
             onAnnounce={handleAnnouncePicked}
@@ -726,22 +740,21 @@ export function AnnounceScreen() {
         )}
       </div>
 
-      <div
-        className={cn(
-          "z-10 border-t border-curb-200 bg-curb-50 px-4",
-          openClass === null ? "pt-4" : "pt-3",
-        )}
-        style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
-      >
-        <PushToTalkButton
-          status={state.micStatus}
-          disabledReason={speechDisabledReason}
-          // The drawer needs the height more than the mic needs the size.
-          compact={openClass !== null}
-          onPressStart={() => void handleMicPressStart()}
-          onPressEnd={() => void handleMicPressEnd()}
-        />
-      </div>
+      <AnnounceDock
+        searchText={state.searchText}
+        onSearchChange={handleSearchChange}
+        onSearchSubmit={handleSearchSubmit}
+        // Typing means calling by name, and the drawer would only cover the
+        // suggestions. Its picks survive the close, badged on the rail.
+        onSearchFocus={() => {
+          if (openClass !== null) dispatch({ type: "pad/close" });
+        }}
+        searchDisabled={state.resolving}
+        micStatus={state.micStatus}
+        micDisabledReason={speechDisabledReason}
+        onMicPressStart={() => void handleMicPressStart()}
+        onMicPressEnd={() => void handleMicPressEnd()}
+      />
     </main>
   );
 }

@@ -141,6 +141,11 @@ const config: Config = {
           "0%": { transform: "translateX(24px)", opacity: "0" },
           "100%": { transform: "translateX(0)", opacity: "1" },
         },
+        // The /announce class-filter sheet rises from the bottom edge.
+        "sheet-in": {
+          "0%": { transform: "translateY(24px)", opacity: "0" },
+          "100%": { transform: "translateY(0)", opacity: "1" },
+        },
       },
 
       animation: {
@@ -150,6 +155,7 @@ const config: Config = {
         "hazard-slide": "hazard-slide 1.2s linear infinite",
         "tile-in": "tile-in 0.3s ease-out both",
         "drawer-in": "drawer-in 0.22s cubic-bezier(0.34,1.56,0.64,1) both",
+        "sheet-in": "sheet-in 0.22s cubic-bezier(0.34,1.56,0.64,1) both",
       },
 
       // The spacing ladder. Only these steps appear in the app.

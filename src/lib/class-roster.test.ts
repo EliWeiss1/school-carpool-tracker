@@ -8,9 +8,10 @@ import {
   promptPicks,
   tapAction,
   countStatuses,
-  narrowedLabel,
+  classFilterLabel,
   pruneSelection,
   railClasses,
+  railLabels,
   removeIds,
   scopeKey,
   selectedCountIn,
@@ -147,13 +148,48 @@ describe("scopeKey", () => {
   });
 });
 
-describe("narrowedLabel", () => {
-  it("reads plainly at each size", () => {
-    expect(narrowedLabel([])).toBe("Narrow by class");
-    expect(narrowedLabel(["K1", "2nd"])).toBe("Narrowed to K1, 2nd");
-    expect(narrowedLabel(["K1", "K2", "1st", "2nd"])).toBe(
-      "Narrowed to 4 classes",
-    );
+describe("classFilterLabel", () => {
+  it("stays short enough for the header at each size", () => {
+    expect(classFilterLabel([])).toBe("All classes");
+    expect(classFilterLabel(["K1"])).toBe("K1");
+    expect(classFilterLabel(["K1", "K2", "1st", "2nd"])).toBe("4 classes");
+  });
+});
+
+describe("railLabels", () => {
+  it("keeps short names whole", () => {
+    const labels = railLabels(["K1", "1st", "2nd"]);
+    expect(labels.get("K1")).toEqual({ top: "K1" });
+    expect(labels.get("2nd")).toEqual({ top: "2nd" });
+  });
+
+  it("keeps a short prefix and abbreviates the rest", () => {
+    const labels = railLabels([
+      "EC Hummingbirds",
+      "EC Chipmunks",
+      "K2 Shoshanim",
+    ]);
+    expect(labels.get("EC Hummingbirds")).toEqual({ top: "EC", bottom: "HUM" });
+    expect(labels.get("EC Chipmunks")).toEqual({ top: "EC", bottom: "CHI" });
+    expect(labels.get("K2 Shoshanim")).toEqual({ top: "K2", bottom: "SHO" });
+  });
+
+  it("abbreviates a long single word onto one line", () => {
+    expect(railLabels(["Kindergarten"]).get("Kindergarten")).toEqual({
+      top: "KIN",
+    });
+  });
+
+  it("widens only the labels that would otherwise collide", () => {
+    const labels = railLabels(["EC Robins", "EC Robots", "EC Eagles"]);
+    expect(labels.get("EC Robins")).toEqual({ top: "EC", bottom: "ROBI" });
+    expect(labels.get("EC Robots")).toEqual({ top: "EC", bottom: "ROBO" });
+    expect(labels.get("EC Eagles")).toEqual({ top: "EC", bottom: "EAG" });
+  });
+
+  it("labels every class even when names stay identical to the cap", () => {
+    const labels = railLabels(["EC Butterflies A", "EC Butterflies B"]);
+    expect(labels.size).toBe(2);
   });
 });
 
