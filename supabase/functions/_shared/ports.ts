@@ -19,7 +19,8 @@ export interface StudentRow {
   first_name: string;
   last_name: string;
   aliases: string[];
-  class_group: string | null;
+  /** Names of the classes the student belongs to, in class sort_order. */
+  class_groups: string[];
   status: StudentStatus;
   arrived_at: string | null;
   updated_at: string;
@@ -57,7 +58,8 @@ export interface StudentWriteInput {
   first_name: string;
   last_name: string;
   aliases: string[];
-  class_group: string | null;
+  /** Ids of the classes the student belongs to (may be empty). */
+  class_group_ids: string[];
   carpool_id: string | null;
   parent1_name: string | null;
   parent2_name: string | null;
@@ -73,6 +75,38 @@ export interface ClassGroupRow {
 /** The fields /admin is allowed to set on a class group. */
 export interface ClassGroupWriteInput {
   name: string;
+}
+
+/** A student who would be left with no class by removing a class. */
+export interface SoleMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+}
+
+/**
+ * What `removeClassGroup` did. Mirrors public.remove_class_group():
+ * `needs-decision` deletes nothing; `not-found` and `bad-target` (move target
+ * is the class itself, or does not exist) change nothing either.
+ */
+export type RemoveClassGroupOutcome =
+  | { status: "deleted"; movedCount: number }
+  | {
+      status: "needs-decision";
+      memberCount: number;
+      soleMemberCount: number;
+      /** At most 10, ordered by last name, first name, id. */
+      soleMembers: SoleMember[];
+    }
+  | { status: "not-found" }
+  | { status: "bad-target" };
+
+/** Result of a bulk add/remove of one class's members. */
+export interface ChangeMembersOutcome {
+  /** The class's member count after the change. */
+  memberCount: number;
+  /** Student ids (from either list) that are not on the roster. */
+  ignoredIds: string[];
 }
 
 export interface StatusEventInput {
@@ -112,10 +146,7 @@ export interface RosterStore {
    * member who arrived moments earlier is silently absent from the result --
    * no second flash, no second audit row, no fabricated history.
    */
-  setStatusMany(
-    ids: string[],
-    status: StudentStatus,
-  ): Promise<StudentRow[]>;
+  setStatusMany(ids: string[], status: StudentStatus): Promise<StudentRow[]>;
   /** Resolves false when the audit row could not be written. Never throws. */
   logEvent(event: StatusEventInput): Promise<boolean>;
 
@@ -177,8 +208,29 @@ export interface RosterStore {
   listClassGroups(): Promise<ClassGroupRow[]>;
   /** Appended after the current highest sort_order. */
   createClassGroup(input: ClassGroupWriteInput): Promise<ClassGroupRow>;
-  /** Never touches any student's existing class_group value -- see the migration comment. */
-  removeClassGroup(id: string): Promise<boolean>;
+  /**
+   * Retires a class. Students are never deleted; their links to this class go.
+   * - `moveToClassId`: every member (sole or not) is linked to that class
+   *   first, and `movedCount` is the class's member count at that moment.
+   * - `force`: delete regardless; sole members end up with no class.
+   * - neither, with sole members present: nothing is deleted and the outcome
+   *   is `needs-decision`. A student in two classes is never a sole member.
+   */
+  removeClassGroup(
+    id: string,
+    options?: { moveToClassId?: string; force?: boolean },
+  ): Promise<RemoveClassGroupOutcome>;
+  /**
+   * Removes `removeIds` first, then adds `addIds` (an id in both ends up a
+   * member). Resolves null when the class does not exist.
+   */
+  changeClassMembers(
+    classGroupId: string,
+    addIds: string[],
+    removeIds: string[],
+  ): Promise<ChangeMembersOutcome | null>;
+  /** Class id -> number of students in it (classes with none may be absent). */
+  countClassMembers(): Promise<Record<string, number>>;
   /** Rewrites sort_order to match this exact id order. Ids not on the list are left untouched. */
   reorderClassGroups(orderedIds: string[]): Promise<ClassGroupRow[]>;
 }
