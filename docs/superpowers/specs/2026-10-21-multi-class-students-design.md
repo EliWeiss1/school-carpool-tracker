@@ -157,9 +157,15 @@ reads a column that no longer exists:
    with a class. The backfill is idempotent (safe to re-run). `class_group`
    column is left in place.
 2. Deploy the Edge Functions, then the frontend, both reading the new table.
-3. **Contract** migration: re-run the idempotent backfill once more (catches
-   anything written by old code during the deploy window), then drop
-   `students.class_group` and `students_class_group_idx`.
+3. **Contract** migration: drop `students.class_group`,
+   `students_class_group_idx` and the `backfill_student_classes()` helper. It
+   deliberately does **not** re-run the backfill: by then `student_classes` is
+   the source of truth, and re-running would resurrect classes an admin
+   retired and memberships an admin removed after the deploy (found in task
+   review). Instead, immediately before applying it, the rollout compares the
+   legacy `class_group` text against the links and shows the user any
+   student whose text has no matching link, so a write that old code made
+   during the short window between steps 1 and 2 can be fixed by hand.
 
 The live roster is small and single-building; a brief inconsistency window
 between steps 1 and 2 is accepted. The sequence and a rollback note (the
