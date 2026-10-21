@@ -55,6 +55,7 @@ import {
   type SpeechStatus,
   createMockSpeechSource,
 } from "@/lib/speech-mock";
+import { useKeyboardBox } from "@/lib/use-keyboard-box";
 import { usePinSession } from "@/lib/use-pin-session";
 
 /** Everything `deepgram-token` handed back, kept until it goes stale. */
@@ -84,6 +85,8 @@ export function AnnounceScreen() {
   const session = usePinSession();
   const { names: classGroups } = useClassGroups();
   const classRoster = useClassRoster();
+  const keyboard = useKeyboardBox();
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [state, dispatch] = useReducer(
     announceReducer,
     undefined,
@@ -126,6 +129,13 @@ export function AnnounceScreen() {
       speechSourceRef.current?.source.cancel();
     };
   }, []);
+
+  // A new set of matches starts at the top, where the best one is. Otherwise
+  // a list scrolled down for the last name keeps its offset and the top
+  // suggestions for the next one sit out of view.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [state.results]);
 
   function reportError(error: unknown, type: ErrorActionType) {
     const banner =
@@ -570,7 +580,23 @@ export function AnnounceScreen() {
     // Top to bottom: a one-line header (class filter + Lock), the matches,
     // then the dock (search + mic). Everything that produces names sits at
     // the bottom under the thumb, so the space between is all names.
-    <main className="flex h-screen flex-col bg-curb-50 supports-[height:100dvh]:h-dvh">
+    //
+    // While an iOS keyboard is open the screen is pinned to the area above it
+    // (`keyboard`), since Safari won't shrink the layout the way Android does.
+    <main
+      className="flex h-screen flex-col bg-curb-50 supports-[height:100dvh]:h-dvh"
+      style={
+        keyboard
+          ? {
+              position: "fixed",
+              left: 0,
+              right: 0,
+              top: keyboard.top,
+              height: keyboard.height,
+            }
+          : undefined
+      }
+    >
       <PageHeader
         dense
         eyebrow="Lane 01 · Outside"
@@ -600,8 +626,9 @@ export function AnnounceScreen() {
 
       <div className="relative mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col">
         <div
+          ref={scrollRef}
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 pl-4 pt-4",
+            "min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pb-6 pl-4 pt-4",
             // Leaves room for the rail so no candidate button slides under it.
             railVisible ? "pr-16" : "pr-4",
           )}
