@@ -13,6 +13,12 @@ export interface ModalSurfaceProps {
   onClose: () => void;
   /** False while a request is in flight: Escape and the backdrop do nothing. */
   dismissible?: boolean;
+  /**
+   * Whether a tap on the backdrop closes it. Escape and the Cancel button are
+   * deliberate; a stray tap outside is not, so a surface holding unsaved work
+   * turns this off.
+   */
+  dismissOnBackdrop?: boolean;
   /** Where focus lands on open; defaults to the first focusable control. */
   initialFocusSelector?: string;
   className?: string;
@@ -34,6 +40,7 @@ export function ModalSurface({
   labelledBy,
   onClose,
   dismissible = true,
+  dismissOnBackdrop = true,
   initialFocusSelector,
   className,
   children,
@@ -99,7 +106,13 @@ export function ModalSurface({
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink/60 sm:items-center sm:p-6"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && dismissible) onClose();
+        if (
+          event.target === event.currentTarget &&
+          dismissible &&
+          dismissOnBackdrop
+        ) {
+          onClose();
+        }
       }}
     >
       <div

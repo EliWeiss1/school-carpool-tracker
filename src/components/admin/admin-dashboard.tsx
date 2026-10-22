@@ -113,7 +113,7 @@ function AdminContent() {
         <ClassManager
           session={session}
           classGroups={classGroups}
-          students={students ?? []}
+          students={students}
           classMemberCounts={classMemberCounts}
           refresh={refreshClassGroups}
           refreshRoster={refresh}

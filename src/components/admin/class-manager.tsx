@@ -18,7 +18,12 @@ import {
   otherClasses,
 } from "@/lib/class-delete";
 import type { ClassGroup } from "@/lib/class-groups";
-import { type MembershipDiff, membersPayload } from "@/lib/class-members";
+import {
+  type MembershipDiff,
+  canOpenMembersSheet,
+  memberCountLabel,
+  membersPayload,
+} from "@/lib/class-members";
 import type { UsePinSession } from "@/lib/use-pin-session";
 
 import { ClassDeleteDialog } from "./class-delete-dialog";
@@ -42,8 +47,8 @@ const INPUT_CLASS =
 export interface ClassManagerProps {
   session: UsePinSession;
   classGroups: ClassGroup[];
-  /** The whole roster, for the membership sheet. */
-  students: RosterStudent[];
+  /** The whole roster, for the membership sheet; null until it has loaded. */
+  students: RosterStudent[] | null;
   /** Class id -> member count. A class with no students may be absent. */
   classMemberCounts: Record<string, number>;
   /** Re-fetches the class list so every picker in the app stays in sync. */
@@ -148,6 +153,21 @@ export function ClassManager({
     } finally {
       setBusyId(null);
     }
+  }
+
+  /**
+   * The inline "Remove?" confirm that opened the dialog is unmounted by then,
+   * so ModalSurface has nothing to hand focus back to. Put it on the row's
+   * own Remove button instead, once the dialog has gone.
+   */
+  function closeDecision(classId: string) {
+    setPending(null);
+    setDialogError(null);
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-remove-for="${classId}"]`)
+        ?.focus();
+    });
   }
 
   async function handleSaveMembers(
@@ -269,8 +289,10 @@ export function ClassManager({
                 </span>
 
                 <span className="min-w-[5.5rem] shrink-0 font-mono text-xs text-curb-500">
-                  {classMemberCounts[classGroup.id] ?? 0} student
-                  {(classMemberCounts[classGroup.id] ?? 0) === 1 ? "" : "s"}
+                  {memberCountLabel(
+                    classMemberCounts[classGroup.id],
+                    students !== null,
+                  )}
                 </span>
 
                 <Button
@@ -278,7 +300,10 @@ export function ClassManager({
                   size="sm"
                   onClick={() => setMembersFor(classGroup)}
                   aria-label={`Students in ${classGroup.name}`}
-                  disabled={isBusy}
+                  disabled={isBusy || !canOpenMembersSheet(students !== null)}
+                  title={
+                    students === null ? "Loading the roster…" : undefined
+                  }
                 >
                   Students
                 </Button>
@@ -308,6 +333,7 @@ export function ClassManager({
                     variant="quiet"
                     size="sm"
                     onClick={() => setConfirmingId(classGroup.id)}
+                    data-remove-for={classGroup.id}
                   >
                     Remove
                   </Button>
@@ -318,7 +344,7 @@ export function ClassManager({
         </ul>
       )}
 
-      {membersFor !== null && (
+      {membersFor !== null && students !== null && (
         <ClassMembersSheet
           classGroup={membersFor}
           classGroups={classGroups}
@@ -336,10 +362,7 @@ export function ClassManager({
           busy={busyId === pending.classGroup.id}
           error={dialogError}
           onResolve={(choice) => void handleDelete(pending.classGroup, choice)}
-          onCancel={() => {
-            setPending(null);
-            setDialogError(null);
-          }}
+          onCancel={() => closeDecision(pending.classGroup.id)}
         />
       )}
     </section>

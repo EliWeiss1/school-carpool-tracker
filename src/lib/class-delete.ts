@@ -31,9 +31,19 @@ export function classifyDeleteFailure(error: unknown): DeleteFailure {
   return { kind: "failed", message: "Could not remove that class. Try again." };
 }
 
-/** "Move" stays disabled until a destination class is picked. */
-export function canMove(moveToClassId: string | null): boolean {
-  return moveToClassId !== null && moveToClassId !== "";
+/**
+ * "Move" stays disabled until a destination is picked, and only while that
+ * destination is still on offer (it may have been deleted elsewhere since).
+ */
+export function canMove(
+  moveToClassId: string | null,
+  targets: readonly ClassGroup[],
+): boolean {
+  return (
+    moveToClassId !== null &&
+    moveToClassId !== "" &&
+    targets.some((t) => t.id === moveToClassId)
+  );
 }
 
 export type DeleteChoice =

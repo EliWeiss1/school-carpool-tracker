@@ -99,3 +99,22 @@ export function membersPayload(
     ...(diff.remove.length > 0 ? { removeStudentIds: diff.remove } : {}),
   };
 }
+
+/**
+ * The sheet edits a snapshot of the roster, so it must never open on a roster
+ * that has not arrived yet: it would show zero members and a later load would
+ * look like "remove everyone".
+ */
+export function canOpenMembersSheet(rosterLoaded: boolean): boolean {
+  return rosterLoaded;
+}
+
+/** "18 students", or an em dash while the roster (and so the count) is unknown. */
+export function memberCountLabel(
+  count: number | undefined,
+  rosterLoaded: boolean,
+): string {
+  if (!rosterLoaded) return "—";
+  const n = count ?? 0;
+  return `${n} student${n === 1 ? "" : "s"}`;
+}

@@ -51,8 +51,10 @@ export function ClassDeleteDialog({
 }: ClassDeleteDialogProps) {
   const titleId = useId();
   const pickerId = useId();
-  const [targetId, setTargetId] = useState("");
-  const target = targets.find((t) => t.id === targetId);
+  const [pickedId, setPickedId] = useState("");
+  // A destination deleted elsewhere since it was picked counts as none.
+  const target = targets.find((t) => t.id === pickedId);
+  const targetId = target?.id ?? "";
   const preview = previewNames(decision.soleMembers, decision.soleMemberCount);
 
   return (
@@ -86,6 +88,8 @@ export function ClassDeleteDialog({
           )}
         </ul>
 
+        {error && <ErrorBanner className="mt-6" message={error} />}
+
         <div className="mt-6 flex flex-col gap-2">
           <label
             htmlFor={pickerId}
@@ -97,7 +101,7 @@ export function ClassDeleteDialog({
             id={pickerId}
             className={SELECT_CLASS}
             value={targetId}
-            onChange={(event) => setTargetId(event.target.value)}
+            onChange={(event) => setPickedId(event.target.value)}
             disabled={busy}
           >
             <option value="">Choose a class</option>
@@ -118,7 +122,7 @@ export function ClassDeleteDialog({
             onClick={() =>
               target && onResolve({ action: "move", moveToClassId: target.id })
             }
-            disabled={busy || !canMove(targetId)}
+            disabled={busy || !canMove(targetId, targets)}
           >
             {target
               ? moveButtonLabel(decision.memberCount, target.name)
@@ -143,8 +147,6 @@ export function ClassDeleteDialog({
             {busy ? "Working…" : "Delete anyway"}
           </Button>
         </div>
-
-        {error && <ErrorBanner className="mt-4" message={error} />}
       </div>
 
       <footer className="flex justify-end rounded-b-2xl border-t border-curb-200 px-6 py-4">

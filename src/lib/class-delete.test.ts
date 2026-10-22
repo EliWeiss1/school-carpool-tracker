@@ -61,10 +61,20 @@ describe("classifyDeleteFailure", () => {
 });
 
 describe("canMove", () => {
+  const targets = [
+    { id: "k2", name: "K2", sortOrder: 1 },
+    { id: "1st", name: "1st", sortOrder: 2 },
+  ];
+
   it("is disabled until a class is chosen", () => {
-    expect(canMove("")).toBe(false);
-    expect(canMove(null)).toBe(false);
-    expect(canMove("k2")).toBe(true);
+    expect(canMove("", targets)).toBe(false);
+    expect(canMove(null, targets)).toBe(false);
+    expect(canMove("k2", targets)).toBe(true);
+  });
+
+  it("is false when the chosen class is no longer on offer", () => {
+    expect(canMove("gone", targets)).toBe(false);
+    expect(canMove("k2", [])).toBe(false);
   });
 });
 

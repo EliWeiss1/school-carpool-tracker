@@ -5,7 +5,9 @@ import {
   describeDiff,
   diffMembership,
   filterStudents,
+  canOpenMembersSheet,
   hasChanges,
+  memberCountLabel,
   memberIdsOf,
   membersPayload,
 } from "./class-members";
@@ -150,5 +152,24 @@ describe("membersPayload", () => {
       addStudentIds: ["a"],
       removeStudentIds: ["b"],
     });
+  });
+});
+
+describe("canOpenMembersSheet", () => {
+  it("is false until the roster has loaded, so a blank list is never edited", () => {
+    expect(canOpenMembersSheet(false)).toBe(false);
+    expect(canOpenMembersSheet(true)).toBe(true);
+  });
+});
+
+describe("memberCountLabel", () => {
+  it("shows an em dash while the roster is loading, not a false zero", () => {
+    expect(memberCountLabel(0, false)).toBe("—");
+    expect(memberCountLabel(undefined, false)).toBe("—");
+  });
+  it("pluralises once loaded, treating a missing count as zero", () => {
+    expect(memberCountLabel(undefined, true)).toBe("0 students");
+    expect(memberCountLabel(1, true)).toBe("1 student");
+    expect(memberCountLabel(18, true)).toBe("18 students");
   });
 });

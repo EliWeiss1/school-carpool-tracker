@@ -66,9 +66,11 @@ export function ClassMembersSheet({
 }: ClassMembersSheetProps) {
   const titleId = useId();
   const searchId = useId();
-  const original = useMemo(
-    () => memberIdsOf(students, classGroup.name),
-    [students, classGroup.name],
+  // Snapshot once, at open. `chosen` starts from the same set, so a roster
+  // refresh while the sheet is open can never make the two drift apart and
+  // read as "remove everyone". The list below may still show fresher rows.
+  const [original] = useState<Set<string>>(() =>
+    memberIdsOf(students, classGroup.name),
   );
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(original));
   const [text, setText] = useState("");
@@ -148,6 +150,7 @@ export function ClassMembersSheet({
       labelledBy={titleId}
       onClose={onClose}
       dismissible={!saving}
+      dismissOnBackdrop={!changed}
       initialFocusSelector='input[type="search"]'
       className="sm:max-w-2xl"
     >
