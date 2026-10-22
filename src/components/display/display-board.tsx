@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 import { BoardGrid } from "@/components/display/board-grid";
 import { ClassFilter } from "@/components/display/class-filter";
@@ -15,12 +14,18 @@ import {
 import { createChimeCoalescer, createChimePlayer } from "@/lib/display-chime";
 import { groupIntoSections } from "@/lib/display-sections";
 import { mockArrivalOrder, mockRoster } from "@/lib/display-mock-roster";
+import { connectBoard, type BoardClient } from "@/lib/display-subscription";
 import {
   applySnapshot,
   reconcile,
   type DisplayRoster,
   type StudentChangePayload,
 } from "@/lib/realtime-reconcile";
+import {
+  STUDENT_WITH_CLASSES_SELECT,
+  withClassNames,
+  type StudentClassesEmbed,
+} from "@/lib/student-classes";
 import { getBrowserClient } from "@/lib/supabase/browser";
 import { useClassGroups } from "@/lib/use-class-groups";
 import type { Student } from "@/types/db";
@@ -69,40 +74,6 @@ const FLASH_DURATION_MS = 3400;
 const CHIME_COALESCE_WINDOW_MS = 2000;
 
 type ConnectionState = "connecting" | "live" | "error";
-
-/**
- * `students` carries FULL replica identity, so a genuine payload always has a
- * complete row in `old` for UPDATE/DELETE -- but the wire *type* only
- * promises `Partial<T>`, because supabase-js has no way to know a given
- * table's replica identity. This is the one place that gap is bridged, with a
- * runtime check rather than a blind cast.
- */
-function fullRowOrNull(
-  row: Partial<Student> | Record<string, never>,
-): Student | null {
-  return "id" in row && "status" in row && "updated_at" in row
-    ? (row as Student)
-    : null;
-}
-
-function toChangePayload(
-  payload: RealtimePostgresChangesPayload<Student>,
-): StudentChangePayload | null {
-  if (payload.eventType === "DELETE") {
-    const old = fullRowOrNull(payload.old);
-    // Cannot happen given REPLICA IDENTITY FULL on students, but a payload
-    // with no identifiable row is not something this board can reconcile --
-    // silently dropping one malformed delete beats crashing the board.
-    if (!old) return null;
-    return { eventType: "DELETE", new: null, old };
-  }
-
-  return {
-    eventType: payload.eventType,
-    new: payload.new,
-    old: fullRowOrNull(payload.old),
-  };
-}
 
 export function DisplayBoard({
   mockMode = false,
@@ -310,46 +281,43 @@ export function DisplayBoard({
 
     let cancelled = false;
 
+    // One fetch serves the first load, every reconnect and every membership
+    // edit. The embed brings each student's classes along; a `students` realtime
+    // payload cannot (see realtime-reconcile.ts), so this is where they come from.
     async function fetchSnapshot() {
-      const { data, error } = await client.from("students").select("*");
+      const { data, error } = await client
+        .from("students")
+        .select(STUDENT_WITH_CLASSES_SELECT)
+        .returns<(Student & StudentClassesEmbed)[]>();
       if (cancelled) return;
       if (error) {
         setConnection("error");
         return;
       }
-      setRoster((prev) => applySnapshot(prev, data ?? []));
+      setRoster((prev) => applySnapshot(prev, (data ?? []).map(withClassNames)));
       setConnection("live");
     }
 
-    const channel = client
-      .channel("display-students")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "students" },
-        (payload: RealtimePostgresChangesPayload<Student>) => {
-          const changePayload = toChangePayload(payload);
-          if (!changePayload) return;
-          setRoster((prev) => {
-            const result = reconcile(prev, changePayload);
-            handleArrivals(
-              result.arrivals.filter((id) => visibleIdsRef.current.has(id)),
-            );
-            return result.roster;
-          });
-        },
-      )
-      .subscribe((status) => {
-        if (cancelled) return;
-        if (status === "SUBSCRIBED") {
-          void fetchSnapshot();
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setConnection("error");
-        }
-      });
+    // supabase-js's channel API is heavily overloaded; BoardClient is the narrow
+    // slice connectBoard uses, so the cast is a view, not a conversion.
+    const disconnect = connectBoard(client as unknown as BoardClient, {
+      onStudentChange: (changePayload) =>
+        setRoster((prev) => {
+          const result = reconcile(prev, changePayload);
+          handleArrivals(
+            result.arrivals.filter((id) => visibleIdsRef.current.has(id)),
+          );
+          return result.roster;
+        }),
+      // A refetch can only change rows and membership, never produce an
+      // arrival: applySnapshot has no `arrivals` to hand to handleArrivals.
+      onSnapshotNeeded: () => void fetchSnapshot(),
+      onConnectionError: () => setConnection("error"),
+    });
 
     return () => {
       cancelled = true;
-      void client.removeChannel(channel);
+      disconnect();
     };
   }, [mockMode, handleArrivals]);
 

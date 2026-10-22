@@ -1,4 +1,4 @@
-import type { Student } from "@/types/db";
+import type { StudentWithClasses } from "@/types/db";
 
 /**
  * The class list is admin-editable data now (see `use-class-groups.ts`), not
@@ -60,9 +60,23 @@ interface MockSeed {
   id: string;
   first_name: string;
   last_name: string;
-  class_group: string;
-  status: Student["status"];
+  class_groups: string[];
+  status: StudentWithClasses["status"];
 }
+
+/**
+ * A handful of students who belong to two classes, keyed by roster position,
+ * so the preview shows the same child under both sections (siblings split
+ * across classes, a student in a mixed-age group). Their second class is
+ * deliberately in a different section from their first.
+ */
+const SECOND_CLASS: Record<number, string> = {
+  1: "K2", // Ari Kohen, K1 + K2
+  17: "1st", // Noa Koen, K2 + 1st
+  44: "3rd", // Rebekah Tal, 1st + 3rd
+  62: "5th", // Noa Koen, 3rd + 5th
+  80: "K1", // Mira Stein, 4th + K1
+};
 
 const SEEDS: MockSeed[] = MOCK_CLASS_GROUPS.flatMap((classGroup, classIndex) =>
   NAME_POOL.map(([firstName, lastName], nameIndex) => {
@@ -71,7 +85,7 @@ const SEEDS: MockSeed[] = MOCK_CLASS_GROUPS.flatMap((classGroup, classIndex) =>
       id: `m${String(seq + 1).padStart(3, "0")}`,
       first_name: firstName,
       last_name: lastName,
-      class_group: classGroup,
+      class_groups: [classGroup, ...(SECOND_CLASS[seq] ? [SECOND_CLASS[seq]] : [])],
       // Roughly a third arrived, spread across the roster rather than
       // clustered in one class, so the flash/chime preview and the
       // red/green mix both look realistic.
@@ -80,13 +94,13 @@ const SEEDS: MockSeed[] = MOCK_CLASS_GROUPS.flatMap((classGroup, classIndex) =>
   }),
 );
 
-function toStudent(seed: MockSeed): Student {
+function toStudent(seed: MockSeed): StudentWithClasses {
   return {
     id: seed.id,
     first_name: seed.first_name,
     last_name: seed.last_name,
     aliases: [],
-    class_group: seed.class_group,
+    class_groups: seed.class_groups,
     status: seed.status,
     arrived_at: seed.status === "arrived" ? BASE_TIME : null,
     updated_at: BASE_TIME,
@@ -95,7 +109,7 @@ function toStudent(seed: MockSeed): Student {
 }
 
 /** The full synthetic roster, ready to pass straight to `applySnapshot`. */
-export function mockRoster(): Student[] {
+export function mockRoster(): StudentWithClasses[] {
   return SEEDS.map(toStudent);
 }
 

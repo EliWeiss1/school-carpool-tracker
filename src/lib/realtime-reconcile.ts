@@ -1,4 +1,4 @@
-import type { Student } from "@/types/db";
+import type { Student, StudentWithClasses } from "@/types/db";
 
 /**
  * The board's own reducer for `students` Postgres Changes payloads. This is
@@ -22,7 +22,14 @@ import type { Student } from "@/types/db";
  *    mid-afternoon) can never resurrect a stale status.
  */
 
-export type DisplayRoster = Record<string, Student>;
+/**
+ * Class membership lives in `student_classes`, not on the `students` row, so
+ * a `students` realtime payload never carries it. The roster therefore holds
+ * `StudentWithClasses` and treats `class_groups` as owned by the snapshot
+ * fetch (and the board's `student_classes` subscription, which refetches),
+ * never by a `students` payload.
+ */
+export type DisplayRoster = Record<string, StudentWithClasses>;
 
 export type StudentChangePayload =
   | { eventType: "INSERT"; new: Student; old: Student | null }
@@ -45,7 +52,10 @@ function parsedTime(iso: string): number {
 }
 
 /** Strictly newer than the row already held, or nothing was held yet. */
-function isFresh(incoming: Student, existing: Student | undefined): boolean {
+function isFresh(
+  incoming: Student,
+  existing: StudentWithClasses | undefined,
+): boolean {
   if (!existing) return true;
   return parsedTime(incoming.updated_at) > parsedTime(existing.updated_at);
 }
@@ -92,7 +102,12 @@ export function reconcile(
       : [];
 
   return {
-    roster: { ...roster, [incoming.id]: incoming },
+    // Whatever the payload carried, membership is the held row's (or [] for
+    // a student we have never seen); a snapshot supplies the real value.
+    roster: {
+      ...roster,
+      [incoming.id]: { ...incoming, class_groups: existing?.class_groups ?? [] },
+    },
     arrivals,
   };
 }
@@ -102,6 +117,10 @@ export function reconcile(
  * the roster already held. Has no `arrivals` in its return type at all --
  * structurally impossible to flash or chime from a snapshot, which matters
  * because plenty of rows in it are already 'arrived' from earlier in the day.
+ *
+ * Row fields obey the freshness rule above, but `class_groups` is always the
+ * snapshot's (see `DisplayRoster`). A row that is unchanged keeps its
+ * identity, so an unaffected tile does not re-render.
  *
  * Never removes a locally-held student who is simply absent from `rows`: only
  * a DELETE payload does that. A student inserted by realtime after the
@@ -117,14 +136,23 @@ export function reconcile(
  */
 export function applySnapshot(
   roster: DisplayRoster,
-  rows: readonly Student[],
+  rows: readonly StudentWithClasses[],
 ): DisplayRoster {
   const next = { ...roster };
   for (const row of rows) {
     const existing = next[row.id];
     if (!existing || parsedTime(row.updated_at) >= parsedTime(existing.updated_at)) {
       next[row.id] = row;
+    } else if (!sameClasses(existing.class_groups, row.class_groups)) {
+      // Membership edits do not touch `students.updated_at`, so the freshness
+      // rule says nothing about them: the snapshot is the only source of
+      // class_groups and always wins. Every other field stays the fresher row's.
+      next[row.id] = { ...existing, class_groups: row.class_groups };
     }
   }
   return next;
+}
+
+function sameClasses(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name, index) => name === b[index]);
 }

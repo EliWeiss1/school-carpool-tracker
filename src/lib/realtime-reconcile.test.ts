@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { applySnapshot, reconcile, type DisplayRoster } from "./realtime-reconcile";
-import type { Student } from "@/types/db";
+import type { Student, StudentWithClasses } from "@/types/db";
 
 /** Minimal, valid `Student` row — only the fields a given test cares about differ. */
-function student(overrides: Partial<Student> & Pick<Student, "id">): Student {
+function student(overrides: Partial<StudentWithClasses> & Pick<StudentWithClasses, "id">): StudentWithClasses {
   return {
     first_name: "Jonah",
     last_name: "Smith",
     aliases: [],
-    class_group: "K1",
+    class_groups: ["K1"],
     status: "waiting",
     arrived_at: null,
     updated_at: "2026-09-02T12:00:00.000Z",
@@ -18,10 +18,20 @@ function student(overrides: Partial<Student> & Pick<Student, "id">): Student {
   };
 }
 
+/** What a realtime payload carries: the row, with no class membership. */
+function plain(row: StudentWithClasses): Student {
+  const { class_groups, ...rest } = row;
+  void class_groups;
+  return rest;
+}
+
 describe("reconcile", () => {
   it("adds a new student on INSERT", () => {
-    const row = student({ id: "s1" });
-    const result = reconcile({}, { eventType: "INSERT", new: row, old: null });
+    const row = student({ id: "s1", class_groups: [] });
+    const result = reconcile(
+      {},
+      { eventType: "INSERT", new: plain(row), old: null },
+    );
 
     expect(result.roster).toEqual({ s1: row });
     expect(result.arrivals).toEqual([]);
@@ -90,25 +100,81 @@ describe("reconcile", () => {
     expect(result.arrivals).toEqual([]);
   });
 
-  it("stays silent on a class edit", () => {
+  it("an UPDATE payload keeps the held class_groups", () => {
+    // A realtime payload on `students` carries no membership (that lives in
+    // student_classes), so the held row's classes must survive the merge.
     const before: DisplayRoster = {
-      s1: student({ id: "s1", status: "waiting", class_group: "K1" }),
+      s1: student({ id: "s1", class_groups: ["K1", "2nd"] }),
     };
-    const after = student({
-      id: "s1",
-      status: "waiting",
-      class_group: "K2",
-      updated_at: "2026-09-02T12:02:00.000Z",
-    });
+    const after = plain(
+      student({
+        id: "s1",
+        first_name: "Jonathan",
+        updated_at: "2026-09-02T12:02:00.000Z",
+      }),
+    );
 
     const result = reconcile(before, {
       eventType: "UPDATE",
       new: after,
-      old: before.s1,
+      old: plain(before.s1),
     });
 
-    expect(result.roster.s1.class_group).toBe("K2");
+    expect(result.roster.s1.first_name).toBe("Jonathan");
+    expect(result.roster.s1.class_groups).toEqual(["K1", "2nd"]);
     expect(result.arrivals).toEqual([]);
+  });
+
+  it("an INSERT starts with []", () => {
+    const result = reconcile(
+      {},
+      { eventType: "INSERT", new: plain(student({ id: "s1" })), old: null },
+    );
+    expect(result.roster.s1.class_groups).toEqual([]);
+  });
+
+  it("a stale payload is still discarded", () => {
+    const held = student({
+      id: "s1",
+      class_groups: ["K1", "2nd"],
+      status: "arrived",
+      updated_at: "2026-09-02T12:05:00.000Z",
+    });
+    const result = reconcile(
+      { s1: held },
+      {
+        eventType: "UPDATE",
+        new: plain(
+          student({
+            id: "s1",
+            status: "waiting",
+            updated_at: "2026-09-02T12:00:00.000Z",
+          }),
+        ),
+        old: null,
+      },
+    );
+    expect(result.roster.s1).toBe(held);
+    expect(result.arrivals).toEqual([]);
+  });
+
+  it("an arrival for a two-class student reports one arrival id", () => {
+    const before: DisplayRoster = {
+      s1: student({ id: "s1", class_groups: ["K1", "2nd"] }),
+    };
+    const result = reconcile(before, {
+      eventType: "UPDATE",
+      new: plain(
+        student({
+          id: "s1",
+          status: "arrived",
+          updated_at: "2026-09-02T12:05:00.000Z",
+        }),
+      ),
+      old: plain(before.s1),
+    });
+    expect(result.arrivals).toEqual(["s1"]);
+    expect(result.roster.s1.class_groups).toEqual(["K1", "2nd"]);
   });
 
   it("discards an out-of-order payload that is not strictly newer", () => {
@@ -232,6 +298,46 @@ describe("applySnapshot", () => {
     const before: DisplayRoster = { s1: student({ id: "s1" }) };
     const roster = applySnapshot(before, []);
     expect(roster).toEqual(before);
+  });
+
+  it("takes class_groups from the snapshot even when the held row is fresher", () => {
+    const held = student({
+      id: "s1",
+      status: "arrived",
+      class_groups: ["K1"],
+      updated_at: "2026-09-02T12:05:00.000Z",
+    });
+    const snapshotRow = student({
+      id: "s1",
+      status: "waiting",
+      class_groups: ["K1", "2nd"],
+      updated_at: "2026-09-02T12:00:00.000Z",
+    });
+
+    const roster = applySnapshot({ s1: held }, [snapshotRow]);
+
+    expect(roster.s1.class_groups).toEqual(["K1", "2nd"]);
+  });
+
+  it("still never lowers a fresher status", () => {
+    const held = student({
+      id: "s1",
+      status: "arrived",
+      arrived_at: "2026-09-02T12:05:00.000Z",
+      updated_at: "2026-09-02T12:05:00.000Z",
+    });
+    const snapshotRow = student({
+      id: "s1",
+      status: "waiting",
+      class_groups: ["3rd"],
+      updated_at: "2026-09-02T12:00:00.000Z",
+    });
+
+    const roster = applySnapshot({ s1: held }, [snapshotRow]);
+
+    expect(roster.s1.status).toBe("arrived");
+    expect(roster.s1.updated_at).toBe("2026-09-02T12:05:00.000Z");
+    expect(roster.s1.class_groups).toEqual(["3rd"]);
   });
 
   it("updates an existing row when the snapshot carries the same timestamp", () => {

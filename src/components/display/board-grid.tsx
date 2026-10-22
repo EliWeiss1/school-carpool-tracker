@@ -55,7 +55,11 @@ export function BoardGrid({
           >
             {section.students.map((student) => (
               <StudentTile
-                key={student.id}
+                // Namespaced by section: a student in two classes renders in two
+                // sections, and a bare id would be a duplicate key in the tree.
+                // Flash state is still keyed by student id alone, so an arrival
+                // lights the child in every section they appear in.
+                key={`${section.key}:${student.id}`}
                 student={student}
                 flashing={flashingIds.has(student.id)}
               />

@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/cn";
-import type { Student } from "@/types/db";
+import type { StudentWithClasses } from "@/types/db";
 
 /** Shortest name length the type is fitted for, so "Li" is not sized as two glyphs. */
 const MIN_FIT_CHARS = 5;
@@ -25,12 +25,11 @@ export function StudentTile({
   student,
   flashing,
 }: {
-  student: Student;
+  student: StudentWithClasses;
   flashing: boolean;
 }) {
   const arrived = student.status === "arrived";
   const announced = flashing && arrived;
-  const meta = student.class_group ?? "";
   const nameFit = {
     "--name-chars": Math.max(student.last_name.length, MIN_FIT_CHARS),
     "--given-chars": Math.max(student.first_name.length, MIN_FIT_CHARS),
@@ -87,22 +86,13 @@ export function StudentTile({
         )}
       />
 
-      <p
-        className={cn(
-          "tile-label relative truncate font-mono uppercase tracking-eyebrow",
-          arrived ? "text-ink/75" : "text-white/95",
-        )}
-      >
-        {meta || " "}
-      </p>
-
       {/* min-h-0 matters more than it looks: without it this block's
           intrinsic height (a two-line surname) becomes the grid row's
           min-content size and pushes the last row off a 1080p screen. Nobody
           scrolls a board mounted on a wall, so the tile clips instead. */}
       <div
         style={nameFit}
-        className="relative mt-1 flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden"
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden"
       >
         {/* Sized from the tile's own box and the name's length (see
             .tile-surname in globals.css), not the viewport: only the tile

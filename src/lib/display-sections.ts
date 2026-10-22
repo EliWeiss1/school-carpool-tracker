@@ -1,4 +1,4 @@
-import type { Student } from "@/types/db";
+import type { StudentWithClasses } from "@/types/db";
 
 /**
  * Falls back to this when the live, admin-editable class order (see
@@ -23,6 +23,12 @@ const DEFAULT_CLASS_ORDER = ["K1", "K2", "1st", "2nd", "3rd", "4th", "5th"];
  * `display-board.tsx` intersects against `reconcile`'s `arrivals` before
  * flashing or chiming, so a 3rd-class teacher's screen is never chimed for a
  * 5th-class arrival.
+ *
+ * A student can belong to several classes. They appear in every one of their
+ * sections (a teacher of either class must see them), but every count that
+ * answers "how many children" -- the header totals and `visibleIds` -- counts
+ * each child once, so a two-class child is never double-counted or
+ * double-chimed. Per-section `waiting`/`arrived` are about that section only.
  */
 
 export interface DisplayFilter {
@@ -35,7 +41,7 @@ export interface DisplaySection {
   classGroup: string | null;
   /** The bare class name, e.g. "3rd", or "Ungrouped" when a student has none. */
   label: string;
-  students: Student[];
+  students: StudentWithClasses[];
   waiting: number;
   arrived: number;
 }
@@ -51,16 +57,25 @@ export interface GroupedSections {
   allSections: DisplaySection[];
   /** Only the sections the current filter shows. */
   sections: DisplaySection[];
-  /** Every student id belonging to a visible section, for scoping flash/chime. */
+  /** Every distinct student id in a visible section, for scoping flash/chime. */
   visibleIds: Set<string>;
-  /** Totals across the FILTERED view -- what the header's waiting/arrived count should show. */
+  /** Distinct-student totals across the FILTERED view -- what the header's waiting/arrived count should show. */
   totals: { waiting: number; arrived: number };
   /** Chip choices for the filter control, ordered the same as `allSections`, waiting-heaviest first is NOT applied -- section order is preserved so the board reads the same way twice. */
   options: FilterOption[];
 }
 
-function sectionKeyFor(student: Student): string {
-  return student.class_group ?? "__none__";
+const NO_CLASS_KEY = "__none__";
+
+/**
+ * The section keys a student is listed under: one per class, or only the
+ * "Ungrouped" key when they have none. Ungrouped is for the classless alone --
+ * a student with a class is never also shown there.
+ */
+function sectionKeysFor(student: StudentWithClasses): string[] {
+  return student.class_groups.length > 0
+    ? [...new Set(student.class_groups)]
+    : [NO_CLASS_KEY];
 }
 
 function labelFor(classGroup: string | null): string {
@@ -89,16 +104,17 @@ function compareClasses(
 }
 
 export function groupIntoSections(
-  students: readonly Student[],
+  students: readonly StudentWithClasses[],
   filter: DisplayFilter,
   classOrder: readonly string[] = DEFAULT_CLASS_ORDER,
 ): GroupedSections {
-  const byKey = new Map<string, Student[]>();
+  const byKey = new Map<string, StudentWithClasses[]>();
   for (const student of students) {
-    const key = sectionKeyFor(student);
-    const list = byKey.get(key) ?? [];
-    list.push(student);
-    byKey.set(key, list);
+    for (const key of sectionKeysFor(student)) {
+      const list = byKey.get(key) ?? [];
+      list.push(student);
+      byKey.set(key, list);
+    }
   }
 
   const allSections: DisplaySection[] = [...byKey.entries()]
@@ -111,7 +127,7 @@ export function groupIntoSections(
           ? byLastName
           : a.first_name.localeCompare(b.first_name);
       });
-      const classGroup = sorted[0]?.class_group ?? null;
+      const classGroup = key === NO_CLASS_KEY ? null : key;
       return {
         key,
         classGroup,
@@ -122,8 +138,8 @@ export function groupIntoSections(
       };
     })
     .sort((a, b) => {
-      if (a.key === "__none__") return 1;
-      if (b.key === "__none__") return -1;
+      if (a.key === NO_CLASS_KEY) return 1;
+      if (b.key === NO_CLASS_KEY) return -1;
       return compareClasses(a.classGroup, b.classGroup, classOrder);
     });
 
@@ -137,10 +153,12 @@ export function groupIntoSections(
   let arrived = 0;
   for (const section of sections) {
     for (const student of section.students) {
+      // A two-class student is in two sections but is still one child.
+      if (visibleIds.has(student.id)) continue;
       visibleIds.add(student.id);
+      if (student.status === "waiting") waiting += 1;
+      if (student.status === "arrived") arrived += 1;
     }
-    waiting += section.waiting;
-    arrived += section.arrived;
   }
 
   const options: FilterOption[] = allSections.map((section) => ({
