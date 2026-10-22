@@ -16,7 +16,7 @@ export type CsvField =
   | "first_name"
   | "last_name"
   | "aliases"
-  | "class_group"
+  | "class_groups"
   | "carpool"
   | "parent1_name"
   | "parent2_name";
@@ -25,7 +25,11 @@ export interface CsvImportStudent {
   first_name: string;
   last_name: string;
   aliases: string[];
-  class_group: string | null;
+  /**
+   * Class NAMES as typed in the file (resolved to ids server-side), already
+   * trimmed and de-duplicated. Empty means "no classes", never null.
+   */
+  class_groups: string[];
   /** The carpool name as typed in the file. Resolved to an id server-side. */
   carpool: string | null;
   parent1_name: string | null;
@@ -77,8 +81,11 @@ const HEADER_ALIASES: Record<CsvField, string[]> = {
   // "grade" is here even though the app dropped grade as a concept (see the
   // drop_grade migration): a school's own export still calls this column
   // "Grade" and puts class names in it (e.g. "EC Hummingbirds"), and that
-  // real file is what class_group needs to receive.
-  class_group: [
+  // real file is what class_groups needs to receive. The cell may list several
+  // classes separated by semicolons (see splitClasses).
+  class_groups: [
+    "class_groups",
+    "classes",
     "class_group",
     "class",
     "classroom",
@@ -254,12 +261,39 @@ function splitAliases(raw: string): string[] {
     .filter((entry) => entry !== "");
 }
 
+/**
+ * One cell -> the classes a student belongs to. Split on `;` only (a comma can
+ * sit inside a class name such as "Room 1, Annex"), trimmed, empties dropped,
+ * and de-duplicated case-insensitively keeping the first spelling the file used.
+ */
+function splitClasses(raw: string): string[] {
+  const seen = new Set<string>();
+  const classes: string[] = [];
+  for (const segment of raw.split(";")) {
+    const name = segment.trim();
+    if (name === "") continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    classes.push(name);
+  }
+  return classes;
+}
+
 function nullableTrim(value: string | undefined): string | null {
   const trimmed = (value ?? "").trim();
   return trimmed === "" ? null : trimmed;
 }
 
-export function parseRosterCsv(text: string): CsvImportReport {
+/**
+ * @param knownClassNames the live class names. When non-empty, a class in the
+ *   file that matches none of them (case-insensitively) rejects that row rather
+ *   than silently creating or dropping a class. Empty skips the check.
+ */
+export function parseRosterCsv(
+  text: string,
+  knownClassNames: readonly string[] = [],
+): CsvImportReport {
   const stripped = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const { rows, unterminatedQuote } = tokenizeCsv(stripped);
 
@@ -308,6 +342,9 @@ export function parseRosterCsv(text: string): CsvImportReport {
     };
   }
 
+  const knownClassKeys = new Set(
+    knownClassNames.map((name) => name.trim().toLowerCase()),
+  );
   const expectedColumns = headerRow.length;
   const toImport: CsvImportStudent[] = [];
   const errors: CsvImportError[] = [];
@@ -377,6 +414,23 @@ export function parseRosterCsv(text: string): CsvImportReport {
       return;
     }
 
+    const classGroups =
+      columnIndex.class_groups !== undefined
+        ? splitClasses(padded[columnIndex.class_groups] ?? "")
+        : [];
+    if (knownClassKeys.size > 0) {
+      const unknown = classGroups.find(
+        (name) => !knownClassKeys.has(name.toLowerCase()),
+      );
+      if (unknown !== undefined) {
+        errors.push({
+          rowNumber,
+          message: `Row ${rowNumber}: there's no class called "${unknown}". Add it under Classes first.`,
+        });
+        return;
+      }
+    }
+
     const key = `${firstName.toLowerCase()} ${lastName.toLowerCase()}`;
     const firstSeenAt = seenNames.get(key);
     if (firstSeenAt !== undefined) {
@@ -395,10 +449,7 @@ export function parseRosterCsv(text: string): CsvImportReport {
         columnIndex.aliases !== undefined
           ? splitAliases(padded[columnIndex.aliases] ?? "")
           : [],
-      class_group:
-        columnIndex.class_group !== undefined
-          ? nullableTrim(padded[columnIndex.class_group])
-          : null,
+      class_groups: classGroups,
       carpool:
         columnIndex.carpool !== undefined
           ? nullableTrim(padded[columnIndex.carpool])

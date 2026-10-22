@@ -22,8 +22,8 @@ export interface RosterTableProps {
 }
 
 /**
- * The roster, one row per student. Class is set in
- * `font-mono` -- CLAUDE.md calls this out by name as one of the few things
+ * The roster, one row per student. Classes are set in
+ * `font-mono` chips -- CLAUDE.md calls this out by name as one of the few things
  * in the app meant to line up in columns, the same rule a CSV row number or a
  * device id follows.
  *
@@ -155,8 +155,19 @@ export function RosterTable({
                     <span className="text-curb-400">—</span>
                   )}
                 </td>
-                <td className="px-4 py-3 font-mono text-sm text-curb-700">
-                  {student.class_group ?? (
+                <td className="px-4 py-3">
+                  {student.class_groups.length > 0 ? (
+                    <ul className="flex flex-wrap gap-1">
+                      {student.class_groups.map((name) => (
+                        <li
+                          key={name}
+                          className="rounded-full border border-curb-200 bg-curb-50 px-2.5 py-0.5 font-mono text-xs text-curb-700"
+                        >
+                          {name}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
                     <span className="text-curb-400">—</span>
                   )}
                 </td>

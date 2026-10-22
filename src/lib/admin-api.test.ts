@@ -212,7 +212,7 @@ describe("importRoster", () => {
       first_name,
       last_name,
       aliases: [],
-      class_group: null,
+      class_groups: [],
       carpool: null,
       parent1_name: null,
       parent2_name: null,

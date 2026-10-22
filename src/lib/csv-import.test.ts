@@ -14,7 +14,7 @@ describe("parseRosterCsv — header handling", () => {
         first_name: "Maya",
         last_name: "Cohen",
         aliases: [],
-        class_group: "K1",
+        class_groups: ["K1"],
         carpool: null,
         parent1_name: null,
         parent2_name: null,
@@ -32,7 +32,7 @@ describe("parseRosterCsv — header handling", () => {
       first_name: "Theo",
       last_name: "Ng",
       aliases: ["Eng", "Ang"],
-      class_group: "K1",
+      class_groups: ["K1"],
       carpool: null,
       parent1_name: null,
       parent2_name: null,
@@ -58,7 +58,7 @@ describe("parseRosterCsv — header handling", () => {
     );
 
     expect(report.headerErrors).toEqual([]);
-    expect(report.toImport[0].class_group).toBe("EC Hummingbirds");
+    expect(report.toImport[0].class_groups).toEqual(["EC Hummingbirds"]);
     expect(report.unrecognizedHeaders).toEqual([]);
   });
 
@@ -80,7 +80,7 @@ describe("parseRosterCsv — header handling", () => {
 
     expect(report.headerErrors).toEqual([]);
     expect(report.unrecognizedHeaders).toEqual(["Grade Level"]);
-    expect(report.toImport[0].class_group).toBeNull();
+    expect(report.toImport[0].class_groups).toEqual([]);
   });
 
   it("reports no unrecognized headers when every column is understood", () => {
@@ -147,7 +147,7 @@ describe("parseRosterCsv — row handling", () => {
       "Chen",
     ]);
     expect(report.errors).toEqual([]);
-    expect(report.toImport[1].class_group).toBeNull();
+    expect(report.toImport[1].class_groups).toEqual([]);
   });
 
   it("flags a row with MORE fields than the header, without crashing the rest of the file", () => {
@@ -227,7 +227,7 @@ describe("parseRosterCsv — quoting, BOM, and line endings", () => {
       'first_name,last_name,class_group\nAva,O\'Brien-Smith,"Room ""B"""\n',
     );
 
-    expect(report.toImport[0].class_group).toBe('Room "B"');
+    expect(report.toImport[0].class_groups).toEqual(['Room "B"']);
   });
 
   it("strips a UTF-8 BOM at the start of the file", () => {
@@ -251,7 +251,7 @@ describe("parseRosterCsv — quoting, BOM, and line endings", () => {
       'first_name,last_name,class_group\r\nMaya,Cohen,"Room 1\r\nAnnex"\r\n',
     );
 
-    expect(report.toImport[0].class_group).toBe("Room 1\r\nAnnex");
+    expect(report.toImport[0].class_groups).toEqual(["Room 1\r\nAnnex"]);
   });
 });
 
@@ -313,7 +313,7 @@ describe("parseRosterCsv — malformed files must never import silently", () => 
     expect(report.toImport[0]).toMatchObject({
       first_name: "Maya",
       last_name: "Cohen",
-      class_group: null,
+      class_groups: [],
     });
   });
 
@@ -336,5 +336,82 @@ describe("parseRosterCsv — malformed files must never import silently", () => 
     expect(report.errors).toHaveLength(1);
     expect(report.errors[0].message).toMatch(/too long/i);
     expect(report.toImport).toHaveLength(0);
+  });
+});
+
+describe("parseRosterCsv — several classes per student", () => {
+  it("splits a cell on semicolons and trims", () => {
+    const report = parseRosterCsv(
+      'first_name,last_name,classes\nMaya,Cohen,"K1 ;  Art Club; Choir"\n',
+    );
+
+    expect(report.toImport[0].class_groups).toEqual(["K1", "Art Club", "Choir"]);
+  });
+
+  it("drops empty segments and case-insensitive duplicates, keeping the first spelling", () => {
+    const report = parseRosterCsv(
+      'first_name,last_name,classes\nMaya,Cohen,"K1;;art club; ;Art Club;k1;"\n',
+    );
+
+    expect(report.toImport[0].class_groups).toEqual(["K1", "art club"]);
+  });
+
+  it("accepts class_groups and classes headers", () => {
+    const viaGroups = parseRosterCsv(
+      "first_name,last_name,class_groups\nMaya,Cohen,K1;Choir\n",
+    );
+    const viaClasses = parseRosterCsv(
+      "First Name,Last Name,Classes\nMaya,Cohen,K1;Choir\n",
+    );
+
+    expect(viaGroups.unrecognizedHeaders).toEqual([]);
+    expect(viaGroups.toImport[0].class_groups).toEqual(["K1", "Choir"]);
+    expect(viaClasses.unrecognizedHeaders).toEqual([]);
+    expect(viaClasses.toImport[0].class_groups).toEqual(["K1", "Choir"]);
+  });
+
+  it("flags an unknown class as a row error naming it", () => {
+    const report = parseRosterCsv(
+      "first_name,last_name,classes\nMaya,Cohen,K1;Chior\nTheo,Ng,k1\n",
+      ["K1", "Choir"],
+    );
+
+    expect(report.errors).toEqual([
+      {
+        rowNumber: 2,
+        message: `Row 2: there's no class called "Chior". Add it under Classes first.`,
+      },
+    ]);
+    expect(report.toImport).toHaveLength(1);
+    expect(report.toImport[0].first_name).toBe("Theo");
+  });
+
+  it("skips the class check when no known classes are passed", () => {
+    const report = parseRosterCsv(
+      "first_name,last_name,classes\nMaya,Cohen,Anything Goes\n",
+    );
+
+    expect(report.errors).toEqual([]);
+    expect(report.toImport[0].class_groups).toEqual(["Anything Goes"]);
+  });
+
+  it("an empty cell means no classes", () => {
+    const report = parseRosterCsv(
+      "first_name,last_name,classes\nMaya,Cohen,\nTheo,Ng,  ;\n",
+      ["K1"],
+    );
+
+    expect(report.errors).toEqual([]);
+    expect(report.toImport.map((row) => row.class_groups)).toEqual([[], []]);
+  });
+
+  it("still refuses a file with an unterminated quote when classes are checked", () => {
+    const report = parseRosterCsv(
+      'first_name,last_name,classes\nMaya,"Cohen,K1\nTheo,Ng,K1\n',
+      ["K1"],
+    );
+
+    expect(report.headerErrors[0]).toMatch(/never closed/i);
+    expect(report.toImport).toEqual([]);
   });
 });

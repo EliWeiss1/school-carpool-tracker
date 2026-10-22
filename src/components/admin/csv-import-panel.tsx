@@ -13,6 +13,12 @@ export interface CsvImportPanelProps {
   session: UsePinSession;
   /** Called after a successful import so the roster table above can refresh. */
   onImported: () => void;
+  /**
+   * The live class names. When non-empty, a class in the file that matches none
+   * of them is reported as a row error before anything is imported; when
+   * omitted or empty the check is skipped and the server still decides.
+   */
+  classNames?: readonly string[];
 }
 
 function requireCredentials(session: UsePinSession) {
@@ -36,7 +42,11 @@ function requireCredentials(session: UsePinSession) {
  * throughout, matching the roster table's class column and the rest of the
  * app's rule that anything meant to line up in columns gets the mono face.
  */
-export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
+export function CsvImportPanel({
+  session,
+  onImported,
+  classNames = [],
+}: CsvImportPanelProps) {
   const [fileName, setFileName] = useState<string | null>(null);
   const [report, setReport] = useState<CsvImportReport | null>(null);
   const [importing, setImporting] = useState(false);
@@ -60,7 +70,7 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
     setUndoError(null);
     setFileName(file.name);
     const text = await file.text();
-    setReport(parseRosterCsv(text));
+    setReport(parseRosterCsv(text, classNames));
   }
 
   function reset() {
@@ -137,7 +147,9 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
         </h2>
         <p className="mt-1 text-curb-600">
           Columns can be in any order. Required: first name, last name.
-          Optional: aliases (comma or semicolon separated), class, carpool,
+          Optional: aliases (comma or semicolon separated), classes (separate
+          several with a semicolon, like K1; Choir, each matching a class
+          under Classes), carpool,
           parent 1 name, parent 2 name. If the carpool column names a carpool
           that already exists, this student is added to it; if it doesn&apos;t
           exist yet, it&apos;s created with that exact name and this student
@@ -273,7 +285,7 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
                       <tr className="text-curb-500">
                         <th className="px-3 py-2 font-semibold">Name</th>
                         <th className="px-3 py-2 font-semibold">Aliases</th>
-                        <th className="px-3 py-2 font-semibold">Class</th>
+                        <th className="px-3 py-2 font-semibold">Classes</th>
                         <th className="px-3 py-2 font-semibold">Carpool</th>
                         <th className="px-3 py-2 font-semibold">Parents</th>
                       </tr>
@@ -291,7 +303,7 @@ export function CsvImportPanel({ session, onImported }: CsvImportPanelProps) {
                             {row.aliases.join(", ") || "—"}
                           </td>
                           <td className="px-3 py-2 font-mono text-curb-700">
-                            {row.class_group ?? "—"}
+                            {row.class_groups.join(", ") || "—"}
                           </td>
                           <td className="px-3 py-2 text-curb-700">
                             {row.carpool ?? "—"}

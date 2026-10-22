@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import type { RosterStudent, StudentFields } from "@/lib/admin-api";
 import { cn } from "@/lib/cn";
+import { toggleClass } from "@/lib/class-selection";
 import type { Carpool } from "@/types/db";
 
 const INPUT_CLASS =
@@ -55,7 +56,9 @@ export function StudentForm({
   const [aliasesText, setAliasesText] = useState(
     (student?.aliases ?? []).join(", "),
   );
-  const [classGroup, setClassGroup] = useState(student?.class_group ?? "");
+  const [selectedClasses, setSelectedClasses] = useState<string[]>(
+    student?.class_groups ?? [],
+  );
   const [carpoolId, setCarpoolId] = useState(student?.carpool_id ?? NO_CARPOOL);
   const [parent1Name, setParent1Name] = useState(student?.parent1_name ?? "");
   const [parent2Name, setParent2Name] = useState(student?.parent2_name ?? "");
@@ -67,7 +70,7 @@ export function StudentForm({
       first_name: firstName.trim(),
       last_name: lastName.trim(),
       aliases: parseAliasesInput(aliasesText),
-      class_group: classGroup.trim() === "" ? null : classGroup.trim(),
+      class_groups: selectedClasses,
       carpool_id: carpoolId === NO_CARPOOL ? null : carpoolId,
       parent1_name: parent1Name.trim() === "" ? null : parent1Name.trim(),
       parent2_name: parent2Name.trim() === "" ? null : parent2Name.trim(),
@@ -127,24 +130,67 @@ export function StudentForm({
           </p>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label className={LABEL_CLASS} htmlFor={`${formId}-class`}>
-            Class
-          </label>
-          <select
-            id={`${formId}-class`}
-            className={cn(INPUT_CLASS, "font-mono")}
-            value={classGroup}
-            onChange={(event) => setClassGroup(event.target.value)}
-          >
-            <option value="">No class</option>
-            {classGroups.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </div>
+        <fieldset className="flex min-w-0 flex-col gap-2 sm:col-span-2">
+          <legend className={LABEL_CLASS}>Classes</legend>
+          {classGroups.length === 0 ? (
+            <p className="text-sm text-curb-500">
+              No classes yet. Add one under Classes below, then tick it here.
+            </p>
+          ) : (
+            <ul className="flex flex-wrap gap-2">
+              {classGroups.map((name) => {
+                const checked = selectedClasses.includes(name);
+                return (
+                  <li key={name}>
+                    <label className="relative block cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="peer sr-only"
+                        checked={checked}
+                        onChange={(event) =>
+                          setSelectedClasses((current) =>
+                            toggleClass(
+                              current,
+                              name,
+                              event.target.checked,
+                              classGroups,
+                            ),
+                          )
+                        }
+                      />
+                      <span
+                        className={cn(
+                          "flex min-h-tap items-center gap-2 rounded-xl border px-3.5 font-mono text-sm text-curb-700 transition-[transform,background-color,border-color] duration-150 ease-spring",
+                          "hover:border-curb-400 hover:bg-curb-50 active:scale-[0.98]",
+                          "peer-focus-visible:outline peer-focus-visible:outline-[3px] peer-focus-visible:outline-offset-2 peer-focus-visible:outline-marigold-500",
+                          checked
+                            ? "border-marigold-500 bg-white font-semibold text-curb-900 shadow-card hover:border-marigold-600 hover:bg-marigold-50"
+                            : "border-curb-300 bg-curb-50",
+                        )}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 text-xs leading-none",
+                            checked
+                              ? "border-marigold-500 bg-marigold-500 text-curb-900"
+                              : "border-curb-400 bg-white text-transparent",
+                          )}
+                        >
+                          &#10003;
+                        </span>
+                        {name}
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="text-xs text-curb-500">
+            A student can be in several classes. Leave all unticked for none.
+          </p>
+        </fieldset>
 
         <div className="flex flex-col gap-1.5">
           <label className={LABEL_CLASS} htmlFor={`${formId}-parent1`}>
