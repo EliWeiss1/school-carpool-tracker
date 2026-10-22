@@ -30,6 +30,9 @@ function AdminContent() {
   const session = usePinSession();
   const [students, setStudents] = useState<RosterStudent[] | null>(null);
   const [carpools, setCarpools] = useState<Carpool[]>([]);
+  const [classMemberCounts, setClassMemberCounts] = useState<
+    Record<string, number>
+  >({});
   const [listError, setListError] = useState<string | null>(null);
   const {
     classGroups,
@@ -46,8 +49,12 @@ function AdminContent() {
 
     setListError(null);
     try {
-      const { students: rows, carpools: rosterCarpools } =
-        await adminApi.listRoster(credentials);
+      const {
+        students: rows,
+        carpools: rosterCarpools,
+        classMemberCounts: counts,
+      } = await adminApi.listRoster(credentials);
+      setClassMemberCounts(counts);
       setStudents(
         [...rows].sort((a, b) =>
           `${a.last_name} ${a.first_name}`.localeCompare(
@@ -93,6 +100,7 @@ function AdminContent() {
           students={students}
           carpools={carpools}
           classGroups={classGroupNames}
+          classOptions={classGroups}
           listError={listError}
           refresh={refresh}
         />
@@ -105,9 +113,16 @@ function AdminContent() {
         <ClassManager
           session={session}
           classGroups={classGroups}
+          students={students ?? []}
+          classMemberCounts={classMemberCounts}
           refresh={refreshClassGroups}
+          refreshRoster={refresh}
         />
-        <CsvImportPanel session={session} onImported={refresh} />
+        <CsvImportPanel
+          session={session}
+          onImported={refresh}
+          classNames={classGroupNames}
+        />
         <ResetPanel session={session} students={students} onReset={refresh} />
       </div>
     </main>

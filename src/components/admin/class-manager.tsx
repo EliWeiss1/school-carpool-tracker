@@ -5,10 +5,24 @@ import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
-import { adminApi } from "@/lib/admin-api";
+import {
+  adminApi,
+  type ClassDeleteNeedsDecision,
+  type RosterStudent,
+} from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
+import {
+  type DeleteChoice,
+  classifyDeleteFailure,
+  deleteResolution,
+  otherClasses,
+} from "@/lib/class-delete";
 import type { ClassGroup } from "@/lib/class-groups";
+import { type MembershipDiff, membersPayload } from "@/lib/class-members";
 import type { UsePinSession } from "@/lib/use-pin-session";
+
+import { ClassDeleteDialog } from "./class-delete-dialog";
+import { ClassMembersSheet } from "./class-members-sheet";
 
 function requireCredentials(session: UsePinSession) {
   const credentials = session.credentials();
@@ -28,8 +42,20 @@ const INPUT_CLASS =
 export interface ClassManagerProps {
   session: UsePinSession;
   classGroups: ClassGroup[];
+  /** The whole roster, for the membership sheet. */
+  students: RosterStudent[];
+  /** Class id -> member count. A class with no students may be absent. */
+  classMemberCounts: Record<string, number>;
   /** Re-fetches the class list so every picker in the app stays in sync. */
   refresh: () => Promise<void>;
+  /** Re-fetches the roster, whose rows and counts change with membership. */
+  refreshRoster: () => Promise<void>;
+}
+
+/** A delete that needs an answer before it can go ahead. */
+interface PendingDecision {
+  classGroup: ClassGroup;
+  decision: ClassDeleteNeedsDecision;
 }
 
 /**
@@ -45,7 +71,10 @@ export interface ClassManagerProps {
 export function ClassManager({
   session,
   classGroups,
+  students,
+  classMemberCounts,
   refresh,
+  refreshRoster,
 }: ClassManagerProps) {
   const [name, setName] = useState("");
   const [adding, setAdding] = useState(false);
@@ -53,6 +82,9 @@ export function ClassManager({
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  const [membersFor, setMembersFor] = useState<ClassGroup | null>(null);
+  const [pending, setPending] = useState<PendingDecision | null>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault();
@@ -79,25 +111,55 @@ export function ClassManager({
     }
   }
 
-  async function handleDelete(classGroup: ClassGroup) {
+  /**
+   * Deletes a class. With no `choice` this is the plain attempt; if some
+   * students would be left with no class the server answers 409 and the
+   * decision dialog opens, which calls back here with the admin's choice.
+   */
+  async function handleDelete(classGroup: ClassGroup, choice?: DeleteChoice) {
     setBusyId(classGroup.id);
     setRowError(null);
+    setDialogError(null);
     try {
       await adminApi.deleteClass({
         ...requireCredentials(session),
         classId: classGroup.id,
+        ...(choice ? deleteResolution(choice) : {}),
       });
       setConfirmingId(null);
-      await refresh();
+      setPending(null);
+      await Promise.all([refresh(), refreshRoster()]);
     } catch (error: unknown) {
-      setRowError(
-        error instanceof ApiError
-          ? error.message
-          : "Could not remove that class. Try again.",
-      );
+      const failure = classifyDeleteFailure(error);
+      if (failure.kind === "decide") {
+        setConfirmingId(null);
+        setPending({ classGroup, decision: failure.decision });
+      } else if (failure.kind === "gone") {
+        // Someone else already removed it: show the sentence, drop the row.
+        setConfirmingId(null);
+        setPending(null);
+        setRowError(failure.message);
+        await Promise.all([refresh(), refreshRoster()]);
+      } else if (pending !== null) {
+        setDialogError(failure.message);
+      } else {
+        setRowError(failure.message);
+      }
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function handleSaveMembers(
+    classGroup: ClassGroup,
+    diff: MembershipDiff,
+  ) {
+    await adminApi.changeClassMembers({
+      ...requireCredentials(session),
+      ...membersPayload(classGroup.id, diff),
+    });
+    setMembersFor(null);
+    await Promise.all([refresh(), refreshRoster()]);
   }
 
   async function handleMove(index: number, direction: -1 | 1) {
@@ -179,7 +241,7 @@ export function ClassManager({
             return (
               <li
                 key={classGroup.id}
-                className="flex items-center justify-between gap-3 px-4 py-2.5"
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5"
               >
                 <div className="flex items-center gap-1">
                   <button
@@ -202,9 +264,24 @@ export function ClassManager({
                   </button>
                 </div>
 
-                <span className="flex-1 truncate text-curb-900">
+                <span className="min-w-[8rem] flex-1 truncate text-curb-900">
                   {classGroup.name}
                 </span>
+
+                <span className="min-w-[5.5rem] shrink-0 font-mono text-xs text-curb-500">
+                  {classMemberCounts[classGroup.id] ?? 0} student
+                  {(classMemberCounts[classGroup.id] ?? 0) === 1 ? "" : "s"}
+                </span>
+
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setMembersFor(classGroup)}
+                  aria-label={`Students in ${classGroup.name}`}
+                  disabled={isBusy}
+                >
+                  Students
+                </Button>
 
                 {isConfirming ? (
                   <div className="flex shrink-0 items-center gap-2">
@@ -239,6 +316,31 @@ export function ClassManager({
             );
           })}
         </ul>
+      )}
+
+      {membersFor !== null && (
+        <ClassMembersSheet
+          classGroup={membersFor}
+          classGroups={classGroups}
+          students={students}
+          onSave={(diff) => handleSaveMembers(membersFor, diff)}
+          onClose={() => setMembersFor(null)}
+        />
+      )}
+
+      {pending !== null && (
+        <ClassDeleteDialog
+          classGroup={pending.classGroup}
+          decision={pending.decision}
+          targets={otherClasses(classGroups, pending.classGroup.id)}
+          busy={busyId === pending.classGroup.id}
+          error={dialogError}
+          onResolve={(choice) => void handleDelete(pending.classGroup, choice)}
+          onCancel={() => {
+            setPending(null);
+            setDialogError(null);
+          }}
+        />
       )}
     </section>
   );

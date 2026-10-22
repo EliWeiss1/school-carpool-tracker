@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  bulkConfirmText,
+  bulkMembershipInput,
+  bulkResultMessage,
+} from "./bulk-class";
+
+describe("bulkMembershipInput", () => {
+  it("Add sends the selected ids as additions only", () => {
+    expect(bulkMembershipInput("add", "k", new Set(["a", "b"]))).toEqual({
+      classId: "k",
+      addStudentIds: ["a", "b"],
+    });
+  });
+  it("Remove sends them as removals only", () => {
+    expect(bulkMembershipInput("remove", "k", new Set(["a"]))).toEqual({
+      classId: "k",
+      removeStudentIds: ["a"],
+    });
+  });
+});
+
+describe("bulkConfirmText", () => {
+  it("Remove states the count and the class", () => {
+    expect(bulkConfirmText("remove", 3, "Choir")).toBe(
+      "Remove 3 students from Choir? They stay on the roster.",
+    );
+    expect(bulkConfirmText("remove", 1, "Choir")).toBe(
+      "Remove 1 student from Choir? They stay on the roster.",
+    );
+  });
+  it("Add states the count and the class", () => {
+    expect(bulkConfirmText("add", 2, "Choir")).toBe("Add 2 students to Choir?");
+  });
+});
+
+describe("bulkResultMessage", () => {
+  it("reports the change and the class's new size", () => {
+    expect(bulkResultMessage("add", 2, "Choir", 14, 0)).toBe(
+      "Added 2 students to Choir. It now has 14.",
+    );
+    expect(bulkResultMessage("remove", 1, "Choir", 9, 0)).toBe(
+      "Removed 1 student from Choir. It now has 9.",
+    );
+  });
+  it("mentions students who were already gone", () => {
+    expect(bulkResultMessage("add", 3, "Choir", 5, 1)).toBe(
+      "Added 3 students to Choir. It now has 5. 1 was already gone.",
+    );
+    expect(bulkResultMessage("add", 3, "Choir", 5, 2)).toContain(
+      "2 were already gone",
+    );
+  });
+});

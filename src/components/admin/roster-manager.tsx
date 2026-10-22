@@ -8,9 +8,16 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ApiError } from "@/lib/api";
 import { adminApi, type RosterStudent, type StudentFields } from "@/lib/admin-api";
+import {
+  type BulkClassMode,
+  bulkMembershipInput,
+  bulkResultMessage,
+} from "@/lib/bulk-class";
+import type { ClassGroup } from "@/lib/class-groups";
 import type { UsePinSession } from "@/lib/use-pin-session";
 import type { Carpool } from "@/types/db";
 
+import { BulkClassActions } from "./bulk-class-actions";
 import { RosterTable } from "./roster-table";
 import { StudentForm } from "./student-form";
 
@@ -40,6 +47,8 @@ export interface RosterManagerProps {
   carpools: Carpool[];
   /** The admin-editable class list, in display order. */
   classGroups: string[];
+  /** The same classes with ids, for the bulk add/remove picker. */
+  classOptions: ClassGroup[];
   listError: string | null;
   /** Re-fetches the roster. Shared with the import and reset panels so all
    *  three sections of /admin always agree on the current state. */
@@ -57,6 +66,7 @@ export function RosterManager({
   students,
   carpools,
   classGroups,
+  classOptions,
   listError,
   refresh,
 }: RosterManagerProps) {
@@ -150,6 +160,25 @@ export function RosterManager({
     } finally {
       setBulkDeleting(false);
     }
+  }
+
+  async function handleBulkClass(mode: BulkClassMode, classGroup: ClassGroup) {
+    const result = await adminApi.changeClassMembers({
+      ...requireCredentials(session),
+      ...bulkMembershipInput(mode, classGroup.id, selectedIds),
+    });
+    const ignored = result.ignoredIds.length;
+    setBulkInfo(
+      bulkResultMessage(
+        mode,
+        selectedIds.size - ignored,
+        classGroup.name,
+        result.memberCount,
+        ignored,
+      ),
+    );
+    setSelectedIds(new Set());
+    await refresh();
   }
 
   return (
@@ -246,29 +275,32 @@ export function RosterManager({
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-between rounded-xl border border-curb-200 bg-curb-50 px-4 py-3">
-                <span className="text-sm text-curb-700">
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-curb-200 bg-curb-50 px-4 py-3">
+                <span className="mr-auto text-sm text-curb-700">
                   {selectedIds.size} selected
                 </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="quiet"
-                    size="sm"
-                    onClick={() => setSelectedIds(new Set())}
-                  >
-                    Clear
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => {
-                      setBulkInfo(null);
-                      setBulkConfirming(true);
-                    }}
-                  >
-                    Delete {selectedIds.size} selected
-                  </Button>
-                </div>
+                <Button
+                  variant="quiet"
+                  size="sm"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear
+                </Button>
+                <BulkClassActions
+                  classGroups={classOptions}
+                  selectedCount={selectedIds.size}
+                  onApply={handleBulkClass}
+                />
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    setBulkInfo(null);
+                    setBulkConfirming(true);
+                  }}
+                >
+                  Delete {selectedIds.size} selected
+                </Button>
               </div>
             ))}
 
