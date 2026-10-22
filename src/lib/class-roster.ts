@@ -215,16 +215,19 @@ function withClass(
   return next;
 }
 
-/** Adds picks, skipping anyone already picked, so a repeat is harmless. */
+/**
+ * Adds picks, skipping anyone already picked in any class (not a toggle: a
+ * multi-class student picked from another drawer must stay picked), so a
+ * repeat is harmless.
+ */
 export function addSelected(
   selection: PadSelection,
   picks: readonly PadPick[],
 ): PadSelection {
   let next = selection;
   for (const { classGroup, studentId } of picks) {
-    if (!(next[classGroup] ?? []).includes(studentId)) {
-      next = toggleSelected(next, classGroup, studentId);
-    }
+    if (isSelected(next, studentId)) continue;
+    next = withClass(next, classGroup, [...(next[classGroup] ?? []), studentId]);
   }
   return next;
 }

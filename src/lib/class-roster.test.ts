@@ -228,6 +228,30 @@ describe("addSelected", () => {
     expect(next).toEqual({ K1: ["1", "3"], "2nd": ["4"] });
   });
 
+  it("addSelected leaves an already-picked multi-class student picked", () => {
+    const next = addSelected({ K1: ["m"] }, [
+      { classGroup: "2nd", studentId: "m" },
+      { classGroup: "2nd", studentId: "s" },
+    ]);
+
+    expect(next).toEqual({ K1: ["m"], "2nd": ["s"] });
+  });
+
+  it("addSelected adds a new pick under the given class", () => {
+    expect(addSelected({}, [{ classGroup: "2nd", studentId: "s" }])).toEqual({
+      "2nd": ["s"],
+    });
+  });
+
+  it("repeating addSelected is idempotent", () => {
+    const picks = [
+      { classGroup: "K1", studentId: "m" },
+      { classGroup: "2nd", studentId: "s" },
+    ];
+    const once = addSelected({}, picks);
+    expect(addSelected(once, picks)).toEqual(once);
+  });
+
   it("returns the selection untouched for no picks", () => {
     const before = { K1: ["1"] };
     expect(addSelected(before, [])).toBe(before);
