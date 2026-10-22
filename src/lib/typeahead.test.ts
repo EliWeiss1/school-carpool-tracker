@@ -19,19 +19,19 @@ const s = (
   id,
   first_name,
   last_name,
-  class_group: "K1",
+  class_groups: ["K1"],
   status: "waiting",
   carpool_id: null,
   ...overrides,
 });
 
 const roster: PadStudent[] = [
-  s("miriam", "Miriam", "Cohen", { carpool_id: "cp-cohen", class_group: "2nd" }),
-  s("aaron", "Aaron", "Cohen", { carpool_id: "cp-cohen", class_group: "K1" }),
+  s("miriam", "Miriam", "Cohen", { carpool_id: "cp-cohen", class_groups: ["2nd"] }),
+  s("aaron", "Aaron", "Cohen", { carpool_id: "cp-cohen", class_groups: ["K1"] }),
   s("rivka", "Rivka", "Cohen"),
   s("yosef", "Yosef", "Kohn", { aliases: ["Yossi"] }),
   s("coby", "Coby", "Levi"),
-  s("dina", "Dina", "Rosenberg", { class_group: "5th" }),
+  s("dina", "Dina", "Rosenberg", { class_groups: ["5th"] }),
   s("eli", "Eli", "Bergman", { status: "arrived" }),
   s("ezra", "Ezra", "Berg"),
   s("noa", "Noa", "Ben-David"),
@@ -142,6 +142,37 @@ describe("suggest", () => {
     expect(keys("cohen", ["2nd"])).toEqual(["carpool:cp-cohen"]);
     expect(keys("cohen", ["5th"])).toEqual([]);
     expect(keys("rosen", ["K1"])).toEqual([]);
+  });
+
+  it("matches any of a student's classes and lists them once", () => {
+    const multi = buildTypeaheadIndex(
+      [s("lev", "Lev", "Zimmer", { class_groups: ["K1", "2nd"] })],
+      [],
+    );
+    const out = suggest(multi, "zimmer", ["K1", "2nd"]).candidates;
+    expect(out).toHaveLength(1);
+    expect(suggest(multi, "zimmer", ["2nd"]).candidates).toHaveLength(1);
+    expect(suggest(multi, "zimmer", ["5th"]).candidates).toHaveLength(0);
+  });
+
+  it("includes a classless student with no filter, but any filter excludes them", () => {
+    const loose = buildTypeaheadIndex(
+      [s("nada", "Nada", "Orphan", { class_groups: [] })],
+      [],
+    );
+    expect(suggest(loose, "orphan").candidates).toHaveLength(1);
+    expect(suggest(loose, "orphan", ["K1"]).candidates).toHaveLength(0);
+  });
+
+  it("carries every class onto the candidate", () => {
+    const multi = buildTypeaheadIndex(
+      [s("lev", "Lev", "Zimmer", { class_groups: ["K1", "2nd"] })],
+      [],
+    );
+    expect(suggest(multi, "zimmer").candidates[0].students[0].class_groups).toEqual([
+      "K1",
+      "2nd",
+    ]);
   });
 
   it("is clear only for a single suggestion", () => {

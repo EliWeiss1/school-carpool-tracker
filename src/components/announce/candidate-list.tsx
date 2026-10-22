@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { classesLabel } from "@/lib/class-roster";
 import {
   candidateKey,
   candidateLabel,
@@ -109,7 +110,7 @@ export function CandidateList({
           const isExpanded = expandedKeys.has(key);
           const meta = candidate.carpool
             ? `${effectiveIds.length} of ${candidate.students.length} student${candidate.students.length === 1 ? "" : "s"}`
-            : (candidate.students[0].class_group ?? "No class on file");
+            : classesLabel(candidate.students[0].class_groups);
           const nothingLeft = candidate.carpool !== null && effectiveIds.length === 0;
 
           return (

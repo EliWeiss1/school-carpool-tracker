@@ -38,11 +38,12 @@ import {
   type PadStudent,
   announceLabel,
   carpoolMembers,
+  pickClassFor,
   promptPicks,
   railClasses,
   scopeKey,
-  selectedCountIn,
-  selectedIds,
+  pickedCountInClass,
+  uniqueSelectedIds,
   studentsInClass,
   tapAction,
 } from "@/lib/class-roster";
@@ -438,7 +439,8 @@ export function AnnounceScreen() {
 
   /** The class drawer's one write: every name picked, across classes, at once. */
   function handleAnnouncePicked() {
-    const ids = selectedIds(state.pad.selection);
+    // De-duplicated: a multi-class student picked in two drawers is one person.
+    const ids = uniqueSelectedIds(state.pad.selection);
     if (ids.length === 0) return;
 
     void confirmCandidates(
@@ -487,7 +489,9 @@ export function AnnounceScreen() {
   /** Routes a tap on a name in the drawer; the rules live in `tapAction`. */
   function handleTapStudent(student: PadStudent) {
     const action = tapAction(classRoster.roster, state.pad.selection, student);
-    const classGroup = student.class_group ?? "";
+    // Filed under the drawer the tap came from (a multi-class student is in
+    // several), or their first class if no drawer is open.
+    const classGroup = pickClassFor(student, state.pad.openClass);
 
     switch (action) {
       case "unannounce":
@@ -520,7 +524,7 @@ export function AnnounceScreen() {
   const railList = railClasses(classGroups, narrowedTo);
   const railVisible = railList.length > 0;
   const openClass = state.pad.openClass;
-  const pickedTotal = selectedIds(state.pad.selection).length;
+  const pickedTotal = uniqueSelectedIds(state.pad.selection).length;
   const promptStudent = state.pad.carpoolPrompt
     ? classRoster.roster.find((s) => s.id === state.pad.carpoolPrompt?.studentId)
     : undefined;
@@ -673,7 +677,7 @@ export function AnnounceScreen() {
             classes={railList}
             openClass={openClass}
             pickedCount={(classGroup) =>
-              selectedCountIn(state.pad.selection, classGroup)
+              pickedCountInClass(classRoster.roster, state.pad.selection, classGroup)
             }
             onSelect={(classGroup) =>
               dispatch(
@@ -689,7 +693,7 @@ export function AnnounceScreen() {
           <ClassDrawer
             classGroup={openClass}
             students={drawerStudents}
-            pickedIds={state.pad.selection[openClass] ?? []}
+            pickedIds={uniqueSelectedIds(state.pad.selection)}
             totalPicked={pickedTotal}
             announcing={state.confirmingKey === "pad"}
             busy={state.confirmingKey !== null}
@@ -715,6 +719,7 @@ export function AnnounceScreen() {
                       picks: promptPicks(
                         promptMembers,
                         state.pad.carpoolPrompt?.unchecked ?? [],
+                        openClass,
                       ),
                     })
                   }

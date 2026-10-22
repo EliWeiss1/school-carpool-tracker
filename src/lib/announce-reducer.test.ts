@@ -13,7 +13,7 @@ const student = (id: string, overrides: Partial<ResolveCandidateLike["students"]
   id,
   first_name: "Maya",
   last_name: "Cohen",
-  class_group: "K1",
+  class_groups: ["K1"],
   status: "waiting" as const,
   ...overrides,
 });

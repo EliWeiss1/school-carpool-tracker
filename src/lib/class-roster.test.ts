@@ -5,10 +5,12 @@ import {
   addSelected,
   announceLabel,
   carpoolMembers,
+  classesLabel,
   promptPicks,
   tapAction,
   countStatuses,
   narrowedLabel,
+  pickedCountInClass,
   pruneSelection,
   railClasses,
   removeIds,
@@ -17,20 +19,26 @@ import {
   selectedIds,
   studentsInClass,
   toggleSelected,
+  uniqueSelectedIds,
 } from "./class-roster";
 
 const s = (
   id: string,
   first: string,
   last: string,
-  classGroup: string | null,
+  classGroups: string | string[] | null,
   status: PadStudent["status"] = "waiting",
   carpoolId: string | null = null,
 ): PadStudent => ({
   id,
   first_name: first,
   last_name: last,
-  class_group: classGroup,
+  class_groups:
+    classGroups === null
+      ? []
+      : Array.isArray(classGroups)
+        ? classGroups
+        : [classGroups],
   status,
   carpool_id: carpoolId,
 });
@@ -79,6 +87,36 @@ describe("studentsInClass", () => {
   });
 });
 
+describe("studentsInClass (multi-class)", () => {
+  const MULTI = [
+    s("m", "Multi", "Levi", ["K1", "2nd"]),
+    s("k", "Kay", "Adler", "K1"),
+    s("n", "Nada", "Zed", null),
+  ];
+
+  it("includes a multi-class student in each of their classes", () => {
+    expect(studentsInClass(MULTI, "K1").map((x) => x.id)).toEqual(["k", "m"]);
+    expect(studentsInClass(MULTI, "2nd").map((x) => x.id)).toEqual(["m"]);
+  });
+
+  it("lists a student with no classes in no drawer", () => {
+    for (const name of ["K1", "2nd", ""]) {
+      expect(studentsInClass(MULTI, name).map((x) => x.id)).not.toContain("n");
+    }
+  });
+});
+
+describe("classesLabel", () => {
+  it("joins a student's classes with a comma and a space", () => {
+    expect(classesLabel(["K1", "2nd"])).toBe("K1, 2nd");
+    expect(classesLabel(["3rd"])).toBe("3rd");
+  });
+
+  it("says so when the student has no class", () => {
+    expect(classesLabel([])).toBe("No class on file");
+  });
+});
+
 describe("countStatuses", () => {
   it("splits waiting from arrived", () => {
     expect(countStatuses(studentsInClass(ROSTER, "K1"))).toEqual({
@@ -112,6 +150,28 @@ describe("selection", () => {
     expect(pruneSelection({ K1: ["1"], "2nd": ["4"] }, ["2nd"])).toEqual({
       "2nd": ["4"],
     });
+  });
+
+  it("uniqueSelectedIds collapses a student picked in two drawers", () => {
+    const sel = { K1: ["m", "k"], "2nd": ["m", "x"] };
+    expect(uniqueSelectedIds(sel)).toEqual(["m", "k", "x"]);
+    expect(uniqueSelectedIds({})).toEqual([]);
+  });
+
+  it("toggling a student picked in another class's drawer un-picks them everywhere", () => {
+    const sel = { K1: ["m"], "2nd": ["m", "x"] };
+    expect(toggleSelected(sel, "3rd", "m")).toEqual({ "2nd": ["x"] });
+  });
+
+  it("counts a multi-class student as picked in each of their classes", () => {
+    const roster = [
+      s("m", "Multi", "Levi", ["K1", "2nd"]),
+      s("k", "Kay", "Adler", "K1"),
+    ];
+    const sel = { K1: ["m"] };
+    expect(pickedCountInClass(roster, sel, "K1")).toBe(1);
+    expect(pickedCountInClass(roster, sel, "2nd")).toBe(1);
+    expect(pickedCountInClass(roster, sel, "5th")).toBe(0);
   });
 
   it("removes announced ids and drops a class left empty", () => {
@@ -227,6 +287,14 @@ describe("carpools", () => {
     });
   });
 
+  describe("multi-class", () => {
+    const multi = s("m", "Multi", "Levi", ["K1", "2nd"]);
+
+    it("treats a student picked from another drawer as picked", () => {
+      expect(tapAction([multi], { K1: ["m"] }, multi)).toBe("deselect");
+    });
+  });
+
   describe("promptPicks", () => {
     const members = [FAMILY[1], FAMILY[0]];
 
@@ -234,6 +302,16 @@ describe("carpools", () => {
       expect(promptPicks(members, [])).toEqual([
         { classGroup: "3rd", studentId: "w2" },
         { classGroup: "K1", studentId: "w1" },
+      ]);
+    });
+
+    it("files a multi-class mate under the open class when they belong to it", () => {
+      const both = s("b", "Bo", "Both", ["K1", "3rd"], "waiting", "weiss");
+      expect(promptPicks([both], [], "3rd")).toEqual([
+        { classGroup: "3rd", studentId: "b" },
+      ]);
+      expect(promptPicks([both], [], "5th")).toEqual([
+        { classGroup: "K1", studentId: "b" },
       ]);
     });
 

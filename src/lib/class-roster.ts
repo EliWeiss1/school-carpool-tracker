@@ -14,7 +14,8 @@ export interface PadStudent {
   id: string;
   first_name: string;
   last_name: string;
-  class_group: string | null;
+  /** Every class the student belongs to, in class order; empty when none. */
+  class_groups: string[];
   status: StudentStatus;
   /** Students sharing a carpool_id ride together; null means no carpool. */
   carpool_id: string | null;
@@ -41,7 +42,9 @@ export interface PadPick {
 /** Stable sort so a name never jumps position between renders. */
 function byName(a: PadStudent, b: PadStudent): number {
   return (
-    a.last_name.localeCompare(b.last_name, undefined, { sensitivity: "base" }) ||
+    a.last_name.localeCompare(b.last_name, undefined, {
+      sensitivity: "base",
+    }) ||
     a.first_name.localeCompare(b.first_name, undefined, { sensitivity: "base" })
   );
 }
@@ -61,12 +64,37 @@ export function railClasses(
   return allClasses.filter((name) => wanted.has(name));
 }
 
-/** One class's students, A to Z by surname. */
+/**
+ * One class's students, A to Z by surname. A student in several classes is
+ * listed in each of them; a student in none is listed in no drawer (they are
+ * still reachable through the typed search).
+ */
 export function studentsInClass(
   roster: readonly PadStudent[],
   classGroup: string,
 ): PadStudent[] {
-  return roster.filter((s) => s.class_group === classGroup).sort(byName);
+  return roster.filter((s) => s.class_groups.includes(classGroup)).sort(byName);
+}
+
+/** A student's classes for a label: "K1, 2nd", or a plain note when they have none. */
+export function classesLabel(classGroups: readonly string[]): string {
+  return classGroups.length > 0 ? classGroups.join(", ") : "No class on file";
+}
+
+/**
+ * The class a pick is filed under. The drawer the staff member tapped in wins
+ * when the student belongs to it; otherwise their first class, or "" for a
+ * student with none (a key no filter keeps, which is right: nothing on screen
+ * shows them, so nothing should keep them picked).
+ */
+export function pickClassFor(
+  student: Pick<PadStudent, "class_groups">,
+  preferred?: string | null,
+): string {
+  if (preferred != null && student.class_groups.includes(preferred)) {
+    return preferred;
+  }
+  return student.class_groups[0] ?? "";
 }
 
 export interface ClassCounts {
@@ -86,16 +114,31 @@ export function countStatuses(students: readonly PadStudent[]): ClassCounts {
 /* Selection                                                                   */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Picks or un-picks a student. A multi-class student can appear in several
+ * drawers, so a student picked anywhere counts as picked everywhere: a toggle
+ * then un-picks them from every class, and only a student not yet picked is
+ * added, under `classGroup`.
+ */
 export function toggleSelected(
   selection: PadSelection,
   classGroup: string,
   studentId: string,
 ): PadSelection {
-  const current = selection[classGroup] ?? [];
-  const next = current.includes(studentId)
-    ? current.filter((id) => id !== studentId)
-    : [...current, studentId];
-  return withClass(selection, classGroup, next);
+  if (isSelected(selection, studentId))
+    return removeIds(selection, [studentId]);
+  return withClass(selection, classGroup, [
+    ...(selection[classGroup] ?? []),
+    studentId,
+  ]);
+}
+
+/** Whether the student is picked in any class's drawer. */
+export function isSelected(
+  selection: PadSelection,
+  studentId: string,
+): boolean {
+  return Object.values(selection).some((ids) => ids.includes(studentId));
 }
 
 /** Every selected id, across classes, in the order the classes were first picked from. */
@@ -103,11 +146,35 @@ export function selectedIds(selection: PadSelection): string[] {
   return Object.values(selection).flat();
 }
 
+/**
+ * Every selected student exactly once. A multi-class student picked in two
+ * drawers is two entries in `selectedIds` but one person: this is the list to
+ * count and to send to `set-status`, so they are announced (and audited) once.
+ */
+export function uniqueSelectedIds(selection: PadSelection): string[] {
+  return [...new Set(selectedIds(selection))];
+}
+
 export function selectedCountIn(
   selection: PadSelection,
   classGroup: string,
 ): number {
   return selection[classGroup]?.length ?? 0;
+}
+
+/**
+ * How many of a class's students are picked, wherever they were picked from.
+ * A multi-class student picked in one drawer counts in each of their classes,
+ * matching the tick the other drawer shows for them.
+ */
+export function pickedCountInClass(
+  roster: readonly PadStudent[],
+  selection: PadSelection,
+  classGroup: string,
+): number {
+  return studentsInClass(roster, classGroup).filter((s) =>
+    isSelected(selection, s.id),
+  ).length;
 }
 
 /** Keeps picks only from the classes still on offer. */
@@ -181,7 +248,9 @@ export function carpoolMembers(
 ): PadStudent[] {
   if (student.carpool_id === null) return [student];
   return roster
-    .filter((s) => s.carpool_id === student.carpool_id && s.status === "waiting")
+    .filter(
+      (s) => s.carpool_id === student.carpool_id && s.status === "waiting",
+    )
     .sort(byName);
 }
 
@@ -201,20 +270,23 @@ export function tapAction(
   student: PadStudent,
 ): TapAction {
   if (student.status === "arrived") return "unannounce";
-  const picked = (selection[student.class_group ?? ""] ?? []).includes(student.id);
-  if (picked) return "deselect";
+  if (isSelected(selection, student.id)) return "deselect";
   return carpoolMembers(roster, student).length > 1 ? "prompt" : "select";
 }
 
-/** The picks a confirmed prompt adds: every member except the un-ticked ones. */
+/**
+ * The picks a confirmed prompt adds: every member except the un-ticked ones,
+ * each filed under `openClass` when they belong to it, else their first class.
+ */
 export function promptPicks(
   members: readonly PadStudent[],
   unchecked: readonly string[],
+  openClass?: string | null,
 ): PadPick[] {
   const off = new Set(unchecked);
   return members
     .filter((m) => !off.has(m.id))
-    .map((m) => ({ classGroup: m.class_group ?? "", studentId: m.id }));
+    .map((m) => ({ classGroup: pickClassFor(m, openClass), studentId: m.id }));
 }
 
 /* -------------------------------------------------------------------------- */

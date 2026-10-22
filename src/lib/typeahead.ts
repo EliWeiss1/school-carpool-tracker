@@ -196,7 +196,7 @@ function toCandidateStudent(student: PadStudent): CandidateStudent {
     id: student.id,
     first_name: student.first_name,
     last_name: student.last_name,
-    class_group: student.class_group,
+    class_groups: student.class_groups,
     status: student.status,
   };
 }
@@ -270,7 +270,7 @@ export function suggest(
 
   const inScope = (student: PadStudent) =>
     classGroups.length === 0 ||
-    (student.class_group !== null && classGroups.includes(student.class_group));
+    student.class_groups.some((name) => classGroups.includes(name));
 
   const hits = new Map<string, Hit>();
   const offer = (key: string, hit: Hit) => {

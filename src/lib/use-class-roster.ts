@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PadStudent } from "@/lib/class-roster";
+import {
+  STUDENT_WITH_CLASSES_SELECT,
+  type StudentClassesEmbed,
+  withClassNames,
+} from "@/lib/student-classes";
 import { getBrowserClient } from "@/lib/supabase/browser";
+import type { Student } from "@/types/db";
 
 export interface UseClassRoster {
   roster: PadStudent[];
@@ -34,12 +40,11 @@ export function useClassRoster(): UseClassRoster {
     try {
       const { data, error: queryError } = await getBrowserClient()
         .from("students")
-        .select(
-          "id, first_name, last_name, class_group, status, carpool_id, aliases",
-        );
+        .select(STUDENT_WITH_CLASSES_SELECT)
+        .returns<(Student & StudentClassesEmbed)[]>();
       if (!mounted.current) return;
       if (queryError) throw new Error(queryError.message);
-      setRoster((data ?? []) as PadStudent[]);
+      setRoster((data ?? []).map(withClassNames));
       setError(null);
     } catch (caught: unknown) {
       if (!mounted.current) return;

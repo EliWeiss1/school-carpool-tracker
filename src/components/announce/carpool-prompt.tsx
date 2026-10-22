@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import type { PadStudent } from "@/lib/class-roster";
+import { type PadStudent, classesLabel } from "@/lib/class-roster";
 
 /**
  * "Who is riding?" -- raised over the class drawer when a tapped name has
@@ -107,9 +107,9 @@ export function CarpoolPrompt({
                     </span>{" "}
                     <span className="text-curb-600">{member.first_name}</span>
                   </span>
-                  {member.class_group && (
+                  {member.class_groups.length > 0 && (
                     <span className="shrink-0 font-mono text-xs uppercase tracking-eyebrow text-curb-500">
-                      {member.class_group}
+                      {classesLabel(member.class_groups)}
                     </span>
                   )}
                 </button>
