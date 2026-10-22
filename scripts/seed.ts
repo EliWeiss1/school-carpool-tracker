@@ -4,7 +4,8 @@
  *   npm run seed                  # local stack only
  *   npm run seed -- --allow-remote  # explicit opt-in for a hosted project
  *
- * This wipes `students` and `status_events` before inserting, so it refuses to
+ * This wipes `students` (and, by cascade, their class links) and
+ * `status_events` before inserting, so it refuses to
  * touch anything that isn't localhost unless you say so on the command line.
  * Deleting a real school's roster because a shell had the wrong .env loaded is
  * exactly the kind of accident worth one extra flag.
@@ -14,6 +15,11 @@ import { config as loadEnv } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../src/types/db";
 import { SAMPLE_ROSTER } from "../supabase/seed/roster";
+import {
+  attachInsertedIds,
+  buildStudentClassLinks,
+  UnknownClassError,
+} from "../supabase/seed/student-class-links";
 
 loadEnv({ path: ".env.local" });
 
@@ -64,6 +70,28 @@ async function main() {
 
   console.log(`\n  Seeding ${url}${isLocal(url) ? " (local)" : " (REMOTE)"}`);
 
+  // Classes already exist (the class_groups migration seeds them, /admin
+  // edits them); seeding only links students to them. Look them up first so a
+  // roster naming a missing class fails before anything is wiped or inserted.
+  const classRows = await supabase.from("class_groups").select("id, name");
+  if (classRows.error)
+    fail(`Reading class_groups failed: ${classRows.error.message}`);
+  const classIdByName = new Map(
+    (classRows.data ?? []).map((row) => [row.name, row.id] as const),
+  );
+  try {
+    buildStudentClassLinks(
+      SAMPLE_ROSTER.map((s) => ({
+        studentId: "",
+        class_groups: s.class_groups,
+      })),
+      classIdByName,
+    );
+  } catch (err) {
+    if (err instanceof UnknownClassError) fail(err.message);
+    throw err;
+  }
+
   // status_events first: its student_id FK is ON DELETE SET NULL, so orphan
   // audit rows would otherwise survive the wipe and confuse the next run.
   const wipeEvents = await supabase
@@ -73,6 +101,7 @@ async function main() {
   if (wipeEvents.error)
     fail(`Clearing status_events failed: ${wipeEvents.error.message}`);
 
+  // Deleting a student cascades to their student_classes links.
   const wipeStudents = await supabase
     .from("students")
     .delete()
@@ -82,20 +111,39 @@ async function main() {
 
   const { data, error } = await supabase
     .from("students")
-    .insert(SAMPLE_ROSTER.map((s) => ({ ...s, status: "waiting" as const })))
-    .select("id, class_group");
+    .insert(
+      SAMPLE_ROSTER.map(({ class_groups: _classes, ...student }) => ({
+        ...student,
+        status: "waiting" as const,
+      })),
+    )
+    .select("id, first_name, last_name");
 
   if (error) fail(`Insert failed: ${error.message}`);
 
+  const links = buildStudentClassLinks(
+    attachInsertedIds(SAMPLE_ROSTER, data ?? []),
+    classIdByName,
+  );
+  const linked = await supabase.from("student_classes").insert(links);
+  if (linked.error)
+    fail(`Linking students to classes failed: ${linked.error.message}`);
+
+  // Count by membership, not by student: a student in two classes appears
+  // under both, so the per-class lines sum to more than the student total.
   const byClass = new Map<string, number>();
-  for (const row of data ?? []) {
-    const classGroup = row.class_group ?? "—";
-    byClass.set(classGroup, (byClass.get(classGroup) ?? 0) + 1);
+  const nameById = new Map(
+    [...classIdByName].map(([name, id]) => [id, name] as const),
+  );
+  for (const link of links) {
+    const name = nameById.get(link.class_group_id) ?? "—";
+    byClass.set(name, (byClass.get(name) ?? 0) + 1);
   }
 
   console.log(`  ✓ Inserted ${data?.length ?? 0} students, all waiting`);
-  for (const classGroup of [...byClass.keys()].sort()) {
-    console.log(`      class ${classGroup}: ${byClass.get(classGroup)}`);
+  console.log(`  ✓ Linked ${links.length} class memberships`);
+  for (const name of [...byClass.keys()].sort()) {
+    console.log(`      class ${name}: ${byClass.get(name)}`);
   }
   console.log("");
 }

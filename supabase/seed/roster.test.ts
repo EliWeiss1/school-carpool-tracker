@@ -6,20 +6,56 @@ import { SAMPLE_ROSTER } from "./roster";
  * quietly remove the confusable names that phase 3's matcher is tuned against.
  */
 
+const CLASSES = new Set(["K1", "K2", "1st", "2nd", "3rd", "4th", "5th"]);
+
 describe("sample roster shape", () => {
   it("has every required field populated", () => {
     for (const s of SAMPLE_ROSTER) {
       expect(s.first_name.trim(), JSON.stringify(s)).not.toBe("");
       expect(s.last_name.trim(), JSON.stringify(s)).not.toBe("");
-      expect(s.class_group.trim(), JSON.stringify(s)).not.toBe("");
+      expect(s.class_groups.length, JSON.stringify(s)).toBeGreaterThanOrEqual(
+        1,
+      );
     }
   });
 
-  it("uses valid class_group values", () => {
-    const validClasses = new Set(["K1", "K2", "1st", "2nd", "3rd", "4th", "5th"]);
+  it("uses valid class names, with no class listed twice for one student", () => {
     for (const s of SAMPLE_ROSTER) {
-      expect(validClasses.has(s.class_group), s.class_group).toBe(true);
+      for (const name of s.class_groups) {
+        expect(CLASSES.has(name), name).toBe(true);
+      }
+      expect(new Set(s.class_groups).size, JSON.stringify(s)).toBe(
+        s.class_groups.length,
+      );
     }
+  });
+
+  it("has 105 students", () => {
+    expect(SAMPLE_ROSTER).toHaveLength(105);
+  });
+
+  // Counts memberships, not students: six students are in two classes, so the
+  // per-class totals sum to 111 while the student count stays 105. Each class
+  // keeps its 15 primary students; the extras land on top of that.
+  it("balances primary classes at 15 and adds six second-class memberships", () => {
+    const primary = new Map<string, number>();
+    const memberships = new Map<string, number>();
+    for (const s of SAMPLE_ROSTER) {
+      primary.set(s.class_groups[0], (primary.get(s.class_groups[0]) ?? 0) + 1);
+      for (const name of s.class_groups) {
+        memberships.set(name, (memberships.get(name) ?? 0) + 1);
+      }
+    }
+    for (const name of CLASSES) expect(primary.get(name), name).toBe(15);
+
+    const total = [...memberships.values()].reduce((a, b) => a + b, 0);
+    expect(total).toBe(111);
+  });
+
+  it("includes six deliberately multi-class students, in two classes each", () => {
+    const multi = SAMPLE_ROSTER.filter((s) => s.class_groups.length > 1);
+    expect(multi).toHaveLength(6);
+    for (const s of multi) expect(s.class_groups).toHaveLength(2);
   });
 
   it("has no two students with the same full name", () => {
@@ -80,9 +116,8 @@ describe("sample roster adversarial coverage", () => {
   // real names rather than forcing an unrealistic one to hit length 2.
   it("includes very short surnames, where one edit is most of the string", () => {
     const short = SAMPLE_ROSTER.filter((s) => s.last_name.length <= 3);
-    expect(
-      short.length,
-      "expected 2-3 letter surnames",
-    ).toBeGreaterThanOrEqual(3);
+    expect(short.length, "expected 2-3 letter surnames").toBeGreaterThanOrEqual(
+      3,
+    );
   });
 });
