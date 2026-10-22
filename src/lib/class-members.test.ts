@@ -164,8 +164,8 @@ describe("canOpenMembersSheet", () => {
 
 describe("memberCountLabel", () => {
   it("shows an em dash while the roster is loading, not a false zero", () => {
-    expect(memberCountLabel(0, false)).toBe("—");
-    expect(memberCountLabel(undefined, false)).toBe("—");
+    expect(memberCountLabel(0, false)).toBe("â€”");
+    expect(memberCountLabel(undefined, false)).toBe("â€”");
   });
   it("pluralises once loaded, treating a missing count as zero", () => {
     expect(memberCountLabel(undefined, true)).toBe("0 students");

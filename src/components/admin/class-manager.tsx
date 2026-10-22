@@ -302,7 +302,7 @@ export function ClassManager({
                   aria-label={`Students in ${classGroup.name}`}
                   disabled={isBusy || !canOpenMembersSheet(students !== null)}
                   title={
-                    students === null ? "Loading the roster…" : undefined
+                    students === null ? "Loading the rosterâ€¦" : undefined
                   }
                 >
                   Students

@@ -114,7 +114,7 @@ export function memberCountLabel(
   count: number | undefined,
   rosterLoaded: boolean,
 ): string {
-  if (!rosterLoaded) return "—";
+  if (!rosterLoaded) return "â€”";
   const n = count ?? 0;
   return `${n} student${n === 1 ? "" : "s"}`;
 }
