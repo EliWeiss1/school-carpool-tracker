@@ -15,8 +15,25 @@ Three screens:
   number of classes, and a button per class down the right edge opens a
   drawer of that class's students to tap and announce without speaking or
   typing. PIN-protected.
-- **`/display`** — inside, on the big screen. Live blue (waiting) / white (arrived) grid. No login.
-- **`/admin`** — roster management and a manual "Reset all to waiting". PIN-protected.
+- **`/display`** — inside, on the big screen. Live blue (waiting) / white (arrived) grid, grouped by class. A student in several classes appears under each one. No login.
+- **`/admin`** — roster management, the class list, and a manual "Reset all to waiting". PIN-protected.
+
+## Classes and the roster
+
+A student can be in any number of classes (or none). Classes are their own
+admin-editable list (`/admin` > Classes: add, reorder, delete, see member
+counts), and membership is its own table, `student_classes`, rather than a
+column on the student. To put a whole group in a class, open the class's
+**Students** sheet; to move a handful, select them in the roster table and use
+**Add to class** / **Remove from class**. Deleting a class that would leave some
+students with no class asks first: move everyone to another class, delete
+anyway, or cancel.
+
+CSV import columns: `first_name`, `last_name`, optional `aliases`, and the
+classes in a `class_groups` column (`classes` also works). Put several classes
+in one cell separated by a semicolon, for example `1st;Art`. A class that does
+not exist yet is an error on that row, not a new class: add it under Classes
+first, then import.
 
 The board also clears itself: a `pg_cron` job in Supabase sends every arrived
 student back to waiting at **8:00 PM Pacific, Sunday through Thursday** (Friday and Saturday

@@ -37,10 +37,28 @@ and status changes were then cleaned up — the live roster is back to its
 original 36 students, 0 carpools. The user separately confirmed the deployed
 site itself works. See `HANDOFF.md` section 10 for the full account.
 
-**Grade has since been removed as a separate concept.** Classification is
-now a single field, `class_group`, with a fixed set of values (`K1`, `K2`,
-`1st`, `2nd`, `3rd`, `4th`, `5th`, in `src/lib/classes.ts`) backing dropdowns
-on `/admin` and `/announce` in place of the old two free-text fields. The
+**Multi-class students are built on the branch `feature/multi-class-students`
+and are NOT deployed — rollout is pending.** A student can now belong to any
+number of classes (a `student_classes` join table; see "Classes" below), and
+`/admin`, `/announce`, `/display` and every Edge Function read and write
+through it. The branch is tested (883 tests, all green), typechecked, linted
+and built, but **nothing is live**: the expand migration
+`20261021120000_student_classes.sql` is not applied to the linked Supabase
+project, the Edge Functions are not redeployed, the contract migration
+`20261021130000_drop_student_class_group_column.sql` (which drops
+`students.class_group`) is not applied, and the branch is not merged to
+`master` (a push to `master` makes Vercel deploy a frontend that would read a
+table that does not exist yet). The order matters: `HANDOFF.md` section 13 has
+the deploy sequence, the pre-contract mismatch check and the rollback note.
+Until that rollout is done, the live system still has the single
+`students.class_group` column described in the next paragraph.
+
+**Grade was removed as a separate concept (live).** Classification became
+a single field, `class_group`, with a fixed set of values (`K1`, `K2`,
+`1st`, `2nd`, `3rd`, `4th`, `5th`) backing dropdowns on `/admin` and
+`/announce` in place of the old two free-text fields; the class list has since
+become admin-editable (`class_groups` table, `src/lib/class-groups.ts`) and,
+on the branch above, membership is many-to-many. The
 sample seed roster (`supabase/seed/roster.ts`) was rewritten to 105 Jewish-
 named students (15 per class), keeping the file's adversarial confusable-
 surname-cluster design. `/display`'s board is now visibly denser at that
@@ -159,6 +177,15 @@ src/
                         by class, on top of the per-section grid + tile pieces
     admin/              carpool-manager.tsx (create/edit/delete a carpool,
                         assign members) alongside the roster CRUD pieces
+                        class-manager.tsx: the class list with member counts
+                        class-members-sheet.tsx: per-class "Students" sheet
+                        (bulk add/remove one class's members, one Save)
+                        class-delete-dialog.tsx: the safe-delete decision when
+                        a class has sole members (move / delete anyway / cancel)
+                        bulk-class-actions.tsx: "Add to class" / "Remove from
+                        class" on the roster's row selection
+                        modal-surface.tsx: shared dialog shell (focus trap,
+                        Escape, backdrop) for the two overlays above
   lib/
     env.ts              single place env vars are read and validated
     api.ts              typed client for the three announce/display Edge
@@ -175,7 +202,22 @@ src/
                         names come once from PIN-gated roster-list, lazily
                         on the first keystroke (use-announce-carpools.ts),
                         because carpools have no public read
-    display-sections.ts pure grouping + per-viewer class filter for /display
+    display-sections.ts pure grouping + per-viewer class filter for /display;
+                        a multi-class student appears under each of their
+                        classes (one student, several tiles)
+    display-subscription.ts  /display's realtime wiring: `students` changes
+                        reconcile (and may flash/chime); `student_classes`
+                        changes only schedule a debounced refetch and can
+                        never count as an arrival
+    class-groups.ts     the admin-editable class list (`class_groups`, public
+                        read with the anon key; writes via classes-write)
+    student-classes.ts  PostgREST `student_classes(class_groups(...))` embed
+                        -> a student's `class_groups: string[]` (sort order)
+    class-members.ts    pure logic of the class membership sheet: diff,
+                        filters, "Add 12, remove 1" footer, `members` payload
+    class-selection.ts  pure toggle for the student form's class checkboxes
+    class-delete.ts     pure decisions of the safe class-delete dialog
+    bulk-class.ts       pure helpers for the roster's bulk add/remove actions
     pin-session.ts      the PIN store: memory only, no React
     use-pin-session.ts  the React hook over it
     device-id.ts        per-tab id for the rate-limit bucket
@@ -184,7 +226,9 @@ src/
       browser.ts        memoised anon client for client components
       server.ts         anon client for server components (never service-role)
   types/db.ts           row types + a Database type for supabase-js generics
-                        (Student.carpool_id, the Carpool type)
+                        (Student.carpool_id, the Carpool type, ClassGroup,
+                        StudentClass, and StudentWithClasses = Student plus
+                        `class_groups: string[]`; the row has no class column)
 supabase/
   config.toml           local stack config
   migrations/           SQL schema + RLS policies
@@ -201,16 +245,27 @@ supabase/
       rate-limit.ts     per-device fixed window, injectable clock
       http.ts           JSON/CORS/error shapes
       ports.ts          RosterStore interface — the seam the handlers depend on
+      class-embed.ts    flattens the `student_classes` embed into a StudentRow's
+                        `class_groups` names; throws on an unexpected shape
+      class-rpc.ts      parses the jsonb the class functions return
+                        (set_student_classes, change_class_members,
+                        remove_class_group) and maps their errors to sentences
       handlers/         one request handler per endpoint, no Deno APIs
         carpool-write.ts  create/update/delete a carpool + replace its members
+        classes-write.ts  create / delete / reorder a class, bulk `members`
       *.deno.ts         Deno-only wiring (env, supabase-js store)
     deepgram-token/     entrypoint: mint a session token + keyterms
     resolve-name/       entrypoint: transcript -> ranked candidates, collapsed
                         by carpool (read-only)
     set-status/         entrypoint: the only write path — one or many students
     carpool-write/      entrypoint: create/update/delete a carpool
-  seed/roster.ts        sample dev roster, deliberately full of confusable surnames
-scripts/seed.ts         loads the sample roster (refuses non-local without --allow-remote)
+  seed/roster.ts        sample dev roster, deliberately full of confusable
+                        surnames: 105 students, `class_groups: string[]` each,
+                        six of them in two classes (111 memberships)
+  seed/student-class-links.ts  pure: roster entries -> student_classes rows,
+                        by class name; an unknown class is an error
+scripts/seed.ts         loads the sample roster, then links students to the
+                        existing classes (refuses non-local without --allow-remote)
 scripts/screenshot.mjs  Puppeteer: URL + viewport -> PNG (npm run screenshot)
 scripts/generate-icons.mjs  renders public/icons/*.png (PWA + apple-touch icons)
 .claude/agents/         subagent definitions (see Model delegation)
@@ -246,12 +301,35 @@ act on" }`. Base URL is `NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL` or
 | `resolve-name`   | `alternatives[{transcript,confidence}]` or `transcript`, `classGroups?` | `{ tier, transcript, candidates[] }`             |
 | `set-status`     | `studentId` **or** `studentIds[]`, `status`, `source`, `matchConfidence?`, `transcript?`, `carpoolId?` | `{ students[], changed[], logged, missing[] }` |
 | `carpool-write`  | `action: "create"\|"update"\|"delete"`, `carpoolId?`, `name?`, `aliases?`, `memberIds?` | `{ carpool, members[], created }` or `{ deleted }` |
+| `classes-write` — `create` | `action: "create"`, `name` | `{ classGroup, created: true }`; 409 if the name exists (case-insensitive) |
+| `classes-write` — `delete` | `action: "delete"`, `classId`, `moveToClassId?`, `force?` | `{ deleted: true, movedCount }`, or **409** `{ error, memberCount, soleMemberCount, soleMembers[] }` when students would be left with no class and neither option was sent |
+| `classes-write` — `reorder` | `action: "reorder"`, `orderedIds[]` | `{ classGroups[] }` |
+| `classes-write` — `members` | `action: "members"`, `classId`, `addStudentIds[]`, `removeStudentIds[]` (500 each, at least one) | `{ memberCount, ignoredIds[] }` |
+
+Classes and multi-class students, on the wire (branch `feature/multi-class-students`):
+`roster-list` returns each student with `class_groups: string[]` (class
+**names**, in class sort order; `[]` means ungrouped) plus `classMemberCounts`
+(class id -> member count) for the class manager. `roster-write` (create and
+update) and `roster-import` take `class_groups: string[]` of names, resolved to
+ids server-side; an unknown name is a 4xx naming it, duplicates collapse, and
+on update omitting `class_groups` leaves memberships alone while `[]` clears
+them. A request still carrying the retired singular `class_group` is
+**rejected** ("This page is out of date. Reload it and try again.") rather than
+mapped, because mapping it would strip a multi-class student's other classes.
+`classes-write` is one function with four actions on purpose: the wrong-PIN
+budget in `pin-budget.test.ts` is summed across deployed functions, so a
+function per action would spend it for nothing. `delete` with `moveToClassId`
+links **every** member of the doomed class (sole members and students who are
+also elsewhere) to that class first; with `force: true` sole members are left
+with no class; with neither, and no sole members, it just deletes. `members`
+never touches a student's status or `arrived_at`.
 
 Notes on `classGroups`: an optional string array narrowing the roster (and so
 the Deepgram keyterm list and the resolver's candidate pool) to any number of
-classes; absent or empty means every class. The old single `classGroup` string
-is still accepted and merged in, so a stale browser tab never breaks mid-deploy
-(`handlers/filter.ts`).
+classes; absent or empty means every class. A student matches if **any** of
+their classes is in the filter, and is still one candidate, never duplicated.
+The old single `classGroup` string is still accepted and merged in, so a stale
+browser tab never breaks mid-deploy (`handlers/filter.ts`).
 
 Notes phase 4 will need:
 
@@ -399,6 +477,63 @@ until 5 of 7 classes fit one 1080p screen at once with no mid-word wrapping
 on all but the very longest surnames (a rare `line-clamp-2` wrap on
 "Rosenberg" is an accepted trade, not a bug — see the tile's own container-
 query font sizing above).
+
+## Classes (a student can be in several)
+
+*Built on `feature/multi-class-students`; not deployed — see Status above.*
+
+**Data model.** `public.class_groups` (`id`, `name`, `sort_order`) is the
+admin-editable class list, created by `20260916010000_class_groups.sql`.
+`public.student_classes` (`student_id`, `class_group_id`, `created_at`;
+primary key on the pair, so no class twice) is the many-to-many link, added by
+`20261021120000_student_classes.sql`; both foreign keys `on delete cascade`,
+so removing a student removes only their links. It has the same RLS shape as
+`students` (public `select`, no write policies, writes through the service
+role) and is in the realtime publication. The old free-text
+`students.class_group` is backfilled into links by the expand migration and
+dropped by `20261021130000_drop_student_class_group_column.sql`, which runs
+last and deliberately does **not** re-run the backfill (it would resurrect
+classes and memberships an admin removed after the deploy). A student row has
+no class column; code sees `class_groups: string[]` (names, in class
+`sort_order`; `[]` is "Ungrouped") built from the
+`student_classes(class_groups(name, sort_order))` embed
+(`src/lib/student-classes.ts` in the browser, `_shared/class-embed.ts` in the
+functions).
+
+**Writes are atomic Postgres functions**, revoked from anon/authenticated and
+called only by the service-role store (like `nightly_reset_board()`):
+`set_student_classes` (replace one student's set), `change_class_members`
+(bulk add/remove for one class; `on conflict do nothing`; ids not on the
+roster are ignored and reported back) and `remove_class_group` (locks the
+class, finds sole members, then deletes, moves, or reports back — the check
+and the delete are one transaction, so a concurrent edit cannot slip past it).
+
+**Removing a class no longer silently drops students' classification.** A
+class whose members are all also in another class deletes immediately. If some
+students would be left with no class, nothing is deleted and `classes-write`
+answers 409; `/admin` then opens `class-delete-dialog.tsx` so the admin picks
+**Move N students to…** (every member joins the chosen class) or **Delete
+anyway** (sole members become ungrouped). Neither path touches a student's
+status.
+
+**Screens.** `/admin`: the student form takes a checkbox per class; the
+roster table shows every class; the class manager shows member counts and a
+"Students" button per class (bulk add/remove in one sheet with search, scope
+filters and a footer that says what saving will do); the roster's row
+selection gains "Add to class" / "Remove from class". `/display`: a student
+is placed in **every** section of their classes (one tile per section, keyed
+by section and student) and in "Ungrouped" only if they have none; header and
+"All classes" totals count **distinct** students; `visibleIds` is the union of
+visible sections, so flash and chime fire once per student. A `students`
+realtime payload carries no class data, so `reconcile` preserves the held
+row's classes; membership changes arrive on `student_classes` and only
+trigger a debounced snapshot refetch (`display-subscription.ts`), never a
+flash or chime. `/announce`: a student is listed in every class drawer they
+belong to and is never shown twice in one list. CSV import (`/admin`): the
+`class_groups` header (aliases `classes`, `class_group`, `class`, `classroom`,
+`class group`, `homeroom`, `grade`), several classes in one cell separated by `;`, and an unknown
+class is a validation error on that row ("Add it under Classes first") rather
+than a silently created class.
 
 ## Coding conventions
 

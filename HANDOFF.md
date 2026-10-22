@@ -2,6 +2,13 @@
 
 Written to be read cold, over coffee, assuming you remember nothing.
 
+**Newest work, not yet live: [section 13](#13-students-in-multiple-classes-built-on-a-branch-not-deployed)**
+— a student can be in several classes. It is built and tested on the branch
+`feature/multi-class-students` and **has not been deployed**; section 13 has the
+exact rollout order. Wherever sections 10–12 below say `students.class_group`
+is a single text column, that is true of the live system today and stops being
+true when section 13's rollout is done.
+
 **Picking this up in a fresh chat? Skip straight to [section 10](#10-carpools-class-filtered-display-and-multi-select-announce)
 — it's the most recent work and supersedes the single-student assumptions
 baked into sections 1–9's description of `/announce`, `/display` and the
@@ -1010,3 +1017,134 @@ table, which the migration seeded only up to 5th. Students with other class
 text still show on the board. To remove them from the board, delete those
 students in `/admin` (the roster table has row checkboxes, shift-click range
 select, and "Delete N selected").
+
+(That `class_group`-text-on-the-student model is replaced by the
+`student_classes` join table in section 13, once it is rolled out.)
+
+## 13. Students in multiple classes (built on a branch, NOT deployed)
+
+**Status.** Built and committed on the branch `feature/multi-class-students`
+(worktree `School_Carpool_Tracker-multiclass`). Not merged to `master`, nothing
+applied to the live Supabase project, no Edge Function redeployed. Gate on the
+branch: `npm run lint`, `npm run typecheck`, `npm test` (883 tests) and
+`npm run build` all green. The design is in
+`docs/superpowers/specs/2026-10-21-multi-class-students-design.md` and the task
+plan in `docs/superpowers/plans/2026-10-21-multi-class-students.md`.
+
+### What was built
+
+- **Data model.** `public.student_classes (student_id, class_group_id,
+  created_at)`, primary key on the pair, both foreign keys `on delete cascade`,
+  same RLS as `students` (public `select`, writes only through the service
+  role), added to the realtime publication. `students.class_group` and its
+  index are dropped by a second migration. Three atomic, service-role-only
+  functions do every membership write: `set_student_classes`,
+  `change_class_members`, `remove_class_group`.
+- **Edge Functions / store.** `StudentRow` carries `class_groups: string[]`
+  (names, in class order) built from the `student_classes` embed
+  (`_shared/class-embed.ts`); RPC results are parsed in `_shared/class-rpc.ts`.
+  `roster-write` and `roster-import` take `class_groups` names, resolve them to
+  ids and refuse the retired singular `class_group` with "This page is out of
+  date. Reload it and try again." (mapping it would strip a multi-class
+  student's other classes). `roster-list` returns `classMemberCounts`.
+  `classes-write` gained `delete` with `moveToClassId` / `force` and a 409
+  decision payload when students would be left with no class, and a `members`
+  action for bulk add/remove. Still ten Edge Functions, **no new
+  function** (the wrong-PIN budget in `pin-budget.test.ts` is summed across
+  them).
+- **`/display`.** A student appears in every section of their classes, totals
+  count distinct students, flash/chime fire once per student, and membership
+  changes (a `student_classes` realtime event) trigger only a debounced
+  snapshot refetch, never a flash (`display-subscription.ts`).
+- **`/announce`.** A student is in every class drawer they belong to and is
+  never listed twice; the class filter matches on any class.
+- **`/admin`.** Multi-class checkboxes on the student form; every class shown
+  in the roster table; the class manager shows member counts and has a
+  "Students" sheet per class (bulk add/remove, one Save); the roster's row
+  selection gains "Add to class" / "Remove from class"; deleting a class that
+  would strand students opens a dialog (Move N students to…, Delete anyway,
+  Cancel). CSV import accepts a `class_groups` (or `classes`) header, `;`
+  between several classes in one cell, and treats an unknown class as a
+  validation error on that row rather than creating it.
+- **Seed and mocks.** `supabase/seed/roster.ts` entries use
+  `class_groups: string[]`; still 105 students with the same confusable-surname
+  clusters, six of whom (Ari Kohen, Leah Levine, Rebekah Tal, Aaron Cohen,
+  Ruvim Koen, Gittel Green) are in two classes, so memberships total 111.
+  `scripts/seed.ts` inserts the students, then links them to the existing
+  classes by name (failing before any wipe if a class name is missing).
+  `display-mock-roster.ts` has multi-class students for the dev preview.
+
+### Rollout sequence (in this order; each live step needs the user's go-ahead)
+
+Vercel deploys the frontend on every push to `master`, and the new frontend
+reads `student_classes`, so **nothing merges to `master` until the table exists
+live.** `supabase db push` applies every pending migration, so the contract
+migration must not be pending when the expand one is pushed.
+
+1. **Expand migration.** Apply only `20261021120000_student_classes.sql` (push
+   with the contract file not yet on the linked branch, or apply by explicit
+   version). It creates the table, indexes, RLS, publication and functions,
+   then runs the idempotent backfill: every distinct non-empty
+   `students.class_group` is matched to `class_groups` by `lower(btrim(name))`
+   (a class that does not exist yet is created, appended after the highest
+   `sort_order`), and one link is written per student. The old column is left in
+   place, so the currently deployed code keeps working.
+2. **Edge Functions.** Redeploy every function whose shared code changed (all
+   of them share the store: `roster-list`, `roster-write`, `roster-delete`,
+   `roster-import`, `roster-reset`, `classes-write`, `carpool-write`,
+   `resolve-name`, `set-status`, `deepgram-token`).
+3. **Verify live** (read-mostly): `roster-list` returns `class_groups` arrays and
+   `classMemberCounts`; a wrong PIN still 401s; a multi-class student resolves
+   to one candidate; a bulk `members` add and remove on a scratch class round
+   trips (and clean up what you create).
+4. **Merge and push to `master`** so Vercel deploys the frontend; check
+   `/display`, `/announce`, `/admin` on the deployed URL.
+5. **Pre-contract mismatch check.** Read-only. Between steps 1 and 2 the old
+   code was still writing `students.class_group`, so a student edited in that
+   window can have legacy text with no matching link. List them:
+
+   ```sql
+   select s.id, s.first_name, s.last_name, s.class_group
+     from public.students s
+    where nullif(btrim(s.class_group, E' \t\r\n'), '') is not null
+      and not exists (
+        select 1
+          from public.student_classes sc
+          join public.class_groups g on g.id = sc.class_group_id
+         where sc.student_id = s.id
+           and lower(btrim(g.name, E' \t\r\n'))
+             = lower(btrim(s.class_group, E' \t\r\n')));
+   ```
+
+   Show the result to the user. Some will be intentional (an admin removed that
+   class after the deploy); fix the genuine ones by hand in `/admin`.
+6. **Contract migration.** Apply `20261021130000_drop_student_class_group_column.sql`
+   last: it drops `students_class_group_idx`, `students.class_group` and
+   `backfill_student_classes()`.
+7. **Reseed (optional, dev data only).** `npm run seed -- --allow-remote` now
+   writes links too; only if the user wants the live roster replaced.
+
+### Rollback
+
+Until step 6 the `students.class_group` column still exists and the old code
+still reads it, so steps 1 to 5 are reversible: redeploy the previous
+functions and revert the frontend commit. The new table and functions can stay
+(they are inert to the old code). After step 6 the column is gone: rolling back
+the code would mean restoring the column and re-deriving its text from the
+links, so treat step 6 as the point of no return and only take it once the
+mismatch check is clean and the deployed screens have been looked at.
+
+**Why the contract migration does not re-run the backfill.** After the
+cut-over, admins manage classes through the new tools (delete or move a class,
+bulk add and remove members). `students.class_group` knows nothing of those
+edits, so a final backfill would resurrect classes and memberships an admin
+had deliberately removed. `student_classes` is the source of truth from the
+moment the frontend is live; the read-only mismatch check in step 5 is the
+substitute for the reconciliation a re-run would have pretended to do.
+
+### Known and deliberately not changed
+
+- A member's `status` and `arrived_at` are never touched by any class
+  operation.
+- The brief inconsistency window between steps 1 and 2 is accepted for a
+  single-building roster; the mismatch check exists to catch its leftovers.
