@@ -81,7 +81,9 @@ export function StudentForm({
       className="flex flex-col gap-4 rounded-2xl border border-marigold-300 bg-marigold-50 p-6 shadow-card"
     >
       <h3 className="font-display text-lg font-bold text-curb-900">
-        {student ? `Edit ${student.first_name} ${student.last_name}` : "Add a student"}
+        {student
+          ? `Edit ${student.first_name} ${student.last_name}`
+          : "Add a student"}
       </h3>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -129,7 +131,9 @@ export function StudentForm({
         </div>
 
         <fieldset className="flex min-w-0 flex-col gap-2 sm:col-span-2">
-          <legend className={LABEL_CLASS}>Classes</legend>
+          <legend className={LABEL_CLASS}>
+            Classes: tick every class this student is in
+          </legend>
           {classGroups.length === 0 ? (
             <p className="text-sm text-curb-500">
               No classes yet. Add one under Classes below, then tick it here.
@@ -186,7 +190,7 @@ export function StudentForm({
             </ul>
           )}
           <p className="text-xs text-curb-500">
-            A student can be in several classes. Leave all unticked for none.
+            Leave all unticked if the student has no class yet.
           </p>
         </fieldset>
 
@@ -215,8 +219,8 @@ export function StudentForm({
             placeholder="Optional"
           />
           <p className="text-xs text-curb-500">
-            For your own reference, and so saying a parent&apos;s name at
-            pickup announces this child too.
+            For your own reference, and so saying a parent&apos;s name at pickup
+            announces this child too.
           </p>
         </div>
 
@@ -247,7 +251,12 @@ export function StudentForm({
       {error && <ErrorBanner message={error} />}
 
       <div className="flex justify-end gap-2">
-        <Button variant="quiet" size="md" onClick={onCancel} disabled={submitting}>
+        <Button
+          variant="quiet"
+          size="md"
+          onClick={onCancel}
+          disabled={submitting}
+        >
           Cancel
         </Button>
         <Button type="submit" variant="primary" size="md" disabled={submitting}>

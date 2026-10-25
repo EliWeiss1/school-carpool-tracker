@@ -227,7 +227,10 @@ export function addSelected(
   let next = selection;
   for (const { classGroup, studentId } of picks) {
     if (isSelected(next, studentId)) continue;
-    next = withClass(next, classGroup, [...(next[classGroup] ?? []), studentId]);
+    next = withClass(next, classGroup, [
+      ...(next[classGroup] ?? []),
+      studentId,
+    ]);
   }
   return next;
 }
@@ -349,48 +352,85 @@ const RAIL_ABBREV_MAX = 6;
  * Short rail labels for every class, keyed by the full name.
  *
  * The rail is 56px wide, so "EC Hummingbirds" truncated to "EC Hu…" and every
- * button in a family of "EC …" classes read the same. Instead a short leading
- * word stays as the top line and the rest is cut to its first few letters in
- * caps ("EC" / "HUM"), the way a pigeonhole or a bus route is labelled. Letters
- * are added until no two classes collide, so "Robins" and "Robots" become
- * "ROBI" and "ROBO" rather than two "ROB"s. The full name is still the drawer's
- * heading and the button's accessible name; this is only what fits.
+ * button in a family of "EC …" classes read the same. So:
+ *
+ * - A short first word that no other class starts with stands alone ("6th",
+ *   "7th", "8th" for "6th Grade", "7th Grade", "8th Grade"): it already says
+ *   everything the rest would add.
+ * - Otherwise a short leading word stays as the top line and the rest is cut
+ *   to its first few letters in caps ("EC" / "HUM"), the way a pigeonhole or a
+ *   bus route is labelled. A family whose rests include a four-letter whole
+ *   word ("MS Boys") takes four letters throughout ("BOYS" / "GIRL"), so the
+ *   siblings line up and the whole word is not clipped to "BOY".
+ * - Letters are added until no two classes collide, so "Robins" and "Robots"
+ *   become "ROBI" and "ROBO" rather than two "ROB"s.
+ *
+ * The full name is still the drawer's heading and the button's accessible
+ * name; this is only what fits.
  */
 export function railLabels(
   classGroups: readonly string[],
 ): Map<string, RailLabel> {
+  const wordsOf = (name: string) => name.trim().split(/\s+/).filter(Boolean);
+  const firstWordCounts = new Map<string, number>();
+  for (const name of classGroups) {
+    const first = (wordsOf(name)[0] ?? name).toLowerCase();
+    firstWordCounts.set(first, (firstWordCounts.get(first) ?? 0) + 1);
+  }
+
   const parts = classGroups.map((name) => {
-    const words = name.trim().split(/\s+/).filter(Boolean);
-    if (name.length <= RAIL_WHOLE_MAX) return { name, whole: true as const };
-    const hasPrefix = words.length > 1 && words[0].length <= RAIL_PREFIX_MAX;
+    const words = wordsOf(name);
+    if (name.length <= RAIL_WHOLE_MAX) {
+      return { name, fixed: { top: name } as RailLabel };
+    }
+    const first = words[0] ?? name;
+    const uniqueFirst =
+      words.length > 1 &&
+      first.length <= RAIL_WHOLE_MAX &&
+      firstWordCounts.get(first.toLowerCase()) === 1;
+    if (uniqueFirst) return { name, fixed: { top: first } as RailLabel };
+
+    const hasPrefix = words.length > 1 && first.length <= RAIL_PREFIX_MAX;
     return {
       name,
-      whole: false as const,
-      prefix: hasPrefix ? words[0] : undefined,
+      fixed: undefined,
+      prefix: hasPrefix ? first : undefined,
       rest: (hasPrefix ? words.slice(1) : words).join(""),
     };
   });
 
+  // A prefix family with a four-letter whole-word rest starts at four letters.
+  const familyStart = new Map<string, number>();
+  for (const part of parts) {
+    if (part.fixed !== undefined) continue;
+    const family = (part.prefix ?? "").toLowerCase();
+    if (part.rest.length === RAIL_WHOLE_MAX)
+      familyStart.set(family, RAIL_WHOLE_MAX);
+  }
+
   const labels = new Map<string, RailLabel>();
+  const flexible = [];
+  for (const part of parts) {
+    if (part.fixed !== undefined) labels.set(part.name, part.fixed);
+    else flexible.push(part);
+  }
+
   let length = RAIL_ABBREV_MIN;
-  let pending = parts;
+  let pending = flexible;
 
   // Widen only the colliding labels, one letter at a time, so a unique
   // class keeps its shortest form.
   while (pending.length > 0) {
-    const candidates = pending.map((part) =>
-      part.whole
-        ? { name: part.name, label: { top: part.name } }
-        : {
-            name: part.name,
-            label: part.prefix
-              ? {
-                  top: part.prefix,
-                  bottom: part.rest.slice(0, length).toUpperCase(),
-                }
-              : { top: part.rest.slice(0, length).toUpperCase() },
-          },
-    );
+    const candidates = pending.map((part) => {
+      const start = familyStart.get((part.prefix ?? "").toLowerCase()) ?? 0;
+      const letters = part.rest.slice(0, Math.max(length, start)).toUpperCase();
+      return {
+        name: part.name,
+        label: part.prefix
+          ? { top: part.prefix, bottom: letters }
+          : { top: letters },
+      };
+    });
     const key = (label: RailLabel) => `${label.top}|${label.bottom ?? ""}`;
     const seen = new Map<string, number>();
     for (const { label } of candidates) {

@@ -17,6 +17,12 @@ import {
   deleteResolution,
   otherClasses,
 } from "@/lib/class-delete";
+import {
+  addedMessage,
+  memberCountAfter,
+  removedMessage,
+  savedMessage,
+} from "@/lib/class-feedback";
 import type { ClassGroup } from "@/lib/class-groups";
 import {
   type MembershipDiff,
@@ -40,6 +46,11 @@ function requireCredentials(session: UsePinSession) {
   }
   return credentials;
 }
+
+// A tap-sized square: the arrows are used on a phone, where a 24px target
+// next to its twin is a coin toss. Hover/active tint keeps it a button.
+const REORDER_CLASS =
+  "focus-ring flex min-h-tap min-w-tap items-center justify-center rounded-xl text-curb-500 transition-colors duration-150 hover:bg-curb-100 hover:text-curb-900 active:bg-curb-200 disabled:opacity-30";
 
 const INPUT_CLASS =
   "focus-ring min-h-tap w-full rounded-xl border border-curb-300 bg-curb-50 px-3.5 text-curb-900 transition-colors duration-150 placeholder:text-curb-400 hover:border-curb-400";
@@ -90,6 +101,8 @@ export function ClassManager({
   const [membersFor, setMembersFor] = useState<ClassGroup | null>(null);
   const [pending, setPending] = useState<PendingDecision | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  // One quiet confirmation of the last successful action; cleared on the next.
+  const [status, setStatus] = useState<string | null>(null);
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault();
@@ -98,6 +111,7 @@ export function ClassManager({
 
     setAdding(true);
     setAddError(null);
+    setStatus(null);
     try {
       await adminApi.createClass({
         ...requireCredentials(session),
@@ -105,6 +119,7 @@ export function ClassManager({
       });
       setName("");
       await refresh();
+      setStatus(addedMessage(trimmed));
     } catch (error: unknown) {
       setAddError(
         error instanceof ApiError
@@ -125,6 +140,7 @@ export function ClassManager({
     setBusyId(classGroup.id);
     setRowError(null);
     setDialogError(null);
+    setStatus(null);
     try {
       await adminApi.deleteClass({
         ...requireCredentials(session),
@@ -134,6 +150,18 @@ export function ClassManager({
       setConfirmingId(null);
       setPending(null);
       await Promise.all([refresh(), refreshRoster()]);
+      const target =
+        choice?.action === "move"
+          ? classGroups.find((g) => g.id === choice.moveToClassId)
+          : undefined;
+      setStatus(
+        removedMessage(
+          classGroup.name,
+          target && pending
+            ? { count: pending.decision.memberCount, targetName: target.name }
+            : undefined,
+        ),
+      );
     } catch (error: unknown) {
       const failure = classifyDeleteFailure(error);
       if (failure.kind === "decide") {
@@ -174,12 +202,19 @@ export function ClassManager({
     classGroup: ClassGroup,
     diff: MembershipDiff,
   ) {
+    setStatus(null);
     await adminApi.changeClassMembers({
       ...requireCredentials(session),
       ...membersPayload(classGroup.id, diff),
     });
     setMembersFor(null);
     await Promise.all([refresh(), refreshRoster()]);
+    setStatus(
+      savedMessage(
+        classGroup.name,
+        memberCountAfter(classMemberCounts[classGroup.id] ?? 0, diff),
+      ),
+    );
   }
 
   async function handleMove(index: number, direction: -1 | 1) {
@@ -187,10 +222,14 @@ export function ClassManager({
     if (target < 0 || target >= classGroups.length) return;
 
     const reordered = [...classGroups];
-    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    [reordered[index], reordered[target]] = [
+      reordered[target],
+      reordered[index],
+    ];
 
     setBusyId(classGroups[index].id);
     setRowError(null);
+    setStatus(null);
     try {
       await adminApi.reorderClasses({
         ...requireCredentials(session),
@@ -209,15 +248,31 @@ export function ClassManager({
   }
 
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-curb-200 bg-white p-6 shadow-card">
+    <section
+      id="classes"
+      className="flex scroll-mt-4 flex-col gap-4 rounded-2xl border border-curb-200 bg-white p-6 shadow-card"
+    >
       <div>
-        <h2 className="font-display text-2xl font-bold text-curb-900">
+        <h2
+          data-panel-heading
+          tabIndex={-1}
+          className="font-display text-2xl font-bold text-curb-900 focus:outline-none"
+        >
           Classes
         </h2>
         <p className="mt-1 text-curb-600">
-          The classes offered on every class picker. Add, remove, or reorder
-          them here -- editing a student&apos;s own class is still done from the
-          roster above.
+          These classes appear on Display, Announce and every class picker here.
+          Use Students to add or remove a whole group at once, or Edit on a
+          roster row to change one student.
+        </p>
+        <p
+          role="status"
+          aria-live="polite"
+          className={
+            status ? "mt-2 text-sm font-medium text-curb-900" : "sr-only"
+          }
+        >
+          {status}
         </p>
       </div>
 
@@ -231,7 +286,7 @@ export function ClassManager({
             className={INPUT_CLASS}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="EC Hummingbirds"
+            placeholder="New class name, like Choir"
           />
         </div>
         <Button
@@ -250,7 +305,7 @@ export function ClassManager({
       {classGroups.length === 0 ? (
         <EmptyState
           title="No classes yet"
-          hint="Add one above -- it&rsquo;ll show up on every class picker in the app."
+          hint="Add one above — it&rsquo;ll show up on every class picker in the app."
         />
       ) : (
         <ul className="flex flex-col divide-y divide-curb-100 rounded-xl border border-curb-200">
@@ -266,7 +321,7 @@ export function ClassManager({
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    className="focus-ring rounded-md p-1 text-curb-500 transition-colors duration-150 hover:text-curb-900 disabled:opacity-30"
+                    className={REORDER_CLASS}
                     onClick={() => void handleMove(index, -1)}
                     disabled={index === 0 || isBusy}
                     aria-label={`Move ${classGroup.name} up`}
@@ -275,7 +330,7 @@ export function ClassManager({
                   </button>
                   <button
                     type="button"
-                    className="focus-ring rounded-md p-1 text-curb-500 transition-colors duration-150 hover:text-curb-900 disabled:opacity-30"
+                    className={REORDER_CLASS}
                     onClick={() => void handleMove(index, 1)}
                     disabled={index === classGroups.length - 1 || isBusy}
                     aria-label={`Move ${classGroup.name} down`}
@@ -301,9 +356,7 @@ export function ClassManager({
                   onClick={() => setMembersFor(classGroup)}
                   aria-label={`Students in ${classGroup.name}`}
                   disabled={isBusy || !canOpenMembersSheet(students !== null)}
-                  title={
-                    students === null ? "Loading the roster…" : undefined
-                  }
+                  title={students === null ? "Loading the roster…" : undefined}
                 >
                   Students
                 </Button>
@@ -320,7 +373,7 @@ export function ClassManager({
                       Cancel
                     </Button>
                     <Button
-                      variant="danger"
+                      variant="secondary"
                       size="sm"
                       onClick={() => void handleDelete(classGroup)}
                       disabled={isBusy}

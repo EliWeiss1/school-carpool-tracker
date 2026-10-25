@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { groupIntoSections } from "./display-sections";
+import { filterOptionLabel, groupIntoSections } from "./display-sections";
 import type { StudentWithClasses } from "@/types/db";
 
-function student(overrides: Partial<StudentWithClasses> & Pick<StudentWithClasses, "id">): StudentWithClasses {
+function student(
+  overrides: Partial<StudentWithClasses> & Pick<StudentWithClasses, "id">,
+): StudentWithClasses {
   return {
     first_name: "Jonah",
     last_name: "Smith",
@@ -63,11 +65,10 @@ describe("groupIntoSections", () => {
       student({ id: "sEC", class_groups: ["EC Hummingbirds"] }),
     ];
 
-    const result = groupIntoSections(
-      students,
-      { sectionKey: "" },
-      ["EC Hummingbirds", "K1"],
-    );
+    const result = groupIntoSections(students, { sectionKey: "" }, [
+      "EC Hummingbirds",
+      "K1",
+    ]);
 
     expect(result.allSections.map((s) => s.classGroup)).toEqual([
       "EC Hummingbirds",
@@ -83,10 +84,7 @@ describe("groupIntoSections", () => {
 
     const result = groupIntoSections(students, { sectionKey: "" });
 
-    expect(result.allSections.map((s) => s.classGroup)).toEqual([
-      "K1",
-      "5th",
-    ]);
+    expect(result.allSections.map((s) => s.classGroup)).toEqual(["K1", "5th"]);
   });
 
   it("puts students with no class into a trailing 'Ungrouped' section", () => {
@@ -212,8 +210,8 @@ describe("groupIntoSections", () => {
     const result = groupIntoSections(students, { sectionKey: "" });
 
     expect(result.options).toEqual([
-      { key: expect.any(String), label: "K1", waiting: 2 },
-      { key: expect.any(String), label: "1st", waiting: 0 },
+      { key: expect.any(String), label: "K1", waiting: 2, total: 2 },
+      { key: expect.any(String), label: "1st", waiting: 0, total: 1 },
     ]);
   });
 
@@ -304,8 +302,8 @@ describe("groupIntoSections", () => {
       );
 
       expect(result.options).toEqual([
-        { key: expect.any(String), label: "K1", waiting: 2 },
-        { key: expect.any(String), label: "2nd", waiting: 1 },
+        { key: expect.any(String), label: "K1", waiting: 2, total: 2 },
+        { key: expect.any(String), label: "2nd", waiting: 1, total: 1 },
       ]);
     });
   });
@@ -319,7 +317,11 @@ describe("groupIntoSections", () => {
         student({ id: "s2", class_groups: ["K1"], status: "arrived" }),
       ];
 
-      const { options } = groupIntoSections(students, { sectionKey: "" }, classOrder);
+      const { options } = groupIntoSections(
+        students,
+        { sectionKey: "" },
+        classOrder,
+      );
 
       expect(options.map((o) => [o.label, o.waiting])).toEqual([
         ["K1", 0],
@@ -327,12 +329,28 @@ describe("groupIntoSections", () => {
         ["6th grade", 0],
         ["7th grade", 0],
       ]);
+      expect(options.map((o) => o.total)).toEqual([1, 1, 0, 0]);
+    });
+
+    it("labels a class with nobody in it as having no students", () => {
+      const { options } = groupIntoSections(
+        [student({ id: "s1", class_groups: ["K1"], status: "arrived" })],
+        { sectionKey: "" },
+        classOrder,
+      );
+
+      expect(filterOptionLabel(options[0])).toBe("K1 (0 waiting)");
+      expect(filterOptionLabel(options[2])).toBe("6th grade (no students)");
     });
 
     it("keeps the board itself free of empty headings", () => {
       const students = [student({ id: "s1", class_groups: ["K1"] })];
 
-      const result = groupIntoSections(students, { sectionKey: "" }, classOrder);
+      const result = groupIntoSections(
+        students,
+        { sectionKey: "" },
+        classOrder,
+      );
 
       expect(result.allSections.map((s) => s.label)).toEqual(["K1"]);
       expect(result.sections.map((s) => s.label)).toEqual(["K1"]);
@@ -361,7 +379,11 @@ describe("groupIntoSections", () => {
         student({ id: "s2", class_groups: [] }),
       ];
 
-      const { options } = groupIntoSections(students, { sectionKey: "" }, classOrder);
+      const { options } = groupIntoSections(
+        students,
+        { sectionKey: "" },
+        classOrder,
+      );
 
       expect(options.map((o) => o.label)).toEqual([
         ...classOrder,
@@ -394,7 +416,11 @@ describe("groupIntoSections", () => {
         student({ id: "s2", class_groups: ["1st"], status: "arrived" }),
       ];
 
-      const result = groupIntoSections(students, { sectionKey: "" }, classOrder);
+      const result = groupIntoSections(
+        students,
+        { sectionKey: "" },
+        classOrder,
+      );
 
       expect(result.totals).toEqual({ waiting: 1, arrived: 1 });
       expect(result.options.map((o) => [o.label, o.waiting])).toEqual([

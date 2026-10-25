@@ -61,3 +61,24 @@ describe("bulkResultMessage", () => {
     );
   });
 });
+
+describe("bulkConfirmText with stranded students", () => {
+  it("adds how many will have no class after a Remove", () => {
+    expect(bulkConfirmText("remove", 3, "Choir", 2)).toBe(
+      "Remove 3 students from Choir? They stay on the roster. 2 of them will have no class after this.",
+    );
+  });
+  it("words the single-student case without 'of them'", () => {
+    expect(bulkConfirmText("remove", 1, "Choir", 1)).toBe(
+      "Remove 1 student from Choir? They stay on the roster. That student will have no class after this.",
+    );
+  });
+  it("says nothing extra when nobody is stranded, and never for Add", () => {
+    expect(bulkConfirmText("remove", 3, "Choir", 0)).toBe(
+      "Remove 3 students from Choir? They stay on the roster.",
+    );
+    expect(bulkConfirmText("add", 3, "Choir", 2)).toBe(
+      "Add 3 students to Choir?",
+    );
+  });
+});

@@ -50,6 +50,16 @@ export function hasChanges(diff: MembershipDiff): boolean {
   return diff.add.length > 0 || diff.remove.length > 0;
 }
 
+/** The dropdown's value for a scope: a class name, or "" for "All classes". */
+export function classPickOf(scope: MemberScope): string {
+  return typeof scope === "string" ? "" : scope.classGroup;
+}
+
+/** The scope a dropdown pick stands for; "" (All classes) lifts the class filter. */
+export function scopeForClassPick(pick: string): MemberScope {
+  return pick === "" ? "all" : { classGroup: pick };
+}
+
 function matchesText(student: RosterStudent, needle: string): boolean {
   if (needle === "") return true;
   const haystacks = [
@@ -78,14 +88,56 @@ export function filterStudents(
   });
 }
 
-/** The sticky footer's summary of what Save will do. */
-export function describeDiff(diff: MembershipDiff): string {
+/**
+ * How many of `ids` would be left with no class at all if they left
+ * `className`: members whose only class is that one. Students who are not in
+ * it are unaffected, so they are not counted. Used by the sheet footer and the
+ * roster's bulk Remove confirmation, so neither strands anyone silently.
+ */
+export function countLeftWithNoClass(
+  students: readonly RosterStudent[],
+  ids: Iterable<string>,
+  className: string,
+): number {
+  const wanted = new Set(ids);
+  return students.filter(
+    (s) =>
+      wanted.has(s.id) &&
+      s.class_groups.includes(className) &&
+      s.class_groups.every((name) => name === className),
+  ).length;
+}
+
+/**
+ * The sticky footer's summary of what Save will do. `stranded` is how many of
+ * the removals leave a student in no class; shown only when above zero.
+ */
+export function describeDiff(diff: MembershipDiff, stranded = 0): string {
   const parts: string[] = [];
   if (diff.add.length > 0) parts.push(`add ${diff.add.length}`);
   if (diff.remove.length > 0) parts.push(`remove ${diff.remove.length}`);
   if (parts.length === 0) return "No changes";
   const text = parts.join(", ");
-  return text.charAt(0).toUpperCase() + text.slice(1);
+  const summary = text.charAt(0).toUpperCase() + text.slice(1);
+  return stranded > 0 ? `${summary} · ${stranded} will have no class` : summary;
+}
+
+/**
+ * The line under a student in the membership sheet. For a student who is (or
+ * is being made) a member it lists their other classes ("Also in"); for one
+ * who is not in this class it lists the classes they are in ("In"), since
+ * "Also in" would wrongly imply they are in this one.
+ */
+export function studentClassesLine(
+  classes: readonly string[],
+  className: string,
+  inThisClass: boolean,
+): string {
+  const others = classes.filter((name) => name !== className);
+  if (others.length > 0) {
+    return `${inThisClass ? "Also in" : "In"} ${others.join(", ")}`;
+  }
+  return classes.includes(className) ? "No other class" : "No class yet";
 }
 
 /** The request body for Save, naming only the sides that have ids. */

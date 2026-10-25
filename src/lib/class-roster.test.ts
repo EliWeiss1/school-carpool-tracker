@@ -231,7 +231,32 @@ describe("railLabels", () => {
     ]);
     expect(labels.get("EC Hummingbirds")).toEqual({ top: "EC", bottom: "HUM" });
     expect(labels.get("EC Chipmunks")).toEqual({ top: "EC", bottom: "CHI" });
-    expect(labels.get("K2 Shoshanim")).toEqual({ top: "K2", bottom: "SHO" });
+    // "K2" is the only class starting with that word, so it stands alone.
+    expect(labels.get("K2 Shoshanim")).toEqual({ top: "K2" });
+  });
+
+  it("shows only the first word when no other class shares it", () => {
+    const labels = railLabels(["6th Grade", "7th Grade", "8th Grade"]);
+    expect(labels.get("6th Grade")).toEqual({ top: "6th" });
+    expect(labels.get("7th Grade")).toEqual({ top: "7th" });
+    expect(labels.get("8th Grade")).toEqual({ top: "8th" });
+  });
+
+  it("does not drop the rest when the first word is shared or too long", () => {
+    const labels = railLabels(["MS Boys", "MS Girls", "Kindergarten Blue"]);
+    expect(labels.get("MS Boys")?.top).toBe("MS");
+    expect(labels.get("Kindergarten Blue")).toEqual({ top: "KIN" });
+  });
+
+  it("uses four letters across a family when that makes a whole word", () => {
+    const labels = railLabels(["MS Boys", "MS Girls"]);
+    expect(labels.get("MS Boys")).toEqual({ top: "MS", bottom: "BOYS" });
+    expect(labels.get("MS Girls")).toEqual({ top: "MS", bottom: "GIRL" });
+  });
+
+  it("keeps three letters when no sibling is a four-letter word", () => {
+    const labels = railLabels(["EC Hummingbirds", "EC Chipmunks"]);
+    expect(labels.get("EC Hummingbirds")).toEqual({ top: "EC", bottom: "HUM" });
   });
 
   it("abbreviates a long single word onto one line", () => {

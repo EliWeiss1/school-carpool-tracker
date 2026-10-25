@@ -6,10 +6,14 @@ import {
   diffMembership,
   filterStudents,
   canOpenMembersSheet,
+  classPickOf,
+  countLeftWithNoClass,
   hasChanges,
   memberCountLabel,
   memberIdsOf,
   membersPayload,
+  scopeForClassPick,
+  studentClassesLine,
 } from "./class-members";
 
 function student(
@@ -171,5 +175,82 @@ describe("memberCountLabel", () => {
     expect(memberCountLabel(undefined, true)).toBe("0 students");
     expect(memberCountLabel(1, true)).toBe("1 student");
     expect(memberCountLabel(18, true)).toBe("18 students");
+  });
+});
+
+describe("countLeftWithNoClass", () => {
+  const roster = [
+    student("a", "Ada", "One", ["3rd"]),
+    student("b", "Bo", "Two", ["3rd", "Choir"]),
+    student("c", "Cy", "Three", []),
+    student("d", "Di", "Four", ["Choir"]),
+  ];
+
+  it("counts only students whose sole class is the one being left", () => {
+    expect(countLeftWithNoClass(roster, ["a", "b"], "3rd")).toBe(1);
+  });
+  it("does not count a student who is not in the class at all", () => {
+    expect(countLeftWithNoClass(roster, ["c", "d"], "3rd")).toBe(0);
+  });
+  it("ignores ids that are not on the roster and accepts a Set", () => {
+    expect(countLeftWithNoClass(roster, new Set(["a", "zzz"]), "3rd")).toBe(1);
+  });
+  it("is 0 for an empty selection", () => {
+    expect(countLeftWithNoClass(roster, [], "3rd")).toBe(0);
+  });
+});
+
+describe("describeDiff with stranded students", () => {
+  it("appends how many will have no class, only when there are some", () => {
+    expect(describeDiff({ add: ["1", "2"], remove: ["3"] }, 1)).toBe(
+      "Add 2, remove 1 · 1 will have no class",
+    );
+    expect(describeDiff({ add: [], remove: ["3"] }, 0)).toBe("Remove 1");
+  });
+});
+
+describe("studentClassesLine", () => {
+  it("says 'Also in' for a student who is (or was) in this class", () => {
+    expect(studentClassesLine(["3rd", "Choir"], "3rd", true)).toBe(
+      "Also in Choir",
+    );
+  });
+  it("says 'In' for a student who is not in this class", () => {
+    expect(studentClassesLine(["Choir", "5th"], "3rd", false)).toBe(
+      "In Choir, 5th",
+    );
+  });
+  it("says 'No other class' for a member of only this class", () => {
+    expect(studentClassesLine(["3rd"], "3rd", true)).toBe("No other class");
+  });
+  it("says 'No class yet' for a student with no class at all", () => {
+    expect(studentClassesLine([], "3rd", false)).toBe("No class yet");
+    expect(studentClassesLine([], "3rd", true)).toBe("No class yet");
+  });
+});
+
+describe("the 'Show students in…' dropdown mapping", () => {
+  it("an empty pick means every class, and any name scopes to that class", () => {
+    expect(scopeForClassPick("")).toBe("all");
+    expect(scopeForClassPick("Choir")).toEqual({ classGroup: "Choir" });
+  });
+  it("shows 'All classes' unless a specific class is the active scope", () => {
+    expect(classPickOf("all")).toBe("");
+    expect(classPickOf("in")).toBe("");
+    expect(classPickOf("out")).toBe("");
+    expect(classPickOf({ classGroup: "Choir" })).toBe("Choir");
+  });
+  it("round-trips through filterStudents", () => {
+    const roster = [
+      student("a", "A", "One", ["3rd"]),
+      student("b", "B", "Two", ["Choir"]),
+    ];
+    const shown = filterStudents(roster, {
+      text: "",
+      scope: scopeForClassPick("Choir"),
+      classId: "3rd",
+      className: "3rd",
+    });
+    expect(shown.map((s) => s.id)).toEqual(["b"]);
   });
 });

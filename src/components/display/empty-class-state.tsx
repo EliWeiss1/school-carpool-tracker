@@ -19,7 +19,7 @@ export function EmptyClassState({ classLabel }: { classLabel: string }) {
           No students in {classLabel} yet
         </h2>
         <p className="max-w-2xl text-lg text-white/70 sm:text-xl">
-          Students are added to a class under Classes in Admin.
+          Ask the office to add students to this class.
         </p>
       </div>
     </div>

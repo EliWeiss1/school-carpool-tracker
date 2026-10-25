@@ -148,13 +148,12 @@ export function CsvImportPanel({
         <p className="mt-1 text-curb-600">
           Columns can be in any order. Required: first name, last name.
           Optional: aliases (comma or semicolon separated), classes (separate
-          several with a semicolon, like K1; Choir, each matching a class
-          under Classes), carpool,
-          parent 1 name, parent 2 name. If the carpool column names a carpool
-          that already exists, this student is added to it; if it doesn&apos;t
-          exist yet, it&apos;s created with that exact name and this student
-          added to it. This always adds to the roster you already have -- it
-          never replaces or removes anyone.
+          several with a semicolon, like K1; Choir, each matching a class under
+          Classes), carpool, parent 1 name, parent 2 name. If the carpool column
+          names a carpool that already exists, this student is added to it; if
+          it doesn&apos;t exist yet, it&apos;s created with that exact name and
+          this student added to it. This always adds to the roster you already
+          have — it never replaces or removes anyone.
         </p>
       </div>
 
@@ -187,7 +186,7 @@ export function CsvImportPanel({
             tone="warning"
             message={
               undone
-                ? `Undone -- ${importedCount} student${importedCount === 1 ? "" : "s"} removed again.`
+                ? `Undone — ${importedCount} student${importedCount === 1 ? "" : "s"} removed again.`
                 : `Imported ${importedCount} student${importedCount === 1 ? "" : "s"}.`
             }
           />
@@ -211,9 +210,7 @@ export function CsvImportPanel({
       {report && (
         <div className="flex flex-col gap-4">
           {report.headerErrors.length > 0 ? (
-            <ErrorBanner
-              message={report.headerErrors.join(" ")}
-            />
+            <ErrorBanner message={report.headerErrors.join(" ")} />
           ) : (
             <>
               {report.unrecognizedHeaders.length > 0 && (

@@ -1,5 +1,5 @@
 import { cn } from "@/lib/cn";
-import type { FilterOption } from "@/lib/display-sections";
+import { type FilterOption, filterOptionLabel } from "@/lib/display-sections";
 
 /**
  * The per-viewer class filter: one compact dropdown rather than a row of
@@ -41,7 +41,7 @@ export function ClassFilter({
             value={option.key}
             className="bg-curb-900 text-white"
           >
-            {option.label} ({option.waiting} waiting)
+            {filterOptionLabel(option)}
           </option>
         ))}
       </select>

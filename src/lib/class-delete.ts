@@ -47,8 +47,7 @@ export function canMove(
 }
 
 export type DeleteChoice =
-  | { action: "move"; moveToClassId: string }
-  | { action: "force" };
+  { action: "move"; moveToClassId: string } | { action: "force" };
 
 /** The extra field the repeat `deleteClass` call carries. */
 export function deleteResolution(
@@ -63,15 +62,45 @@ function students(count: number): string {
   return `${count} student${count === 1 ? "" : "s"}`;
 }
 
-/** M is the class's WHOLE membership: move relocates everyone, not just sole members. */
-export function moveButtonLabel(memberCount: number, targetName: string): string {
-  return `Move ${students(memberCount)} to ${targetName} and delete`;
+/** What the move button says while no destination has been chosen. */
+export const NO_TARGET_MOVE_LABEL = "Choose a class to move them to";
+
+/**
+ * M is the class's WHOLE membership: move relocates everyone, not just sole
+ * members. "all" is dropped for one student, where it reads oddly.
+ */
+export function moveButtonLabel(
+  memberCount: number,
+  targetName: string,
+  className: string,
+): string {
+  const who = memberCount === 1 ? "1 student" : `all ${memberCount}`;
+  return `Move ${who} to ${targetName}, then remove ${className}`;
+}
+
+/** The line under the destination picker: who moves, and what they keep. */
+export function moveHelpLine(memberCount: number, className: string): string {
+  const who =
+    memberCount === 1
+      ? `The 1 student in ${className} will move.`
+      : `All ${memberCount} students in ${className} will move.`;
+  return `${who} Anyone also in another class keeps it.`;
+}
+
+/** The second option: remove the class and leave its sole members classless. */
+export function removeWithoutMovingLine(
+  className: string,
+  soleMemberCount: number,
+): string {
+  const who =
+    soleMemberCount === 1
+      ? "that student"
+      : `those ${soleMemberCount} students`;
+  return `Or remove ${className} and leave ${who} with no class for now. They stay on the roster.`;
 }
 
 export function deleteDecisionHeading(soleMemberCount: number): string {
-  return soleMemberCount === 1
-    ? "1 student is only in this class"
-    : `${soleMemberCount} students are only in this class`;
+  return `${students(soleMemberCount)} would be left with no class`;
 }
 
 export function previewNames(

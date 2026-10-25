@@ -7,13 +7,19 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { LoadingState } from "@/components/ui/loading-state";
 import { ApiError } from "@/lib/api";
-import { adminApi, type RosterStudent, type StudentFields } from "@/lib/admin-api";
+import {
+  adminApi,
+  type RosterStudent,
+  type StudentFields,
+} from "@/lib/admin-api";
 import {
   type BulkClassMode,
   bulkMembershipInput,
   bulkResultMessage,
 } from "@/lib/bulk-class";
 import type { ClassGroup } from "@/lib/class-groups";
+import { countLeftWithNoClass } from "@/lib/class-members";
+import { jumpToPanel } from "@/lib/jump-to-panel";
 import type { UsePinSession } from "@/lib/use-pin-session";
 import type { Carpool } from "@/types/db";
 
@@ -34,10 +40,7 @@ function requireCredentials(session: UsePinSession) {
 }
 
 /** What editor is open, if any: a fresh form, or an edit of one row. */
-type Editor =
-  | { mode: "add" }
-  | { mode: "edit"; student: RosterStudent }
-  | null;
+type Editor = { mode: "add" } | { mode: "edit"; student: RosterStudent } | null;
 
 export interface RosterManagerProps {
   session: UsePinSession;
@@ -183,7 +186,7 @@ export function RosterManager({
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-2xl font-bold text-curb-900">
             Roster
@@ -197,16 +200,25 @@ export function RosterManager({
           </p>
         </div>
         {editor === null && (
-          <Button
-            variant="primary"
-            size="md"
-            onClick={() => {
-              setFormError(null);
-              setEditor({ mode: "add" });
-            }}
-          >
-            Add student
-          </Button>
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => jumpToPanel("classes")}
+            >
+              Classes
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => {
+                setFormError(null);
+                setEditor({ mode: "add" });
+              }}
+            >
+              Add student
+            </Button>
+          </div>
         )}
       </div>
 
@@ -290,17 +302,21 @@ export function RosterManager({
                   classGroups={classOptions}
                   selectedCount={selectedIds.size}
                   onApply={handleBulkClass}
-                />
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => {
-                    setBulkInfo(null);
-                    setBulkConfirming(true);
-                  }}
+                  strandedIn={(className) =>
+                    countLeftWithNoClass(students, selectedIds, className)
+                  }
                 >
-                  Delete {selectedIds.size} selected
-                </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => {
+                      setBulkInfo(null);
+                      setBulkConfirming(true);
+                    }}
+                  >
+                    Remove {selectedIds.size} from roster
+                  </Button>
+                </BulkClassActions>
               </div>
             ))}
 

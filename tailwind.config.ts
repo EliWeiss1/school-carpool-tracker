@@ -165,6 +165,10 @@ const config: Config = {
         "tap-lg": "4rem", // 64px — every control on /announce
         candidate: "6rem", // 96px — a candidate tap target, gloved and one-handed
       },
+      // The width twin of min-h-tap, for square icon-only controls.
+      minWidth: {
+        tap: "3.5rem", // 56px
+      },
     },
   },
   plugins: [],

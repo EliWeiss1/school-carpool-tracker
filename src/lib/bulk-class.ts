@@ -24,15 +24,24 @@ export function bulkMembershipInput(
     : { classId, removeStudentIds: ids };
 }
 
-/** The question the confirmation asks; Remove states the count, per the spec. */
+/**
+ * The question the confirmation asks; Remove states the count, per the spec.
+ * `stranded` is how many of them would be left with no class (Remove only).
+ */
 export function bulkConfirmText(
   mode: BulkClassMode,
   count: number,
   className: string,
+  stranded = 0,
 ): string {
-  return mode === "add"
-    ? `Add ${students(count)} to ${className}?`
-    : `Remove ${students(count)} from ${className}? They stay on the roster.`;
+  if (mode === "add") return `Add ${students(count)} to ${className}?`;
+  const base = `Remove ${students(count)} from ${className}? They stay on the roster.`;
+  if (stranded <= 0) return base;
+  const warning =
+    count === 1
+      ? "That student will have no class after this."
+      : `${stranded} of them will have no class after this.`;
+  return `${base} ${warning}`;
 }
 
 /**

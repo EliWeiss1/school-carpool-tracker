@@ -7,8 +7,11 @@ import {
   deleteDecisionHeading,
   deleteResolution,
   moveButtonLabel,
+  moveHelpLine,
+  NO_TARGET_MOVE_LABEL,
   otherClasses,
   previewNames,
+  removeWithoutMovingLine,
 } from "./class-delete";
 
 const decision = {
@@ -85,26 +88,61 @@ describe("deleteResolution", () => {
     });
   });
 
-  it("Delete anyway re-sends force", () => {
+  it("Remove without moving re-sends force", () => {
     expect(deleteResolution({ action: "force" })).toEqual({ force: true });
   });
 });
 
 describe("moveButtonLabel", () => {
   it("counts the whole membership, not just the sole members", () => {
-    expect(moveButtonLabel(14, "3rd")).toBe(
-      "Move 14 students to 3rd and delete",
+    expect(moveButtonLabel(14, "3rd", "K1")).toBe(
+      "Move all 14 to 3rd, then remove K1",
     );
   });
-  it("uses the singular for one student", () => {
-    expect(moveButtonLabel(1, "3rd")).toBe("Move 1 student to 3rd and delete");
+  it("does not say 'all' for a single student", () => {
+    expect(moveButtonLabel(1, "3rd", "K1")).toBe(
+      "Move 1 student to 3rd, then remove K1",
+    );
+  });
+  it("tells the admin what to do while no destination is chosen", () => {
+    expect(NO_TARGET_MOVE_LABEL).toBe("Choose a class to move them to");
+  });
+});
+
+describe("moveHelpLine", () => {
+  it("says everyone moves and extra classes are kept", () => {
+    expect(moveHelpLine(14, "K1")).toBe(
+      "All 14 students in K1 will move. Anyone also in another class keeps it.",
+    );
+  });
+  it("handles a single student", () => {
+    expect(moveHelpLine(1, "K1")).toBe(
+      "The 1 student in K1 will move. Anyone also in another class keeps it.",
+    );
+  });
+});
+
+describe("removeWithoutMovingLine", () => {
+  it("names the class and the stranded students", () => {
+    expect(removeWithoutMovingLine("K1", 7)).toBe(
+      "Or remove K1 and leave those 7 students with no class for now. They stay on the roster.",
+    );
+  });
+  it("handles a single student", () => {
+    expect(removeWithoutMovingLine("K1", 1)).toBe(
+      "Or remove K1 and leave that student with no class for now. They stay on the roster.",
+    );
   });
 });
 
 describe("deleteDecisionHeading", () => {
   it("pluralises", () => {
-    expect(deleteDecisionHeading(7)).toBe("7 students are only in this class");
-    expect(deleteDecisionHeading(1)).toBe("1 student is only in this class");
+    expect(deleteDecisionHeading(7)).toBe(
+      "7 students would be left with no class",
+    );
+    expect(deleteDecisionHeading(1)).toBe(
+      "1 student would be left with no class",
+    );
   });
 });
 

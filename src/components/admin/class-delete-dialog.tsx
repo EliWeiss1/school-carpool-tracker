@@ -9,34 +9,37 @@ import type { ClassGroup } from "@/lib/class-groups";
 import {
   type DeleteChoice,
   canMove,
+  NO_TARGET_MOVE_LABEL,
   deleteDecisionHeading,
   moveButtonLabel,
+  moveHelpLine,
   previewNames,
+  removeWithoutMovingLine,
 } from "@/lib/class-delete";
 
 import { ModalSurface } from "./modal-surface";
 
 export interface ClassDeleteDialogProps {
-  /** The class being deleted. */
+  /** The class being removed. */
   classGroup: ClassGroup;
   decision: ClassDeleteNeedsDecision;
-  /** Destinations: every class but the one being deleted. */
+  /** Destinations: every class but the one being removed. */
   targets: readonly ClassGroup[];
   busy: boolean;
   error: string | null;
-  /** Re-sends the delete with `moveToClassId` or `force`. */
+  /** Re-sends the remove with `moveToClassId` or `force`. */
   onResolve: (choice: DeleteChoice) => void;
   onCancel: () => void;
 }
-
 
 const SELECT_CLASS =
   "focus-ring min-h-tap w-full rounded-xl border border-curb-300 bg-curb-50 px-3.5 text-curb-900 transition-colors duration-150 hover:border-curb-400";
 
 /**
- * Shown when deleting a class would leave some students with no class at all.
- * The admin decides: move everyone in the class to another one, delete anyway
- * (those students end up with no class, and the dialog says so), or cancel.
+ * Shown when removing a class would leave some students with no class at all.
+ * The admin decides: move everyone in the class to another one, remove it
+ * without moving anyone (those students end up with no class, and the dialog
+ * says so), or cancel.
  * Which call is re-sent, and when "Move" is enabled, are pure rules in
  * `lib/class-delete.ts`.
  */
@@ -112,9 +115,7 @@ export function ClassDeleteDialog({
             ))}
           </select>
           <p className="text-sm text-curb-600">
-            Moving sends all {decision.memberCount} student
-            {decision.memberCount === 1 ? "" : "s"} in {classGroup.name} to the
-            class you choose. Anyone also in another class keeps it.
+            {moveHelpLine(decision.memberCount, classGroup.name)}
           </p>
           <Button
             variant="primary"
@@ -125,26 +126,26 @@ export function ClassDeleteDialog({
             disabled={busy || !canMove(targetId, targets)}
           >
             {target
-              ? moveButtonLabel(decision.memberCount, target.name)
-              : "Move and delete"}
+              ? moveButtonLabel(
+                  decision.memberCount,
+                  target.name,
+                  classGroup.name,
+                )
+              : NO_TARGET_MOVE_LABEL}
           </Button>
         </div>
 
         <div className="mt-6 flex flex-col gap-2 border-t border-curb-200 pt-6">
           <p className="text-sm text-curb-600">
-            Or delete {classGroup.name} without moving anyone.{" "}
-            {decision.soleMemberCount === 1
-              ? "That student"
-              : `Those ${decision.soleMemberCount} students`}{" "}
-            will have no class until you add one. They stay on the roster.
+            {removeWithoutMovingLine(classGroup.name, decision.soleMemberCount)}
           </p>
           <Button
-            variant="danger"
+            variant="secondary"
             size="md"
             onClick={() => onResolve({ action: "force" })}
             disabled={busy}
           >
-            {busy ? "Working…" : "Delete anyway"}
+            {busy ? "Working…" : "Remove without moving"}
           </Button>
         </div>
       </div>

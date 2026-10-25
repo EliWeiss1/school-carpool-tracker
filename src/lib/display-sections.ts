@@ -50,6 +50,18 @@ export interface FilterOption {
   key: string;
   label: string;
   waiting: number;
+  /** Everyone in the class, waiting or arrived; 0 for an empty class. */
+  total: number;
+}
+
+/**
+ * The dropdown text for a class. A class nobody is in says so, rather than
+ * "(0 waiting)", which reads as "everyone has been picked up".
+ */
+export function filterOptionLabel(option: FilterOption): string {
+  return option.total === 0
+    ? `${option.label} (no students)`
+    : `${option.label} (${option.waiting} waiting)`;
 }
 
 export interface GroupedSections {
@@ -118,6 +130,7 @@ function buildOptions(
     key: section.key,
     label: section.label,
     waiting: section.waiting,
+    total: section.students.length,
   });
   if (knownClasses === null) return allSections.map(toOption);
 
@@ -125,7 +138,9 @@ function buildOptions(
   const listed = new Set(knownClasses);
   const options: FilterOption[] = [...new Set(knownClasses)].map((name) => {
     const section = sectionByKey.get(name);
-    return section ? toOption(section) : { key: name, label: name, waiting: 0 };
+    return section
+      ? toOption(section)
+      : { key: name, label: name, waiting: 0, total: 0 };
   });
   const unlisted = allSections.filter(
     (s) => s.classGroup !== null && !listed.has(s.classGroup),

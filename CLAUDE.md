@@ -643,6 +643,8 @@ Touch targets are not a spacing decision, they are a requirement:
 `min-h-tap` (56px) is the floor anywhere; `min-h-tap-lg` (64px) is the floor for
 **everything** on `/announce`; `min-h-candidate` (96px) is a candidate confirm
 button. `/announce` is used one-handed, outdoors, sometimes gloved.
+`min-w-tap` (56px) is the width twin, for square icon-only controls such as the
+Classes panel's reorder arrows.
 
 ### Elevation
 

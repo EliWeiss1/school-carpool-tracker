@@ -31,7 +31,7 @@ export interface RosterTableProps {
  * its own inline confirmation rather than firing on the first click.
  *
  * The leftmost checkbox column feeds `selectedIds`, owned by the parent
- * (`RosterManager`), which drives the bulk "Delete N selected" flow -- this
+ * (`RosterManager`), which drives the bulk "Remove N from roster" flow -- this
  * component only knows how to toggle one row or a shift-click range, and a
  * header checkbox for "select all currently visible". Range select is a
  * shift-click between the last row clicked and the one just clicked, the
@@ -54,7 +54,8 @@ export function RosterTable({
   );
 
   const allSelected =
-    students.length > 0 && students.every((student) => selectedIds.has(student.id));
+    students.length > 0 &&
+    students.every((student) => selectedIds.has(student.id));
 
   function toggleAll() {
     onSelectionChange(
@@ -157,11 +158,11 @@ export function RosterTable({
                 </td>
                 <td className="px-4 py-3">
                   {student.class_groups.length > 0 ? (
-                    <ul className="flex flex-wrap gap-1">
+                    <ul className="flex flex-col items-start gap-1">
                       {student.class_groups.map((name) => (
                         <li
                           key={name}
-                          className="rounded-full border border-curb-200 bg-curb-50 px-2.5 py-0.5 font-mono text-xs text-curb-700"
+                          className="whitespace-nowrap rounded-full border border-curb-200 bg-curb-50 px-2.5 py-0.5 font-mono text-xs text-curb-700"
                         >
                           {name}
                         </li>
@@ -173,9 +174,9 @@ export function RosterTable({
                 </td>
                 <td className="px-4 py-3 text-curb-700">
                   {student.carpool_id ? (
-                    carpoolNameById.get(student.carpool_id) ?? (
+                    (carpoolNameById.get(student.carpool_id) ?? (
                       <span className="text-curb-400">—</span>
-                    )
+                    ))
                   ) : (
                     <span className="text-curb-400">—</span>
                   )}
@@ -183,7 +184,9 @@ export function RosterTable({
                 <td className="px-4 py-3">
                   <StatusPill status={student.status} />
                 </td>
-                <td className={cn("px-4 py-3", isConfirming && "min-w-[220px]")}>
+                <td
+                  className={cn("px-4 py-3", isConfirming && "min-w-[220px]")}
+                >
                   {isConfirming ? (
                     <div className="flex items-center justify-end gap-2">
                       <span className="text-xs text-curb-600">Remove?</span>

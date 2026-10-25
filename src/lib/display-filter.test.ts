@@ -8,9 +8,9 @@ import {
 import type { FilterOption } from "./display-sections";
 
 const options: FilterOption[] = [
-  { key: "K1", label: "K1", waiting: 2 },
-  { key: "6th grade", label: "6th grade", waiting: 0 },
-  { key: "__none__", label: "Ungrouped", waiting: 1 },
+  { key: "K1", label: "K1", waiting: 2, total: 2 },
+  { key: "6th grade", label: "6th grade", waiting: 0, total: 0 },
+  { key: "__none__", label: "Ungrouped", waiting: 1, total: 1 },
 ];
 
 describe("resolveSectionKey", () => {

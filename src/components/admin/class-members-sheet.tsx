@@ -10,12 +10,16 @@ import { cn } from "@/lib/cn";
 import type { ClassGroup } from "@/lib/class-groups";
 import {
   type MemberScope,
+  countLeftWithNoClass,
   describeDiff,
   diffMembership,
   filterStudents,
   hasChanges,
   memberIdsOf,
   type MembershipDiff,
+  classPickOf,
+  scopeForClassPick,
+  studentClassesLine,
 } from "@/lib/class-members";
 
 import { ModalSurface } from "./modal-surface";
@@ -23,12 +27,15 @@ import { ModalSurface } from "./modal-surface";
 const INPUT_CLASS =
   "focus-ring min-h-tap w-full rounded-xl border border-curb-300 bg-curb-50 px-3.5 text-curb-900 transition-colors duration-150 placeholder:text-curb-400 hover:border-curb-400";
 
+const SELECT_CLASS =
+  "focus-ring min-h-tap rounded-xl border border-curb-300 bg-curb-50 px-3.5 text-curb-900 transition-colors duration-150 hover:border-curb-400";
+
 const CHIP_BASE =
   "focus-ring flex min-h-tap shrink-0 items-center rounded-xl border px-3.5 font-mono text-sm transition-[transform,background-color,border-color] duration-150 ease-spring hover:border-curb-400 hover:bg-curb-50 active:scale-[0.98]";
 
 export interface ClassMembersSheetProps {
   classGroup: ClassGroup;
-  /** Every class, for the "in another class" scope chips. */
+  /** Every class, for the "Show students in…" dropdown. */
   classGroups: readonly ClassGroup[];
   students: readonly RosterStudent[];
   /** Applies the diff and refreshes; rejects with an ApiError to show its sentence. */
@@ -42,15 +49,18 @@ interface ScopeChip {
   scope: MemberScope;
 }
 
-function sameScope(a: MemberScope, b: MemberScope): boolean {
-  if (typeof a === "string" || typeof b === "string") return a === b;
-  return a.classGroup === b.classGroup;
-}
+/** The three scopes about THIS class; any other class is the dropdown's job. */
+const SCOPE_CHIPS: readonly ScopeChip[] = [
+  { key: "all", label: "All", scope: "all" },
+  { key: "in", label: "In this class", scope: "in" },
+  { key: "out", label: "Not in this class", scope: "out" },
+];
 
 /**
  * The membership editor for one class: every student with a checkbox, ticked
- * when they are in it. Search and scope chips narrow the list (so "everyone in
- * 3rd" is one tap, which is how a new group is usually built), "Select all
+ * when they are in it. Search, three scope chips and a "Show students in…"
+ * class dropdown narrow the list (so "everyone in 3rd" is one pick, which is
+ * how a new group is usually built), "Select all
  * shown" ticks what is visible, and a sticky footer says what Save will do.
  * Unticking removes, so the same sheet adds and removes. Cancel discards.
  *
@@ -66,6 +76,7 @@ export function ClassMembersSheet({
 }: ClassMembersSheetProps) {
   const titleId = useId();
   const searchId = useId();
+  const classFilterId = useId();
   // Snapshot once, at open. `chosen` starts from the same set, so a roster
   // refresh while the sheet is open can never make the two drift apart and
   // read as "remove everyone". The list below may still show fresher rows.
@@ -93,20 +104,15 @@ export function ClassMembersSheet({
     [original, chosen],
   );
   const changed = hasChanges(diff);
-  const allShownChosen = shown.length > 0 && shown.every((s) => chosen.has(s.id));
+  const allShownChosen =
+    shown.length > 0 && shown.every((s) => chosen.has(s.id));
 
-  const chips: ScopeChip[] = [
-    { key: "all", label: "All", scope: "all" },
-    { key: "in", label: "In this class", scope: "in" },
-    { key: "out", label: "Not in this class", scope: "out" },
-    ...classGroups
-      .filter((g) => g.id !== classGroup.id)
-      .map((g) => ({
-        key: g.id,
-        label: g.name,
-        scope: { classGroup: g.name } as MemberScope,
-      })),
-  ];
+  const otherClassGroups = classGroups.filter((g) => g.id !== classGroup.id);
+  // The dropdown shows its "All classes" default whenever a chip (or nothing
+  // specific) is the active scope, and a class name when one is picked.
+  const pickedClassName = classPickOf(scope);
+  // Only the removals can strand someone; additions go into this class.
+  const stranded = countLeftWithNoClass(students, diff.remove, classGroup.name);
 
   function toggle(id: string, on: boolean) {
     setChosen((current) => {
@@ -165,8 +171,8 @@ export function ClassMembersSheet({
           Students in {classGroup.name}
         </h2>
         <p className="text-sm text-curb-600">
-          {original.size} in this class now. Tick to add, untick to remove,
-          then save.
+          {original.size} in this class now. Tick to add, untick to remove, then
+          save.
         </p>
       </header>
 
@@ -186,30 +192,60 @@ export function ClassMembersSheet({
           />
         </div>
 
-        <div
-          role="group"
-          aria-label="Show"
-          className="-mx-6 flex gap-2 overflow-x-auto px-6 pb-1 sm:flex-wrap"
-        >
-          {chips.map((chip) => {
-            const active = sameScope(scope, chip.scope);
-            return (
-              <button
-                key={chip.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setScope(chip.scope)}
-                className={cn(
-                  CHIP_BASE,
-                  active
-                    ? "border-marigold-500 bg-white font-semibold text-curb-900 shadow-card hover:border-marigold-600 hover:bg-marigold-50"
-                    : "border-curb-300 bg-curb-50 text-curb-700",
-                )}
-              >
-                {chip.label}
-              </button>
-            );
-          })}
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <div
+            role="group"
+            aria-label="Show"
+            className="-mx-6 flex gap-2 overflow-x-auto px-6 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0"
+          >
+            {SCOPE_CHIPS.map((chip) => {
+              const active = scope === chip.scope;
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setScope(chip.scope)}
+                  className={cn(
+                    CHIP_BASE,
+                    active
+                      ? "border-marigold-500 bg-white font-semibold text-curb-900 shadow-card hover:border-marigold-600 hover:bg-marigold-50"
+                      : "border-curb-300 bg-curb-50 text-curb-700",
+                  )}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor={classFilterId}
+              className="shrink-0 font-display text-sm font-semibold text-curb-800"
+            >
+              Show students in…
+            </label>
+            <select
+              id={classFilterId}
+              className={cn(
+                SELECT_CLASS,
+                pickedClassName !== "" &&
+                  "border-marigold-500 bg-white font-semibold shadow-card",
+              )}
+              value={pickedClassName}
+              onChange={(event) =>
+                setScope(scopeForClassPick(event.target.value))
+              }
+            >
+              <option value="">All classes</option>
+              {otherClassGroups.map((g) => (
+                <option key={g.id} value={g.name}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center justify-between gap-3">
@@ -237,9 +273,6 @@ export function ClassMembersSheet({
             {shown.map((student) => {
               const checked = chosen.has(student.id);
               const wasMember = original.has(student.id);
-              const others = student.class_groups.filter(
-                (name) => name !== classGroup.name,
-              );
               const pending =
                 checked && !wasMember
                   ? "Will be added"
@@ -280,9 +313,11 @@ export function ClassMembersSheet({
                         {student.first_name} {student.last_name}
                       </span>
                       <span className="truncate font-mono text-xs text-curb-500">
-                        {others.length > 0
-                          ? `Also in ${others.join(", ")}`
-                          : "No other class"}
+                        {studentClassesLine(
+                          student.class_groups,
+                          classGroup.name,
+                          checked || wasMember,
+                        )}
                       </span>
                     </span>
                     {pending !== null && (
@@ -306,7 +341,7 @@ export function ClassMembersSheet({
             aria-live="polite"
             data-testid="members-diff"
           >
-            {describeDiff(diff)}
+            {describeDiff(diff, stranded)}
           </p>
           <div className="flex gap-2">
             <Button
