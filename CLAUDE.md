@@ -37,8 +37,8 @@ and status changes were then cleaned up — the live roster is back to its
 original 36 students, 0 carpools. The user separately confirmed the deployed
 site itself works. See `HANDOFF.md` section 10 for the full account.
 
-**Multi-class students are live (rolled out 2026-10-25), except for one
-deliberately pending step.** A student can belong to any number of classes (a
+**Multi-class students are fully live (rolled out 2026-10-25; the legacy column
+was dropped later the same day).** A student can belong to any number of classes (a
 `student_classes` join table; see "Classes" below), and `/admin`, `/announce`,
 `/display` and every Edge Function read and write through it. The branch
 `feature/multi-class-students` was tested (972 tests, all green, with
@@ -49,15 +49,18 @@ rolled out in this order: the expand migration
 class exactly), all ten Edge Functions were redeployed, the live API and the
 real `/admin`, `/announce` and `/display` screens were exercised end to end
 against the live project with throwaway data (fully removed afterwards), and
-the branch was merged to `master` so Vercel deployed the frontend. **Still
-pending:** the contract migration
-`20261021130000_drop_student_class_group_column.sql`, which drops the now-unused
-legacy `students.class_group` column. Nothing reads it any more, it is
-irreversible, and it should be applied deliberately after a few days of use
-(`HANDOFF.md` section 13 has the pre-contract mismatch check and the exact
-steps — note `supabase db push` applies every pending migration, so that file
-is the next one it would apply). The paragraph below still describes the
-single-column history.
+the branch was merged to `master` so Vercel deployed the frontend. **The
+contract migration is applied too:**
+`20261021130000_drop_student_class_group_column.sql` dropped the legacy
+`students.class_group` column (and its index and the one-time backfill helper)
+after the owner OK'd removing it if it was safe. It was: the pre-checks found
+zero students whose legacy class text lacked a matching link, nothing in the
+database depended on the column, no application code read or wrote it, and a
+backup of all 198 legacy values was saved outside the repo. After the drop the
+live API suite (50 checks) and the production screens were re-verified and the
+data matched the pre-rollout snapshot exactly. `students` now has no class
+column at all — classes exist only as `student_classes` links. The paragraph
+below still describes the single-column history.
 
 **Grade was removed as a separate concept (live).** Classification became
 a single field, `class_group`, with a fixed set of values (`K1`, `K2`,
@@ -496,7 +499,7 @@ query font sizing above).
 
 ## Classes (a student can be in several)
 
-*Live since 2026-10-25; the contract migration that drops `students.class_group` is still pending — see Status above.*
+*Live since 2026-10-25; `students.class_group` has been dropped — see Status above.*
 
 **Data model.** `public.class_groups` (`id`, `name`, `sort_order`) is the
 admin-editable class list, created by `20260916010000_class_groups.sql`.

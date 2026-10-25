@@ -4,11 +4,10 @@ Written to be read cold, over coffee, assuming you remember nothing.
 
 **Newest work, live since 2026-10-25: [section 13](#13-students-in-multiple-classes-built-on-a-branch-not-deployed)**
 — a student can be in several classes. The expand migration, all ten Edge
-Functions and the frontend are live; only the contract migration that drops the
-legacy `students.class_group` column is still pending (section 13 has the exact
-steps). Wherever sections 10–12 below say `students.class_group` is a single
-text column, that describes the system before this change: the column still
-exists but nothing reads or writes it any more.
+Functions and the frontend are live, and the contract migration has dropped the
+legacy `students.class_group` column (section 13 has the account). Wherever
+sections 10–12 below say `students.class_group` is a single text column, that
+describes the system before this change: the column no longer exists.
 
 **Picking this up in a fresh chat? Skip straight to [section 10](#10-carpools-class-filtered-display-and-multi-select-announce)
 — it's the most recent work and supersedes the single-student assumptions
@@ -1022,7 +1021,7 @@ select, and "Delete N selected").
 (That `class_group`-text-on-the-student model is replaced by the
 `student_classes` join table in section 13, once it is rolled out.)
 
-## 13. Students in multiple classes (LIVE; only the contract migration is pending)
+## 13. Students in multiple classes (LIVE, including the column drop)
 
 **Status (2026-10-25).** Rolled out. The branch `feature/multi-class-students`
 was merged to `master`; the expand migration `20261021120000` is applied to the
@@ -1034,10 +1033,25 @@ through the membership sheet, two-class chips, the delete-class decision
 dialog with move, bulk add/remove from the roster) all passed using throwaway
 `ZZ` data, after which the data was compared field by field with a snapshot
 taken before the rollout and was identical (198 students, 57 carpools, 16
-classes, 1,875 audit events, nothing left over). **Not done:** the contract
-migration `20261021130000_drop_student_class_group_column.sql`. It is
-irreversible and nothing needs it, so it was left for a deliberate follow-up.
-Gate on the branch before merge: `npm run lint`, `npm run typecheck`,
+classes, 1,875 audit events, nothing left over). **Contract migration, applied
+later the same day (2026-10-25):** `20261021130000_drop_student_class_group_column.sql`
+after the owner said to remove the column if it was safe. Safety checks first
+(all read-only, against the live database): zero students with legacy class
+text lacking a matching link; zero links without legacy text; every student has
+links; the only database objects that referenced the column were
+`students_class_group_idx` and `backfill_student_classes()`, both dropped by the
+migration; a grep of `src/`, `supabase/functions`, `supabase/seed` and `scripts`
+found no code reading or writing the column (the CSV header alias `class_group`
+and the "singular `class_group` is rejected" guard are unrelated to the DB
+column). A backup of all 198 legacy values was saved outside the repo. `db push
+--linked --dry-run` listed exactly that one migration, then it was applied.
+Afterwards: `students` columns are `id, first_name, last_name, aliases, status,
+arrived_at, updated_at, carpool_id`; 198 students, 198 links, 16 classes, 57
+carpools, 1,875 events, 131 arrived, 69 parents (all unchanged); the 50-check
+live API suite passed again; production `/admin`, `/announce` and `/display`
+showed the same 16 classes and 198 students. A stale browser tab running the
+old frontend that explicitly selected `class_group` would get a 400 until it is
+reloaded. Gate on the branch before merge: `npm run lint`, `npm run typecheck`,
 `npm test` (972 tests, after merging `master`'s /announce redesign) and
 `npm run build` all green. The design is in
 `docs/superpowers/specs/2026-10-21-multi-class-students-design.md` and the task
@@ -1187,13 +1201,13 @@ migrations folder when the expand one is pushed.
 
 ### Rollback
 
-Until step 6 the `students.class_group` column still exists and the old code
-still reads it, so steps 1 to 5 are reversible: redeploy the previous
-functions and revert the frontend commit. The new table and functions can stay
-(they are inert to the old code). After step 6 the column is gone: rolling back
-the code would mean restoring the column and re-deriving its text from the
-links, so treat step 6 as the point of no return and only take it once the
-mismatch check is clean and the deployed screens have been looked at.
+Step 6 has been taken (see Status above), so the column is gone: rolling back
+the code would now mean restoring the column (`alter table public.students add
+column class_group text`) and re-deriving its text from the links (each
+student's single class name from `student_classes` joined to `class_groups`).
+Before the drop, steps 1 to 5 were reversible by redeploying the previous
+functions and reverting the frontend commit; that is no longer possible without
+restoring the column first.
 
 **Why the contract migration does not re-run the backfill.** After the
 cut-over, admins manage classes through the new tools (delete or move a class,
