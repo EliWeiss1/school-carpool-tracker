@@ -197,6 +197,7 @@ describe("errors staff have to read", () => {
     { status: 503, kind: "unavailable" },
     { status: 400, kind: "request" },
     { status: 404, kind: "request" },
+    { status: 409, kind: "conflict" },
   ] as const;
 
   for (const { status, kind } of cases) {
