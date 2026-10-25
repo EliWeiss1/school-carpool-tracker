@@ -1026,7 +1026,7 @@ select, and "Delete N selected").
 **Status.** Built and committed on the branch `feature/multi-class-students`
 (worktree `School_Carpool_Tracker-multiclass`). Not merged to `master`, nothing
 applied to the live Supabase project, no Edge Function redeployed. Gate on the
-branch: `npm run lint`, `npm run typecheck`, `npm test` (883 tests) and
+branch: `npm run lint`, `npm run typecheck`, `npm test` (920 tests, after merging `master`'s /announce redesign) and
 `npm run build` all green. The design is in
 `docs/superpowers/specs/2026-10-21-multi-class-students-design.md` and the task
 plan in `docs/superpowers/plans/2026-10-21-multi-class-students.md`.

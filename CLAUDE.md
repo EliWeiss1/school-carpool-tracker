@@ -41,7 +41,7 @@ site itself works. See `HANDOFF.md` section 10 for the full account.
 and are NOT deployed — rollout is pending.** A student can now belong to any
 number of classes (a `student_classes` join table; see "Classes" below), and
 `/admin`, `/announce`, `/display` and every Edge Function read and write
-through it. The branch is tested (883 tests, all green), typechecked, linted
+through it. The branch is tested (920 tests, all green, with `master`'s /announce redesign merged in), typechecked, linted
 and built, but **nothing is live**: the expand migration
 `20261021120000_student_classes.sql` is not applied to the linked Supabase
 project, the Edge Functions are not redeployed, the contract migration
