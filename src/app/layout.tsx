@@ -17,6 +17,7 @@ const display = Archivo({
   weight: ["600", "700", "800"],
   variable: "--font-display",
   display: "swap",
+  fallback: ["system-ui", "sans-serif"],
 });
 
 const body = IBM_Plex_Sans({
@@ -24,6 +25,7 @@ const body = IBM_Plex_Sans({
   weight: ["400", "500", "600"],
   variable: "--font-body",
   display: "swap",
+  fallback: ["system-ui", "sans-serif"],
 });
 
 const mono = IBM_Plex_Mono({
@@ -31,6 +33,7 @@ const mono = IBM_Plex_Mono({
   weight: ["400", "500"],
   variable: "--font-mono",
   display: "swap",
+  fallback: ["ui-monospace", "monospace"],
 });
 
 export const metadata: Metadata = {
