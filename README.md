@@ -34,7 +34,7 @@ anyway, or cancel.
 
 CSV import columns: `first_name`, `last_name`, optional `aliases`, and the
 classes in a `class_groups` column (`classes` also works). Put several classes
-in one cell separated by a semicolon, for example `1st;Art`. A class that does
+in one cell separated by a semicolon, for example `1st;2nd`. A class that does
 not exist yet is an error on that row, not a new class: add it under Classes
 first, then import.
 
