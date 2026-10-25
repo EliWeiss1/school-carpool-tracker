@@ -7,20 +7,13 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import type { RosterStudent, StudentFields } from "@/lib/admin-api";
 import { cn } from "@/lib/cn";
 import { toggleClass } from "@/lib/class-selection";
+import { NO_CARPOOL, buildStudentFields } from "@/lib/student-form-fields";
 import type { Carpool } from "@/types/db";
 
 const INPUT_CLASS =
   "focus-ring min-h-tap w-full rounded-xl border border-curb-300 bg-curb-50 px-3.5 text-curb-900 transition-colors duration-150 placeholder:text-curb-400 hover:border-curb-400";
 
 const LABEL_CLASS = "text-sm font-semibold text-curb-700";
-
-/** Splits on comma or semicolon, same rule csv-import.ts uses for the aliases column. */
-function parseAliasesInput(value: string): string[] {
-  return value
-    .split(/[,;]/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry !== "");
-}
 
 export interface StudentFormProps {
   /** Omitted for "add a student"; a row for "edit this one". */
@@ -34,8 +27,6 @@ export interface StudentFormProps {
   submitting: boolean;
   error: string | null;
 }
-
-const NO_CARPOOL = "";
 
 /**
  * The one form that both adds and edits a student. It never renders a status
@@ -66,15 +57,22 @@ export function StudentForm({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await onSubmit({
-      first_name: firstName.trim(),
-      last_name: lastName.trim(),
-      aliases: parseAliasesInput(aliasesText),
-      class_groups: selectedClasses,
-      carpool_id: carpoolId === NO_CARPOOL ? null : carpoolId,
-      parent1_name: parent1Name.trim() === "" ? null : parent1Name.trim(),
-      parent2_name: parent2Name.trim() === "" ? null : parent2Name.trim(),
-    });
+    // On an edit, classes are only sent if the admin changed them -- see
+    // buildStudentFields for why re-sending an untouched set loses data.
+    await onSubmit(
+      buildStudentFields(
+        {
+          firstName,
+          lastName,
+          aliasesText,
+          selectedClasses,
+          carpoolId,
+          parent1Name,
+          parent2Name,
+        },
+        student,
+      ),
+    );
   }
 
   return (
