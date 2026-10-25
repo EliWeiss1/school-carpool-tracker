@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveClassNames } from "./roster-input.ts";
+import { nameKey, resolveClassNames } from "./roster-input.ts";
 
 const classes = [
   { id: "c-1", name: "3rd" },
@@ -34,5 +34,15 @@ describe("resolveClassNames", () => {
 
   it("empty input yields ok with no ids", () => {
     expect(resolveClassNames([], classes)).toEqual({ ok: true, ids: [] });
+  });
+});
+
+describe("nameKey", () => {
+  it("keeps first and last name apart, so Ann A and An Na are different children", () => {
+    expect(nameKey("Ann", "A")).not.toBe(nameKey("An", "NA"));
+  });
+
+  it("case-folds and trims, so one child has one key", () => {
+    expect(nameKey(" Maya ", "COHEN")).toBe(nameKey("maya", "Cohen"));
   });
 });
