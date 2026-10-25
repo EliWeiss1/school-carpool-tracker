@@ -353,6 +353,17 @@ describe("carpools", () => {
     it("treats a student picked from another drawer as picked", () => {
       expect(tapAction([multi], { K1: ["m"] }, multi)).toBe("deselect");
     });
+
+    // Regression guard for the master merge: master's tapAction looked only
+    // under the student's (single) class key, so a pick filed under K1 read
+    // "not picked" from the 2nd drawer and a second tap added them again.
+    it('tapAction returns "deselect" for a two-class student picked in class A when tapped in class B\'s drawer', () => {
+      const twoClass = s("t", "Tova", "Stern", ["K1", "2nd"]);
+      const roster = [twoClass, s("o", "Other", "Kid", "2nd")];
+      // Picked from the K1 drawer; the tap below comes from the 2nd drawer.
+      expect(tapAction(roster, { K1: ["t"] }, twoClass)).toBe("deselect");
+      expect(tapAction(roster, { "2nd": ["o"] }, twoClass)).toBe("select");
+    });
   });
 
   describe("promptPicks", () => {
