@@ -185,9 +185,9 @@ project rule about not spending or changing live resources unasked.
 and the full test suite run against the final schema, with the column gone)
 but is **applied live last**, only after the frontend has been deployed and
 verified. Because `supabase db push` applies every pending migration, the
-plan must apply the expand migration first (push before the contract file is
-on the linked branch, or apply by explicit version) and apply the contract
-migration as its own later step.
+plan must apply the expand migration first (push with the contract file
+moved out of `supabase/migrations/`, since `db push` has no per-version flag)
+and apply the contract migration as its own later step.
 
 ## Wire and store shapes
 

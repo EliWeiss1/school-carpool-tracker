@@ -1078,12 +1078,31 @@ plan in `docs/superpowers/plans/2026-10-21-multi-class-students.md`.
 
 Vercel deploys the frontend on every push to `master`, and the new frontend
 reads `student_classes`, so **nothing merges to `master` until the table exists
-live.** `supabase db push` applies every pending migration, so the contract
-migration must not be pending when the expand one is pushed.
+live.** `supabase db push` applies every pending migration and has no flag to
+push just one version, so the contract migration must physically not be in the
+migrations folder when the expand one is pushed.
 
-1. **Expand migration.** Apply only `20261021120000_student_classes.sql` (push
-   with the contract file not yet on the linked branch, or apply by explicit
-   version). It creates the table, indexes, RLS, publication and functions,
+1. **Expand migration.** Push `20261021120000_student_classes.sql` on its own:
+   1. Move `supabase/migrations/20261021130000_drop_student_class_group_column.sql`
+      out of `supabase/migrations/` (anywhere outside it, e.g. the repo root).
+   2. `npx supabase db push --linked`.
+   3. `npx supabase migration list --linked`: `20261021120000` is applied
+      remotely and `20261021130000` does not appear at all.
+   4. Move the contract file back into `supabase/migrations/` (do not commit
+      the move).
+   5. Note the time (`select now();` in the SQL editor); step 5's second
+      query needs it.
+
+   Do **not** apply the expand file by pasting it into the SQL editor or via
+   MCP `execute_sql`: that does not record it in the migration history, so the
+   later `db push` in step 6 would run it again, and it has no
+   `if not exists`, so the push fails. If it was ever applied by hand anyway,
+   run `npx supabase migration repair --status applied 20261021120000 --linked`
+   before step 6. The opposite slip (pushing while the contract file is still
+   in the folder) drops `students.class_group` while the deployed functions
+   still write it, which breaks every roster save until step 2.
+
+   The migration creates the table, indexes, RLS, publication and functions,
    then runs the idempotent backfill: every distinct non-empty
    `students.class_group` is matched to `class_groups` by `lower(btrim(name))`
    (a class that does not exist yet is created, appended after the highest
@@ -1093,6 +1112,16 @@ migration must not be pending when the expand one is pushed.
    of them share the store: `roster-list`, `roster-write`, `roster-delete`,
    `roster-import`, `roster-reset`, `classes-write`, `carpool-write`,
    `resolve-name`, `set-status`, `deepgram-token`).
+
+   **From this deploy until the frontend deploy in step 4, `/admin` cannot
+   save students.** The still-deployed old `/admin` always sends the singular
+   `class_group` (the student form, and every CSV row), which the new
+   functions refuse with "This page is out of date. Reload it and try again."
+   (reloading does not help until step 4 ships the new page). An old class
+   manager delete still works, but when it would strand students it shows the
+   409 sentence without the move/delete dialog. `/announce` and `/display`
+   are unaffected. So run steps 2 to 4 back to back, outside office hours,
+   and tell the admins not to edit the roster in between.
 3. **Verify live** (read-mostly): `roster-list` returns `class_groups` arrays and
    `classMemberCounts`; a wrong PIN still 401s; a multi-class student resolves
    to one candidate; a bulk `members` add and remove on a scratch class round
@@ -1116,10 +1145,30 @@ migration must not be pending when the expand one is pushed.
              = lower(btrim(s.class_group, E' \t\r\n')));
    ```
 
-   Show the result to the user. Some will be intentional (an admin removed that
-   class after the deploy); fix the genuine ones by hand in `/admin`.
-6. **Contract migration.** Apply `20261021130000_drop_student_class_group_column.sql`
-   last: it drops `students_class_group_idx`, `students.class_group` and
+   The first query cannot see a class the old code *cleared*: a student whose
+   legacy text was emptied after step 1 still has their links, so nothing
+   mismatches. The second lists students edited after the expand migration
+   (put step 1's noted time in place of the timestamp) who have links but a
+   blank legacy `class_group`, which is exactly that case:
+
+   ```sql
+   select s.id, s.first_name, s.last_name, s.updated_at,
+          array_agg(g.name order by g.sort_order) as linked_classes
+     from public.students s
+     join public.student_classes sc on sc.student_id = s.id
+     join public.class_groups g on g.id = sc.class_group_id
+    where s.updated_at > timestamptz '2026-01-01 00:00:00+00' -- step 1's time
+      and nullif(btrim(s.class_group, E' \t\r\n'), '') is null
+    group by s.id, s.first_name, s.last_name, s.updated_at;
+   ```
+
+   Show both results to the user. Some will be intentional (an admin removed
+   that class after the deploy); fix the genuine ones by hand in `/admin`.
+6. **Contract migration.** With the file back in `supabase/migrations/`,
+   `npx supabase db push --linked` now applies only
+   `20261021130000_drop_student_class_group_column.sql` (confirm with
+   `npx supabase migration list --linked` first that `20261021120000` is
+   recorded as applied; if not, see the repair note in step 1). It drops `students_class_group_idx`, `students.class_group` and
    `backfill_student_classes()`.
 7. **Reseed (optional, dev data only).** `npm run seed -- --allow-remote` now
    writes links too; only if the user wants the live roster replaced.
