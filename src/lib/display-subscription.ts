@@ -137,3 +137,36 @@ export function connectBoard(
     void client.removeChannel(channel as never);
   };
 }
+
+/** Orders overlapping snapshot fetches; see `createFetchSequencer`. */
+export interface FetchSequencer {
+  /** Call as a fetch starts; hand the token back to `shouldApply`. */
+  begin(): number;
+  /** Call once the fetch resolves: true means apply it, false means drop it. */
+  shouldApply(token: number): boolean;
+}
+
+/**
+ * Guards against two overlapping snapshot fetches resolving out of order (a
+ * reconnect's fetch and a debounced membership refetch, say). The snapshot's
+ * class memberships win unconditionally in `applySnapshot`, so an older
+ * response landing last would leave stale memberships on the board until the
+ * next membership event. A result is applied only if no NEWER fetch has
+ * already been applied -- tracking what was applied, not what was started,
+ * so a slow first load is still used when the fetch after it never lands.
+ */
+export function createFetchSequencer(): FetchSequencer {
+  let started = 0;
+  let latestApplied = 0;
+  return {
+    begin() {
+      started += 1;
+      return started;
+    },
+    shouldApply(token) {
+      if (token <= latestApplied) return false;
+      latestApplied = token;
+      return true;
+    },
+  };
+}

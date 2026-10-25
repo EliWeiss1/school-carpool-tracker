@@ -14,7 +14,11 @@ import {
 import { createChimeCoalescer, createChimePlayer } from "@/lib/display-chime";
 import { groupIntoSections } from "@/lib/display-sections";
 import { mockArrivalOrder, mockRoster } from "@/lib/display-mock-roster";
-import { connectBoard, type BoardClient } from "@/lib/display-subscription";
+import {
+  connectBoard,
+  createFetchSequencer,
+  type BoardClient,
+} from "@/lib/display-subscription";
 import {
   applySnapshot,
   reconcile,
@@ -284,7 +288,12 @@ export function DisplayBoard({
     // One fetch serves the first load, every reconnect and every membership
     // edit. The embed brings each student's classes along; a `students` realtime
     // payload cannot (see realtime-reconcile.ts), so this is where they come from.
+    // Fetches can overlap (a reconnect and a membership refetch); only the
+    // newest result to land is applied, so stale memberships never win.
+    const sequencer = createFetchSequencer();
+
     async function fetchSnapshot() {
+      const mine = sequencer.begin();
       const { data, error } = await client
         .from("students")
         .select(STUDENT_WITH_CLASSES_SELECT)
@@ -294,6 +303,7 @@ export function DisplayBoard({
         setConnection("error");
         return;
       }
+      if (!sequencer.shouldApply(mine)) return;
       setRoster((prev) => applySnapshot(prev, (data ?? []).map(withClassNames)));
       setConnection("live");
     }

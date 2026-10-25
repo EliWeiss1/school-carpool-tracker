@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   connectBoard,
+  createFetchSequencer,
   MEMBERSHIP_REFETCH_DEBOUNCE_MS,
   type BoardClient,
 } from "./display-subscription";
@@ -131,5 +132,37 @@ describe("connectBoard", () => {
     disconnect();
     fake.status("SUBSCRIBED");
     expect(onSnapshotNeeded).not.toHaveBeenCalled();
+  });
+});
+
+describe("createFetchSequencer", () => {
+  it("applies fetches that resolve in the order they started", () => {
+    const seq = createFetchSequencer();
+    const first = seq.begin();
+    const second = seq.begin();
+    expect(seq.shouldApply(first)).toBe(true);
+    expect(seq.shouldApply(second)).toBe(true);
+  });
+
+  it("drops an older fetch that resolves after a newer one was applied", () => {
+    const seq = createFetchSequencer();
+    const older = seq.begin();
+    const newer = seq.begin();
+    expect(seq.shouldApply(newer)).toBe(true);
+    expect(seq.shouldApply(older)).toBe(false);
+  });
+
+  it("applies a single fetch", () => {
+    const seq = createFetchSequencer();
+    expect(seq.shouldApply(seq.begin())).toBe(true);
+  });
+
+  it("applies a slow first load when nothing newer has been applied", () => {
+    // A newer fetch that started but never applied (failed, or still in
+    // flight) must not make the first load's good data get thrown away.
+    const seq = createFetchSequencer();
+    const firstLoad = seq.begin();
+    seq.begin();
+    expect(seq.shouldApply(firstLoad)).toBe(true);
   });
 });
