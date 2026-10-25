@@ -5,7 +5,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/lib/cn";
 import type { SpeechStatus } from "@/lib/speech-mock";
 
-const CAPTION: Record<SpeechStatus, string> = {
+/** What the mic is doing, in words. The dock shows it in place of the search box. */
+export const MIC_CAPTION: Record<SpeechStatus, string> = {
   idle: "Hold to talk",
   connecting: "Connecting…",
   listening: "Listening — let go when done",
@@ -16,8 +17,13 @@ const CAPTION: Record<SpeechStatus, string> = {
  * The one control a staff member actually needs both hands free to avoid:
  * press, hold, say the last name, let go. Modeled on the pedestrian call
  * button at the curb it is standing next to — round, unmissable, one job —
- * which is also why it lives fixed to the bottom of the screen rather than
- * pinned up top with everything else a phone UI defaults to.
+ * which is also why it lives at the bottom of the screen, under the thumb.
+ *
+ * It sits beside the search box in `AnnounceDock` rather than on a stage of
+ * its own: the 112px button and its caption used to take over a quarter of a
+ * phone's height, which left room for one candidate out of three. The
+ * caption moved into the dock, where it replaces the search box while the
+ * mic is open -- the one thing on screen that is irrelevant at that moment.
  *
  * Purely presentational: it reports press/release, `announce-screen.tsx`
  * decides what those mean.
@@ -25,19 +31,12 @@ const CAPTION: Record<SpeechStatus, string> = {
 export function PushToTalkButton({
   status,
   disabledReason,
-  compact = false,
   onPressStart,
   onPressEnd,
 }: {
   status: SpeechStatus;
   /** When set, voice capture is not available at all and the button is inert. */
   disabledReason?: string;
-  /**
-   * A shorter bar -- the button beside its caption instead of above it -- for
-   * when something else (the class drawer) needs the height. The target is
-   * still 64px, the app's floor for anything on this screen.
-   */
-  compact?: boolean;
   onPressStart: () => void;
   onPressEnd: () => void;
 }) {
@@ -84,72 +83,42 @@ export function PushToTalkButton({
   }
 
   return (
-    <div
-      className={cn(
-        "flex items-center",
-        compact ? "flex-row justify-center gap-4" : "flex-col gap-3",
+    // 64px: tap-lg, the floor for every control on /announce.
+    <div className="relative flex h-16 w-16 shrink-0 items-center justify-center">
+      {listening && (
+        <>
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 animate-listen-pulse rounded-full bg-marigold-500"
+          />
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 animate-listen-pulse rounded-full bg-marigold-500 [animation-delay:0.45s]"
+          />
+        </>
       )}
-    >
-      <div
+
+      <button
+        type="button"
+        disabled={disabled}
+        aria-pressed={listening}
+        aria-label={disabledReason ?? MIC_CAPTION[status]}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onContextMenu={(event) => event.preventDefault()}
         className={cn(
-          "relative flex shrink-0 items-center justify-center",
-          compact ? "h-16 w-16" : "h-28 w-28",
+          "focus-ring relative flex h-16 w-16 touch-none select-none items-center justify-center rounded-full transition-[transform,background-color,box-shadow] duration-150 ease-spring",
+          "disabled:pointer-events-none disabled:opacity-40",
+          listening
+            ? "scale-105 bg-marigold-400 text-curb-900 shadow-float"
+            : busy
+              ? "bg-marigold-300 text-curb-800 shadow-card"
+              : "bg-marigold-500 text-curb-900 shadow-float hover:bg-marigold-400 active:scale-95 active:bg-marigold-600 active:shadow-press",
         )}
       >
-        {listening && (
-          <>
-            <span
-              aria-hidden="true"
-              className="absolute inset-0 animate-listen-pulse rounded-full bg-marigold-500"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute inset-0 animate-listen-pulse rounded-full bg-marigold-500 [animation-delay:0.45s]"
-            />
-          </>
-        )}
-
-        <button
-          type="button"
-          disabled={disabled}
-          aria-pressed={listening}
-          aria-label={disabledReason ?? CAPTION[status]}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onContextMenu={(event) => event.preventDefault()}
-          className={cn(
-            compact ? "h-16 w-16" : "h-28 w-28",
-            "focus-ring relative flex touch-none select-none items-center justify-center rounded-full font-display text-base font-bold transition-[transform,background-color,box-shadow] duration-150 ease-spring",
-            "disabled:pointer-events-none disabled:opacity-40",
-            listening
-              ? "scale-105 bg-marigold-400 text-curb-900 shadow-float"
-              : busy
-                ? "bg-marigold-300 text-curb-800 shadow-card"
-                : "bg-marigold-500 text-curb-900 shadow-float active:scale-95 active:bg-marigold-600 active:shadow-press",
-          )}
-        >
-          <MicGlyph className={compact ? "h-6 w-6" : "h-9 w-9"} />
-        </button>
-      </div>
-
-      {/* The eyebrow treatment is for one- and two-word labels. A whole
-          sentence set in wide-tracked caps is markedly harder to read, which
-          is the opposite of what an explanation is for -- so the mic status
-          keeps it and the explanation drops to sentence case. */}
-      <p
-        role="status"
-        aria-live="polite"
-        className={cn(
-          "min-h-[1.5rem]",
-          compact ? "min-w-0 text-left" : "text-center",
-          disabledReason
-            ? "text-sm leading-snug text-curb-600"
-            : "font-mono text-sm uppercase tracking-eyebrow text-curb-600",
-        )}
-      >
-        {disabledReason ?? CAPTION[status]}
-      </p>
+        <MicGlyph className="h-8 w-8" />
+      </button>
     </div>
   );
 }

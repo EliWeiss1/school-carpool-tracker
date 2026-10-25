@@ -57,8 +57,12 @@ export function ClassDrawer({
   busy: boolean;
   loading: boolean;
   error: string | null;
-  /** Banners and the undo window, shown here because the page behind is covered. */
-  feedback: ReactNode;
+  /**
+   * Error banners, shown here because the page behind is covered. Null when
+   * there is none -- the footer then only appears once a name is picked, so
+   * an always-disabled button never takes a row from the list.
+   */
+  feedback: ReactNode | null;
   /** The carpool prompt, or null. Rendered over the drawer's own area. */
   prompt: ReactNode;
   onTap: (student: PadStudent) => void;
@@ -96,7 +100,7 @@ export function ClassDrawer({
       aria-label={`${classGroup} students`}
       className="absolute inset-y-0 right-14 z-20 flex w-[min(20rem,calc(100%-5rem))] animate-drawer-in flex-col rounded-l-2xl border-l border-curb-200 bg-white shadow-float"
     >
-      <header className="flex items-center justify-between gap-3 border-b border-curb-200 py-2 pl-4 pr-2">
+      <header className="flex items-center justify-between gap-3 border-b border-curb-200 py-1 pl-4 pr-1">
         <div className="min-w-0">
           <h2 className="truncate font-display text-2xl font-bold leading-tight text-curb-900">
             {classGroup}
@@ -109,16 +113,32 @@ export function ClassDrawer({
               : `${waiting} waiting, ${arrived} here`}
           </p>
         </div>
-        <Button
-          variant="quiet"
-          size="md"
-          // Important modifiers: `cn` joins classes without merging, so a plain
-          // px-4 would lose to the size's own px-6 on stylesheet order.
-          className="shrink-0 !px-4"
+        {/* An x, not a "Close" label: the word took a third of the header's
+            width from the class name. Still a full 64px target. */}
+        <button
+          type="button"
+          aria-label={`Close ${classGroup}`}
           onClick={onClose}
+          className={cn(
+            "focus-ring flex h-16 w-16 shrink-0 items-center justify-center rounded-xl text-curb-600",
+            "transition-[transform,background-color] duration-150 ease-spring",
+            "hover:bg-curb-100 hover:text-curb-900 active:scale-95 active:bg-curb-200",
+          )}
         >
-          Close
-        </Button>
+          <svg
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            className="h-6 w-6"
+            fill="none"
+          >
+            <path
+              d="M4 4l8 8M12 4l-8 8"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
       </header>
 
       {/* Keyed on the class so switching starts at the top of the new list. */}
@@ -157,36 +177,38 @@ export function ClassDrawer({
         </ul>
       </div>
 
-      <footer className="flex flex-col gap-2 border-t border-curb-200 bg-white p-3">
-        {feedback}
-        <div className="flex gap-2">
-          {totalPicked > 0 && (
+      {(feedback || totalPicked > 0) && (
+        <footer className="flex animate-tile-in flex-col gap-2 border-t border-curb-200 bg-white p-3">
+          {feedback}
+          <div className="flex gap-2">
+            {totalPicked > 0 && (
+              <Button
+                variant="quiet"
+                size="tap"
+                className="shrink-0 !px-4 !text-base"
+                disabled={busy}
+                onClick={onClear}
+              >
+                Clear
+              </Button>
+            )}
             <Button
-              variant="quiet"
+              variant="primary"
               size="tap"
-              className="shrink-0 !px-4 !text-base"
-              disabled={busy}
-              onClick={onClear}
+              fullWidth
+              className="!px-4 !text-base"
+              disabled={totalPicked === 0 || busy}
+              onClick={onAnnounce}
             >
-              Clear
+              {announcing
+                ? "Announcing…"
+                : totalPicked === 0
+                  ? "Pick names to announce"
+                  : `Announce ${totalPicked}`}
             </Button>
-          )}
-          <Button
-            variant="primary"
-            size="tap"
-            fullWidth
-            className="!px-4 !text-base"
-            disabled={totalPicked === 0 || busy}
-            onClick={onAnnounce}
-          >
-            {announcing
-              ? "Announcing…"
-              : totalPicked === 0
-                ? "Pick names to announce"
-                : `Announce ${totalPicked}`}
-          </Button>
-        </div>
-      </footer>
+          </div>
+        </footer>
+      )}
 
       {prompt}
     </section>
@@ -214,7 +236,9 @@ function StudentRow({
       // A green row is the already-announced state, and tapping it reverses
       // that, so it reads as "here" to a screen reader and says what a tap does.
       aria-pressed={here ? true : selected}
-      aria-label={here ? `${fullName}, here. Tap to send back to waiting.` : fullName}
+      aria-label={
+        here ? `${fullName}, here. Tap to send back to waiting.` : fullName
+      }
       onClick={onTap}
       className={cn(
         "focus-ring flex min-h-tap w-full touch-manipulation items-center gap-3 rounded-xl border-2 px-3 text-left",
@@ -254,10 +278,7 @@ function StudentRow({
         </svg>
       </span>
 
-      <span
-        className="min-w-0 flex-1 truncate"
-        title={fullName}
-      >
+      <span className="min-w-0 flex-1 truncate" title={fullName}>
         <span
           className={cn(
             "font-display text-lg font-bold",

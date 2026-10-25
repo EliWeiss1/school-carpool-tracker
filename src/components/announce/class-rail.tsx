@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/cn";
+import { railLabels } from "@/lib/class-roster";
 
 /**
  * A slim strip of class buttons down the right-hand edge, one per class on
@@ -13,6 +14,11 @@ import { cn } from "@/lib/cn";
  *
  * A badge shows how many names are already picked in a class, so a pick made
  * in K1 is not forgotten while the drawer is showing 2nd.
+ *
+ * Each button shows a short label from `railLabels` ("EC" / "HUM"), never the
+ * full name cut off mid-word: with real class names like "EC Hummingbirds"
+ * and "EC Chipmunks", truncation made every button read "EC …". The full
+ * name is the button's accessible name and the open drawer's heading.
  */
 export function ClassRail({
   classes,
@@ -26,6 +32,8 @@ export function ClassRail({
   pickedCount: (classGroup: string) => number;
   onSelect: (classGroup: string) => void;
 }) {
+  const labels = railLabels(classes);
+
   return (
     <nav
       aria-label="Classes"
@@ -34,6 +42,7 @@ export function ClassRail({
       {classes.map((classGroup) => {
         const isOpen = classGroup === openClass;
         const picked = pickedCount(classGroup);
+        const label = labels.get(classGroup) ?? { top: classGroup };
 
         return (
           <button
@@ -54,8 +63,16 @@ export function ClassRail({
                 : "bg-curb-100 text-curb-800 active:bg-curb-200 [@media(hover:hover)]:hover:bg-curb-200",
             )}
           >
-            <span className="line-clamp-2 break-words font-display text-sm font-bold leading-tight">
-              {classGroup}
+            <span
+              aria-hidden="true"
+              className="flex flex-col items-center font-display text-sm font-bold leading-tight"
+            >
+              <span>{label.top}</span>
+              {label.bottom && (
+                <span className="font-mono text-xs font-medium tracking-normal">
+                  {label.bottom}
+                </span>
+              )}
             </span>
             {picked > 0 && (
               <span

@@ -53,6 +53,13 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  // Android Chrome (and the installed PWA) otherwise keeps the layout at
+  // full height when the keyboard opens and scrolls the whole page up to
+  // reveal the input, pushing /announce's header and the top of its
+  // suggestions off screen. With this, `dvh` shrinks to the space above the
+  // keyboard and the flex layout reflows instead. iOS Safari ignores it;
+  // `use-keyboard-box.ts` covers iOS.
+  interactiveWidget: "resizes-content",
   themeColor: "#10151f",
 };
 

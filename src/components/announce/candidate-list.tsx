@@ -71,29 +71,21 @@ export function CandidateList({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3 px-1">
-        <p className="text-sm text-curb-600">
-          {results.live
-            ? "Matching"
-            : results.origin === "voice"
-              ? "Heard"
-              : "Closest to"}{" "}
-          <span className="font-semibold text-curb-900">&ldquo;{results.transcript}&rdquo;</span>
-          {!results.live &&
-            results.tier === "ambiguous" &&
-            " — more than one close match:"}
-        </p>
-        {showMultiSelectToggle && (
-          <button
-            type="button"
-            onClick={onToggleMultiSelect}
-            disabled={busy}
-            className="focus-ring shrink-0 whitespace-nowrap font-mono text-xs uppercase tracking-eyebrow text-curb-500 underline decoration-curb-300 underline-offset-2 hover:text-curb-700"
-          >
-            {multiSelect ? "Announce one at a time" : "Announce several"}
-          </button>
-        )}
-      </div>
+      {/* One line, always: on a phone this sits directly above the matches,
+          and every wrapped line here pushes a candidate below the fold. */}
+      <p className="truncate px-1 text-sm text-curb-600">
+        {results.live
+          ? "Matching"
+          : results.origin === "voice"
+            ? "Heard"
+            : "Closest to"}{" "}
+        <span className="font-semibold text-curb-900">
+          &ldquo;{results.transcript}&rdquo;
+        </span>
+        {!results.live &&
+          results.tier === "ambiguous" &&
+          ` · ${results.candidates.length} close matches`}
+      </p>
 
       <ul className="flex flex-col gap-3">
         {results.candidates.map((candidate, index) => {
@@ -111,10 +103,11 @@ export function CandidateList({
           const meta = candidate.carpool
             ? `${effectiveIds.length} of ${candidate.students.length} student${candidate.students.length === 1 ? "" : "s"}`
             : classesLabel(candidate.students[0].class_groups);
-          const nothingLeft = candidate.carpool !== null && effectiveIds.length === 0;
+          const nothingLeft =
+            candidate.carpool !== null && effectiveIds.length === 0;
 
           return (
-            <li key={key} className="flex flex-col gap-1.5">
+            <li key={key} className="relative flex flex-col gap-2">
               <Button
                 type="button"
                 size="candidate"
@@ -128,6 +121,9 @@ export function CandidateList({
                       ? "primary"
                       : "secondary"
                 }
+                // Room on the right for the members chevron, which sits over
+                // the card as a sibling -- a button inside a button is invalid.
+                className={candidate.carpool ? "!pr-24" : undefined}
                 disabled={busy || (!multiSelect && nothingLeft)}
                 aria-pressed={multiSelect ? isSelected : undefined}
                 onClick={() =>
@@ -186,44 +182,99 @@ export function CandidateList({
               </Button>
 
               {candidate.carpool && (
-                <div className="px-1">
-                  <button
-                    type="button"
-                    onClick={() => toggleExpanded(key)}
-                    disabled={busy}
-                    className="focus-ring font-mono text-[0.6875rem] uppercase tracking-eyebrow text-curb-500 underline decoration-curb-300 underline-offset-2 hover:text-curb-700"
-                  >
-                    {isExpanded
-                      ? "Hide members"
-                      : `Show ${candidate.students.length} members`}
-                  </button>
-
-                  {isExpanded && (
-                    <ul className="mt-2 flex flex-col rounded-xl border border-curb-200 bg-white">
-                      {candidate.students.map((student) => (
-                        <li key={student.id}>
-                          <label className="flex min-h-tap cursor-pointer items-center gap-3 rounded-lg px-3 hover:bg-curb-50">
-                            <input
-                              type="checkbox"
-                              className="h-5 w-5 shrink-0 accent-marigold-500"
-                              checked={!excludedMemberIds[key]?.includes(student.id)}
-                              disabled={busy}
-                              onChange={() => onToggleMember(key, student.id)}
-                            />
-                            <span className="min-w-0 flex-1 truncate text-curb-900">
-                              {student.first_name} {student.last_name}
-                            </span>
-                          </label>
-                        </li>
-                      ))}
-                    </ul>
+                <button
+                  type="button"
+                  onClick={() => toggleExpanded(key)}
+                  disabled={busy}
+                  aria-expanded={isExpanded}
+                  aria-label={
+                    isExpanded
+                      ? `Hide ${label} members`
+                      : `Choose which of ${label}'s ${candidate.students.length} members arrived`
+                  }
+                  className={cn(
+                    "focus-ring absolute right-2 top-4 flex h-16 w-16 items-center justify-center rounded-xl text-curb-600",
+                    "transition-[transform,background-color] duration-150 ease-spring",
+                    "hover:bg-curb-100 hover:text-curb-900 active:scale-95 active:bg-curb-200 disabled:opacity-50",
                   )}
-                </div>
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    aria-hidden="true"
+                    className={cn(
+                      "h-6 w-6 transition-transform duration-200 ease-spring",
+                      isExpanded && "rotate-180",
+                    )}
+                    fill="none"
+                  >
+                    <path
+                      d="M4 6l4 4 4-4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )}
+
+              {candidate.carpool && isExpanded && (
+                <ul className="flex flex-col rounded-xl border border-curb-200 bg-white">
+                  {candidate.students.map((student) => (
+                    <li key={student.id}>
+                      <label className="flex min-h-tap-lg cursor-pointer items-center gap-3 rounded-lg px-3 hover:bg-curb-50 active:bg-curb-100">
+                        <input
+                          type="checkbox"
+                          className="h-6 w-6 shrink-0 accent-marigold-500"
+                          checked={
+                            !excludedMemberIds[key]?.includes(student.id)
+                          }
+                          disabled={busy}
+                          onChange={() => onToggleMember(key, student.id)}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-curb-900">
+                          {student.first_name} {student.last_name}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
               )}
             </li>
           );
         })}
       </ul>
+
+      {/* Below the matches, not beside the "Heard ..." line: there it forced
+          that line to wrap to three, and it was a 20px text link. Here it is
+          a real control, reached after reading the names it applies to. */}
+      {showMultiSelectToggle && (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={multiSelect}
+          onClick={onToggleMultiSelect}
+          disabled={busy}
+          className={cn(
+            "focus-ring flex min-h-tap-lg items-center gap-3 rounded-xl px-3 text-left text-curb-700",
+            "transition-[transform,background-color] duration-150 ease-spring",
+            "hover:bg-curb-100 active:scale-[0.98] active:bg-curb-200 disabled:opacity-50",
+          )}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2",
+              multiSelect
+                ? "border-marigold-600 bg-marigold-500 text-ink"
+                : "border-curb-400 bg-white",
+            )}
+          >
+            {multiSelect && "✓"}
+          </span>
+          Announce several at once
+        </button>
+      )}
 
       {multiSelect && (
         <Button

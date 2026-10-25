@@ -167,7 +167,15 @@ src/
                         class-rail.tsx + class-drawer.tsx: a button per class
                         down the right edge opens a drawer of that class's
                         students to tap and announce (state in the reducer's
-                        `pad`, pure logic in lib/class-roster.ts)
+                        `pad`, pure logic in lib/class-roster.ts); rail
+                        buttons show short labels ("EC"/"HUM") from
+                        `railLabels`, never a truncated full name
+                        announce-dock.tsx: search box + push-to-talk on one
+                        row at the bottom, under the thumb
+                        roster-filter.tsx: the header's class filter button
+                        and the bottom sheet of class chips it opens
+                        recent-announcements.tsx: the idle screen's last
+                        five names this device announced, each with Send back
     home/               install-card.tsx: the "add to home screen" prompt on /
                         (logic in lib/install-prompt.ts, hook in
                         lib/use-install-prompt.ts; sw.js in public/ caches
@@ -358,7 +366,9 @@ Notes phase 4 will need:
 - Taking an announcement back is just `set-status` with `status: "waiting"`
   and the same id(s). `/announce` no longer has a timed undo banner: a green
   name tapped in the class drawer is the reverse of announcing it, available
-  any time. The server never enforced a window either way.
+  any time, and the idle screen lists the last five names this device
+  announced (`recentIds` in the reducer), each with a "Send back" button.
+  The server never enforced a window either way.
 - `source` is **required** (`voice` | `manual` | `admin`). It is not defaulted:
   a client that omitted it used to log a voice confirmation as hand-picked,
   dropping the transcript and score that `status_events` exists to collect.
@@ -662,6 +672,7 @@ driving the display that is a repaint of every tile. Name the properties:
 | `animate-listen-pulse`                           | The ring on the push-to-talk button while the mic is open                                    |
 | `animate-hazard-slide`                           | The signature band, while listening                                                          |
 | `animate-tile-in`                                | A row or tile entering                                                                       |
+| `animate-drawer-in` / `animate-sheet-in`         | `/announce`'s class drawer (from the rail) and class-filter sheet (from the bottom) entering |
 
 `ease-spring` (`cubic-bezier(0.34,1.56,0.64,1)`) for anything a finger touches;
 `ease-out` for everything else. The `prefers-reduced-motion` guard in
@@ -978,6 +989,20 @@ longer active, and an uncaught throw on release used to be able to abort the
 handler before it reached `onPressEnd` — the failure mode being a microphone
 stuck open with the screen reading "listening". Both calls are now
 best-effort; starting and stopping the mic never is.
+
+**Mobile layout.** `/announce` is laid out for a phone held at the kerb,
+where height is the scarce thing: a one-line header (route name, class filter
+button, Lock — the eyebrow drops below `sm` via `PageHeader dense`), then the
+matches, then `AnnounceDock` — the search box and a 64px mic button side by
+side at the bottom. That replaced a search card at the top, a class-filter
+card, and a 185px mic stage at the bottom, which together left about 95px for
+results on an iPhone with Safari's bars showing: one candidate of three was
+visible, and with the keyboard up the live suggestions were entirely hidden
+behind the mic bar. While the mic is open, its caption covers the search box.
+The class rail steps aside while matches are on screen (unless the drawer is
+open or picks are pending), so candidates get the full width. Verified by
+screenshot at 390×664 and at 390×370 (keyboard up) with every Edge Function
+call intercepted and faked.
 
 ### Phase 5 — `/display`
 

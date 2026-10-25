@@ -132,6 +132,27 @@ export interface AnnounceState {
   banner: AnnounceBanner | null;
   /** A calm, non-error message: "already arrived", "nothing heard", etc. */
   info: string | null;
+  /**
+   * Students this device moved to arrived, newest first, at most
+   * `RECENT_LIMIT`. Ids only -- the screen looks names and live status up in
+   * the roster, so a name someone else sent back reads as waiting, not stale.
+   */
+  recentIds: string[];
+}
+
+/** How many recent announcements the idle screen offers to take back. */
+export const RECENT_LIMIT = 5;
+
+/** `added` to the front of `recent`, without repeats, capped. */
+function pushRecent(
+  recent: readonly string[],
+  added: readonly string[],
+): string[] {
+  const fresh = new Set(added);
+  return [...added, ...recent.filter((id) => !fresh.has(id))].slice(
+    0,
+    RECENT_LIMIT,
+  );
 }
 
 export function initialAnnounceState(): AnnounceState {
@@ -148,6 +169,7 @@ export function initialAnnounceState(): AnnounceState {
     confirmingKey: null,
     banner: null,
     info: null,
+    recentIds: [],
   };
 }
 
@@ -210,7 +232,7 @@ export type AnnounceAction =
       logged: number;
     }
   | { type: "confirm/error"; banner: AnnounceBanner }
-  | { type: "unannounce/settled"; displayName: string }
+  | { type: "unannounce/settled"; studentId: string; displayName: string }
   | { type: "banner/dismiss" }
   | { type: "info/dismiss" };
 
@@ -257,7 +279,8 @@ function narrow(state: AnnounceState, classGroups: string[]): AnnounceState {
 function searchChanged(
   state: AnnounceState,
   value: string,
-  suggestions: { tier: MatchTier; candidates: ResolveCandidateLike[] } | undefined,
+  suggestions:
+    { tier: MatchTier; candidates: ResolveCandidateLike[] } | undefined,
 ): AnnounceState {
   const next = { ...state, searchText: value };
   if (!suggestions) return next;
@@ -299,7 +322,9 @@ export function announceReducer(
       return narrow(
         state,
         isOn
-          ? state.filter.classGroups.filter((name) => name !== action.classGroup)
+          ? state.filter.classGroups.filter(
+              (name) => name !== action.classGroup,
+            )
           : [...state.filter.classGroups, action.classGroup],
       );
     }
@@ -469,6 +494,7 @@ export function announceReducer(
         searchText: "",
         selectedKeys: [],
         excludedMemberIds: {},
+        recentIds: pushRecent(state.recentIds, action.changedIds),
       };
 
       const total = action.studentIds.length;
@@ -511,6 +537,7 @@ export function announceReducer(
       return {
         ...state,
         confirmingKey: null,
+        recentIds: state.recentIds.filter((id) => id !== action.studentId),
         info: `${action.displayName} is back to waiting.`,
       };
 

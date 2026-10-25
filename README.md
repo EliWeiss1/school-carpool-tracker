@@ -7,14 +7,17 @@ inside, with a flash and a chime.
 
 Three screens:
 
-- **`/announce`** — outside, on a phone or tablet. Push-to-talk, confirm the
+- **`/announce`** — outside, on a phone or tablet. The search box and the
+  push-to-talk button share one row at the bottom of the screen, so the
+  matches get the space in between. Hold to talk and confirm the
   matched name, or search the roster by hand: suggestions appear as you
   type a first name, last name, nickname or carpool name (matched in the
   browser, no request per keystroke), and Search adds fuzzy, sound-alike
-  matching for misspellings. "Narrow by class" takes any
+  matching for misspellings. The class filter in the header takes any
   number of classes, and a button per class down the right edge opens a
   drawer of that class's students to tap and announce without speaking or
-  typing. PIN-protected.
+  typing. Between calls, the screen lists the last few names announced from
+  that device, each with "Send back" to undo a wrong tap. PIN-protected.
 - **`/display`** — inside, on the big screen. Live blue (waiting) / white (arrived) grid, grouped by class. A student in several classes appears under each one. No login.
 - **`/admin`** — roster management, the class list, and a manual "Reset all to waiting". PIN-protected.
 
