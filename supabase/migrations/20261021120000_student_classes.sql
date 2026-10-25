@@ -8,8 +8,10 @@
 --
 -- students.class_group is deliberately LEFT IN PLACE: the frontend and Edge
 -- Functions deploy separately from the database, so old code must keep
--- working until the new code is live. A later contract migration re-runs the
--- idempotent backfill and drops the column.
+-- working until the new code is live. A later contract migration drops the
+-- column (and backfill_student_classes()) WITHOUT re-running the backfill:
+-- by then the links are the source of truth, and the stale text would
+-- resurrect memberships an admin removed in the meantime.
 --
 -- Every function below is security invoker with an empty search_path (all
 -- names schema-qualified), and is revoked from public/anon/authenticated the
@@ -40,6 +42,10 @@ create index student_classes_class_idx
 alter table public.student_classes enable row level security;
 revoke all on public.student_classes from anon, authenticated;
 grant select on public.student_classes to anon, authenticated;
+-- Spelled out rather than left to the platform's default privileges: the
+-- service-role store inserts and deletes links directly (bulk import,
+-- scripts/seed.ts), not only through the functions below.
+grant select, insert, delete on public.student_classes to service_role;
 
 create policy "student classes are publicly readable"
   on public.student_classes
