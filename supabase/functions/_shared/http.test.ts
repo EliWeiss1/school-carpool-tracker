@@ -6,6 +6,7 @@ import {
   jsonResponse,
   preflight,
   readJsonBody,
+  withStoreErrors,
 } from "./http.ts";
 
 describe("jsonResponse", () => {
@@ -80,5 +81,36 @@ describe("readJsonBody", () => {
 
     await expect(readJsonBody(broken)).resolves.toEqual({});
     await expect(readJsonBody(array)).resolves.toEqual({});
+  });
+});
+
+describe("withStoreErrors", () => {
+  it("adds the retry hint to a store failure", async () => {
+    const response = await withStoreErrors(async () => {
+      throw new Error("The roster could not be reached.");
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "The roster could not be reached. Try again in a moment.",
+    });
+  });
+
+  it("does not say try again twice when the message already does", async () => {
+    const response = await withStoreErrors(async () => {
+      throw new Error("That change collided with another one. Try again.");
+    });
+    expect(await response.json()).toEqual({
+      error: "That change collided with another one. Try again.",
+    });
+
+    const reload = await withStoreErrors(async () => {
+      throw new Error(
+        "One of those classes no longer exists. Reload the page and try again.",
+      );
+    });
+    expect(await reload.json()).toEqual({
+      error:
+        "One of those classes no longer exists. Reload the page and try again.",
+    });
   });
 });

@@ -9,6 +9,7 @@
  */
 
 import { flattenClassNames } from "./class-embed.ts";
+import { RequestError } from "./http.ts";
 import type {
   ChangeMembersOutcome,
   ClassGroupRow,
@@ -32,6 +33,9 @@ export interface RpcErrorLike {
  *   40P01 deadlock / 40001 serialization -> the collision sentence (retrying
  *     is the right response, and the whole call already rolled back);
  *   23503 foreign key -> a class went away between the picker and the save;
+ *   22P02 invalid text representation -> a malformed (non-uuid) class or
+ *     student id: a 400 `RequestError`, since retrying cannot help and the
+ *     raw Postgres text means nothing to staff;
  *   anything else -> `<action>: <postgres message>`.
  * Codes the caller handles itself (P0002, 22023) must be checked before
  * calling this.
@@ -43,6 +47,12 @@ export function classWriteFailure(error: RpcErrorLike, action: string): Error {
   if (error.code === "23503") {
     return new Error(
       "One of those classes no longer exists. Reload the page and try again.",
+    );
+  }
+  if (error.code === "22P02") {
+    return new RequestError(
+      "That class or student could not be found. Reload the page and try again.",
+      400,
     );
   }
   return new Error(`${action}: ${error.message}`);

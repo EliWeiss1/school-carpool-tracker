@@ -80,13 +80,43 @@ export async function withStoreErrors(
   try {
     return await work();
   } catch (error: unknown) {
+    // A request the database refused as malformed: retrying will not help, so
+    // it is the caller's status and sentence, not a 503 "try again".
+    if (error instanceof RequestError) {
+      return errorResponse(error.status, error.message);
+    }
     console.error("edge function failed", error);
     const message =
       error instanceof Error && error.message !== ""
         ? error.message
         : "Something went wrong on the server.";
-    return errorResponse(503, `${message} Try again in a moment.`);
+    return errorResponse(503, withRetryHint(message));
   }
+}
+
+/**
+ * A store failure caused by the request itself (a malformed id, say), thrown
+ * so `withStoreErrors` answers with `status` and the message verbatim.
+ */
+export class RequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "RequestError";
+  }
+}
+
+/**
+ * Appends " Try again in a moment." unless the sentence already ends by
+ * telling staff to try again -- otherwise they read "...Try again. Try again
+ * in a moment."
+ */
+function withRetryHint(message: string): string {
+  return /try again[.!]?$/i.test(message.trim())
+    ? message
+    : `${message} Try again in a moment.`;
 }
 
 /** Read a required non-empty string field. */

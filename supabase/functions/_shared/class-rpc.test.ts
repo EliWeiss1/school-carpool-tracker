@@ -7,6 +7,7 @@ import {
   parseRemoveClassGroupResult,
   classWriteFailure,
 } from "./class-rpc.ts";
+import { RequestError, withStoreErrors } from "./http.ts";
 
 describe("parseRemoveClassGroupResult", () => {
   it("maps a deletion to movedCount", () => {
@@ -88,6 +89,23 @@ describe("classWriteFailure", () => {
     expect(classWriteFailure({ code: "23503", message: "fk" }, "x").message).toMatch(
       /no longer exists/,
     );
+  });
+
+  it("turns a malformed id (22P02) into a plain-sentence 400, not a 503 with Postgres text", async () => {
+    const failure = classWriteFailure(
+      { code: "22P02", message: 'invalid input syntax for type uuid: "abc"' },
+      "Could not remove that class",
+    );
+    expect(failure).toBeInstanceOf(RequestError);
+    expect((failure as RequestError).status).toBe(400);
+    expect(failure.message).not.toMatch(/uuid|syntax/);
+
+    // End to end through the shared wrapper the handlers use.
+    const response = await withStoreErrors(async () => {
+      throw failure;
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: failure.message });
   });
 
   it("prefixes any other failure with the action", () => {
