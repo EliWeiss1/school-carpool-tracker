@@ -38,6 +38,10 @@ export function bulkConfirmText(
 /**
  * The one-line result. `applied` is the selection minus any ids the server
  * ignored; `ignoredCount` those that were already deleted.
+ *
+ * It states the end state ("are now in"), not a count of changes: `applied`
+ * includes students who were already members (or already not), and the
+ * server does not say how many actually moved.
  */
 export function bulkResultMessage(
   mode: BulkClassMode,
@@ -46,10 +50,11 @@ export function bulkResultMessage(
   memberCount: number,
   ignoredCount: number,
 ): string {
+  const verb = applied === 1 ? "is" : "are";
   const done =
     mode === "add"
-      ? `Added ${students(applied)} to ${className}.`
-      : `Removed ${students(applied)} from ${className}.`;
+      ? `${students(applied)} ${verb} now in ${className}.`
+      : `${students(applied)} ${verb} no longer in ${className}.`;
   const tail =
     ignoredCount === 0
       ? ""

@@ -38,15 +38,23 @@ describe("bulkConfirmText", () => {
 describe("bulkResultMessage", () => {
   it("reports the change and the class's new size", () => {
     expect(bulkResultMessage("add", 2, "Choir", 14, 0)).toBe(
-      "Added 2 students to Choir. It now has 14.",
+      "2 students are now in Choir. It now has 14.",
     );
     expect(bulkResultMessage("remove", 1, "Choir", 9, 0)).toBe(
-      "Removed 1 student from Choir. It now has 9.",
+      "1 student is no longer in Choir. It now has 9.",
     );
+  });
+  it("does not claim to have added students who were already members", () => {
+    // The server cannot tell us how many were new, so the sentence states the
+    // end state ("are now in") rather than a count of additions.
+    expect(bulkResultMessage("add", 1, "Choir", 14, 0)).toBe(
+      "1 student is now in Choir. It now has 14.",
+    );
+    expect(bulkResultMessage("add", 2, "Choir", 14, 0)).not.toMatch(/Added/);
   });
   it("mentions students who were already gone", () => {
     expect(bulkResultMessage("add", 3, "Choir", 5, 1)).toBe(
-      "Added 3 students to Choir. It now has 5. 1 was already gone.",
+      "3 students are now in Choir. It now has 5. 1 was already gone.",
     );
     expect(bulkResultMessage("add", 3, "Choir", 5, 2)).toContain(
       "2 were already gone",
