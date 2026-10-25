@@ -2,12 +2,13 @@
 
 Written to be read cold, over coffee, assuming you remember nothing.
 
-**Newest work, not yet live: [section 13](#13-students-in-multiple-classes-built-on-a-branch-not-deployed)**
-— a student can be in several classes. It is built and tested on the branch
-`feature/multi-class-students` and **has not been deployed**; section 13 has the
-exact rollout order. Wherever sections 10–12 below say `students.class_group`
-is a single text column, that is true of the live system today and stops being
-true when section 13's rollout is done.
+**Newest work, live since 2026-10-25: [section 13](#13-students-in-multiple-classes-built-on-a-branch-not-deployed)**
+— a student can be in several classes. The expand migration, all ten Edge
+Functions and the frontend are live; only the contract migration that drops the
+legacy `students.class_group` column is still pending (section 13 has the exact
+steps). Wherever sections 10–12 below say `students.class_group` is a single
+text column, that describes the system before this change: the column still
+exists but nothing reads or writes it any more.
 
 **Picking this up in a fresh chat? Skip straight to [section 10](#10-carpools-class-filtered-display-and-multi-select-announce)
 — it's the most recent work and supersedes the single-student assumptions
@@ -1021,12 +1022,23 @@ select, and "Delete N selected").
 (That `class_group`-text-on-the-student model is replaced by the
 `student_classes` join table in section 13, once it is rolled out.)
 
-## 13. Students in multiple classes (built on a branch, NOT deployed)
+## 13. Students in multiple classes (LIVE; only the contract migration is pending)
 
-**Status.** Built and committed on the branch `feature/multi-class-students`
-(worktree `School_Carpool_Tracker-multiclass`). Not merged to `master`, nothing
-applied to the live Supabase project, no Edge Function redeployed. Gate on the
-branch: `npm run lint`, `npm run typecheck`, `npm test` (920 tests, after merging `master`'s /announce redesign) and
+**Status (2026-10-25).** Rolled out. The branch `feature/multi-class-students`
+was merged to `master`; the expand migration `20261021120000` is applied to the
+linked project (198 links for 198 students, per-class counts identical to the
+old `class_group` counts, zero mismatches, anon/authenticated cannot call the
+four SQL functions); all ten Edge Functions were redeployed with `--use-api`;
+a 50-check live API run and a live `/admin` UI run (add class, bulk-assign
+through the membership sheet, two-class chips, the delete-class decision
+dialog with move, bulk add/remove from the roster) all passed using throwaway
+`ZZ` data, after which the data was compared field by field with a snapshot
+taken before the rollout and was identical (198 students, 57 carpools, 16
+classes, 1,875 audit events, nothing left over). **Not done:** the contract
+migration `20261021130000_drop_student_class_group_column.sql`. It is
+irreversible and nothing needs it, so it was left for a deliberate follow-up.
+Gate on the branch before merge: `npm run lint`, `npm run typecheck`,
+`npm test` (972 tests, after merging `master`'s /announce redesign) and
 `npm run build` all green. The design is in
 `docs/superpowers/specs/2026-10-21-multi-class-students-design.md` and the task
 plan in `docs/superpowers/plans/2026-10-21-multi-class-students.md`.

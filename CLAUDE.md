@@ -37,21 +37,27 @@ and status changes were then cleaned up — the live roster is back to its
 original 36 students, 0 carpools. The user separately confirmed the deployed
 site itself works. See `HANDOFF.md` section 10 for the full account.
 
-**Multi-class students are built on the branch `feature/multi-class-students`
-and are NOT deployed — rollout is pending.** A student can now belong to any
-number of classes (a `student_classes` join table; see "Classes" below), and
-`/admin`, `/announce`, `/display` and every Edge Function read and write
-through it. The branch is tested (920 tests, all green, with `master`'s /announce redesign merged in), typechecked, linted
-and built, but **nothing is live**: the expand migration
-`20261021120000_student_classes.sql` is not applied to the linked Supabase
-project, the Edge Functions are not redeployed, the contract migration
-`20261021130000_drop_student_class_group_column.sql` (which drops
-`students.class_group`) is not applied, and the branch is not merged to
-`master` (a push to `master` makes Vercel deploy a frontend that would read a
-table that does not exist yet). The order matters: `HANDOFF.md` section 13 has
-the deploy sequence, the pre-contract mismatch check and the rollback note.
-Until that rollout is done, the live system still has the single
-`students.class_group` column described in the next paragraph.
+**Multi-class students are live (rolled out 2026-10-25), except for one
+deliberately pending step.** A student can belong to any number of classes (a
+`student_classes` join table; see "Classes" below), and `/admin`, `/announce`,
+`/display` and every Edge Function read and write through it. The branch
+`feature/multi-class-students` was tested (972 tests, all green, with
+`master`'s /announce redesign merged in), typechecked, linted and built, then
+rolled out in this order: the expand migration
+`20261021120000_student_classes.sql` was applied to the linked Supabase project
+(the backfill produced 198 links for 198 students, matching every student's
+class exactly), all ten Edge Functions were redeployed, the live API and the
+real `/admin`, `/announce` and `/display` screens were exercised end to end
+against the live project with throwaway data (fully removed afterwards), and
+the branch was merged to `master` so Vercel deployed the frontend. **Still
+pending:** the contract migration
+`20261021130000_drop_student_class_group_column.sql`, which drops the now-unused
+legacy `students.class_group` column. Nothing reads it any more, it is
+irreversible, and it should be applied deliberately after a few days of use
+(`HANDOFF.md` section 13 has the pre-contract mismatch check and the exact
+steps — note `supabase db push` applies every pending migration, so that file
+is the next one it would apply). The paragraph below still describes the
+single-column history.
 
 **Grade was removed as a separate concept (live).** Classification became
 a single field, `class_group`, with a fixed set of values (`K1`, `K2`,
@@ -314,7 +320,7 @@ act on" }`. Base URL is `NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL` or
 | `classes-write` — `reorder` | `action: "reorder"`, `orderedIds[]` | `{ classGroups[] }` |
 | `classes-write` — `members` | `action: "members"`, `classId`, `addStudentIds[]`, `removeStudentIds[]` (500 each, at least one) | `{ memberCount, ignoredIds[] }` |
 
-Classes and multi-class students, on the wire (branch `feature/multi-class-students`):
+Classes and multi-class students, on the wire (live):
 `roster-list` returns each student with `class_groups: string[]` (class
 **names**, in class sort order; `[]` means ungrouped) plus `classMemberCounts`
 (class id -> member count) for the class manager. `roster-write` (create and
@@ -490,7 +496,7 @@ query font sizing above).
 
 ## Classes (a student can be in several)
 
-*Built on `feature/multi-class-students`; not deployed — see Status above.*
+*Live since 2026-10-25; the contract migration that drops `students.class_group` is still pending — see Status above.*
 
 **Data model.** `public.class_groups` (`id`, `name`, `sort_order`) is the
 admin-editable class list, created by `20260916010000_class_groups.sql`.
