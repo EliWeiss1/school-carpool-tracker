@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BoardGrid } from "@/components/display/board-grid";
 import { ClassFilter } from "@/components/display/class-filter";
+import { EmptyClassState } from "@/components/display/empty-class-state";
 import { SoundToggle } from "@/components/display/sound-toggle";
 import {
   EmptyState,
@@ -12,8 +13,17 @@ import {
   PageHeader,
 } from "@/components/ui";
 import { createChimeCoalescer, createChimePlayer } from "@/lib/display-chime";
+import {
+  emptyClassLabel,
+  resolveInitialSectionKey,
+  resolveSectionKey,
+} from "@/lib/display-filter";
 import { groupIntoSections } from "@/lib/display-sections";
-import { mockArrivalOrder, mockRoster } from "@/lib/display-mock-roster";
+import {
+  mockArrivalOrder,
+  mockClassOrder,
+  mockRoster,
+} from "@/lib/display-mock-roster";
 import {
   connectBoard,
   createFetchSequencer,
@@ -100,7 +110,7 @@ export function DisplayBoard({
   const [flashingIds, setFlashingIds] = useState<Set<string>>(new Set());
   const [soundBlocked, setSoundBlocked] = useState(false);
   const [sectionKey, setSectionKey] = useState("");
-  const urlFilterResolvedRef = useRef(false);
+  const initialFilterResolvedRef = useRef(false);
 
   const coalescerRef = useRef(
     createChimeCoalescer({ windowMs: CHIME_COALESCE_WINDOW_MS }),
@@ -114,7 +124,11 @@ export function DisplayBoard({
   // not a hardcoded order -- fetched here the same public, no-PIN way the
   // roster itself is. Falls back to groupIntoSections' own default order
   // until it loads, rather than an empty list sorting nothing.
-  const { names: classOrder } = useClassGroups();
+  // The mock preview has no backend, so it brings its own list (including a
+  // class with nobody in it, to preview the empty-class view).
+  const { names: liveClassOrder, loading: classesLoading } = useClassGroups();
+  const classOrder = mockMode ? mockClassOrder() : liveClassOrder;
+  const classesReady = mockMode || !classesLoading;
 
   const students = useMemo(() => Object.values(roster), [roster]);
   const grouped = useMemo(
@@ -136,34 +150,34 @@ export function DisplayBoard({
   const visibleIdsRef = useRef(grouped.visibleIds);
   visibleIdsRef.current = grouped.visibleIds;
 
-  // Restore a remembered filter on first mount, once: a bookmarked ?class= is
-  // resolved against the roster below and takes priority the moment it can
-  // be resolved, but until the roster has loaded there is nothing to resolve
-  // it against, so the stored choice is what the board opens to meanwhile.
+  // Resolve the opening filter exactly once, when both the roster and the
+  // class list are in: a bookmarked ?class= wins over the remembered choice,
+  // and both are matched against the dropdown's options -- every class, empty
+  // ones included -- so a classroom tablet bookmarked to a class with nobody
+  // in it today still opens to it. Anything that no longer exists falls back
+  // to "All classes". Waiting for the class list is what stops an empty class
+  // being discarded because the list simply hadn't arrived yet.
+  const boardReady = connection === "live" && classesReady;
   useEffect(() => {
-    const stored = readStoredFilter();
-    if (stored !== null) setSectionKey(stored);
-  }, []);
-
-  // Resolve ?class= against the loaded sections, exactly once. A bookmarked
-  // or embedded URL should win over whatever was remembered from last time
-  // this browser opened the board.
-  useEffect(() => {
-    if (urlFilterResolvedRef.current) return;
-    if (grouped.allSections.length === 0) return;
-    if (!initialClassParam) {
-      urlFilterResolvedRef.current = true;
-      return;
-    }
-
-    const match = grouped.allSections.find(
-      (section) =>
-        section.classGroup?.toLowerCase() === initialClassParam.toLowerCase(),
+    if (initialFilterResolvedRef.current || !boardReady) return;
+    initialFilterResolvedRef.current = true;
+    setSectionKey(
+      resolveInitialSectionKey({
+        urlParam: initialClassParam,
+        stored: readStoredFilter(),
+        options: grouped.options,
+      }),
     );
+  }, [boardReady, grouped.options, initialClassParam]);
 
-    if (match) setSectionKey(match.key);
-    urlFilterResolvedRef.current = true;
-  }, [grouped.allSections, initialClassParam]);
+  // A class an admin deletes while this board is open: drop back to every
+  // class rather than sitting on a filter that no longer exists.
+  useEffect(() => {
+    if (!initialFilterResolvedRef.current || sectionKey === "") return;
+    if (resolveSectionKey(sectionKey, grouped.options) === null) {
+      setSectionKey("");
+    }
+  }, [sectionKey, grouped.options]);
 
   function handleFilterChange(nextKey: string) {
     setSectionKey(nextKey);
@@ -343,7 +357,13 @@ export function DisplayBoard({
   }
 
   const rosterIsEmpty = students.length === 0;
-  const filterHidesEveryone = !rosterIsEmpty && grouped.sections.length === 0;
+  const emptyClass = emptyClassLabel(
+    sectionKey,
+    grouped.options,
+    grouped.sections,
+  );
+  const filterHidesEveryone =
+    !rosterIsEmpty && grouped.sections.length === 0 && emptyClass === null;
 
   return (
     // h-screen from sm up: a board screwed to a wall is exactly one screen
@@ -428,6 +448,10 @@ export function DisplayBoard({
             hint="Add students in Admin to see them here."
           />
         </div>
+      )}
+
+      {!configError && connection === "live" && !rosterIsEmpty && emptyClass !== null && (
+        <EmptyClassState classLabel={emptyClass} />
       )}
 
       {!configError && connection === "live" && filterHidesEveryone && (

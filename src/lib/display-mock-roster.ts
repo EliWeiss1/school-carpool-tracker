@@ -17,6 +17,15 @@ const MOCK_CLASS_GROUPS = [
 ] as const;
 
 /**
+ * The mock preview's class list: the seven populated classes plus one with
+ * nobody in it, so `/display?mock=1` can show the empty-class dropdown option
+ * and its empty state. Preview only -- a real deployment reads the live list.
+ */
+export function mockClassOrder(): string[] {
+  return [...MOCK_CLASS_GROUPS, "6th grade"];
+}
+
+/**
  * Synthetic roster for the dev-only `/display?mock=1` preview.
  *
  * There is no live Supabase project reachable from this machine (no

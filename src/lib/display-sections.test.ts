@@ -309,4 +309,114 @@ describe("groupIntoSections", () => {
       ]);
     });
   });
+
+  describe("filter options when the class list is known", () => {
+    const classOrder = ["K1", "1st", "6th grade", "7th grade"];
+
+    it("lists every class in class-list order, including empty ones", () => {
+      const students = [
+        student({ id: "s1", class_groups: ["1st"] }),
+        student({ id: "s2", class_groups: ["K1"], status: "arrived" }),
+      ];
+
+      const { options } = groupIntoSections(students, { sectionKey: "" }, classOrder);
+
+      expect(options.map((o) => [o.label, o.waiting])).toEqual([
+        ["K1", 0],
+        ["1st", 1],
+        ["6th grade", 0],
+        ["7th grade", 0],
+      ]);
+    });
+
+    it("keeps the board itself free of empty headings", () => {
+      const students = [student({ id: "s1", class_groups: ["K1"] })];
+
+      const result = groupIntoSections(students, { sectionKey: "" }, classOrder);
+
+      expect(result.allSections.map((s) => s.label)).toEqual(["K1"]);
+      expect(result.sections.map((s) => s.label)).toEqual(["K1"]);
+    });
+
+    it("adds Ungrouped last only when a student has no class", () => {
+      const withClassless = groupIntoSections(
+        [student({ id: "s1", class_groups: [] })],
+        { sectionKey: "" },
+        classOrder,
+      );
+      const without = groupIntoSections(
+        [student({ id: "s1", class_groups: ["K1"] })],
+        { sectionKey: "" },
+        classOrder,
+      );
+
+      expect(withClassless.options.at(-1)?.label).toBe("Ungrouped");
+      expect(withClassless.options).toHaveLength(classOrder.length + 1);
+      expect(without.options.map((o) => o.label)).not.toContain("Ungrouped");
+    });
+
+    it("appends a section whose class is not on the list after the listed ones", () => {
+      const students = [
+        student({ id: "s1", class_groups: ["Mystery"] }),
+        student({ id: "s2", class_groups: [] }),
+      ];
+
+      const { options } = groupIntoSections(students, { sectionKey: "" }, classOrder);
+
+      expect(options.map((o) => o.label)).toEqual([
+        ...classOrder,
+        "Mystery",
+        "Ungrouped",
+      ]);
+    });
+
+    it.each([[undefined], [[]]])(
+      "derives options from the sections when the list is %j",
+      (order) => {
+        const students = [
+          student({ id: "s1", class_groups: ["1st"] }),
+          student({ id: "s2", class_groups: ["K1"] }),
+        ];
+
+        const { options } = groupIntoSections(
+          students,
+          { sectionKey: "" },
+          order as string[] | undefined,
+        );
+
+        expect(options.map((o) => o.label)).toEqual(["K1", "1st"]);
+      },
+    );
+
+    it("still counts a two-class student once in the totals", () => {
+      const students = [
+        student({ id: "s1", class_groups: ["K1", "1st"] }),
+        student({ id: "s2", class_groups: ["1st"], status: "arrived" }),
+      ];
+
+      const result = groupIntoSections(students, { sectionKey: "" }, classOrder);
+
+      expect(result.totals).toEqual({ waiting: 1, arrived: 1 });
+      expect(result.options.map((o) => [o.label, o.waiting])).toEqual([
+        ["K1", 1],
+        ["1st", 1],
+        ["6th grade", 0],
+        ["7th grade", 0],
+      ]);
+    });
+
+    it("filtering to an empty class shows nothing and counts nothing", () => {
+      const students = [student({ id: "s1", class_groups: ["K1"] })];
+
+      const result = groupIntoSections(
+        students,
+        { sectionKey: "6th grade" },
+        classOrder,
+      );
+
+      expect(result.sections).toEqual([]);
+      expect(result.visibleIds.size).toBe(0);
+      expect(result.totals).toEqual({ waiting: 0, arrived: 0 });
+    });
+  });
 });

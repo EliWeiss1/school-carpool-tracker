@@ -103,11 +103,53 @@ function compareClasses(
   return a.localeCompare(b);
 }
 
+/**
+ * The dropdown's choices. With a known class list, every class on it is
+ * selectable -- an empty class (a teacher whose class has no students today,
+ * or one an admin just created) must still be pickable on the day. Sections
+ * for a class missing from the list follow (defensive: free text makes it
+ * possible), then "Ungrouped" only if someone actually has no class.
+ */
+function buildOptions(
+  allSections: readonly DisplaySection[],
+  knownClasses: readonly string[] | null,
+): FilterOption[] {
+  const toOption = (section: DisplaySection): FilterOption => ({
+    key: section.key,
+    label: section.label,
+    waiting: section.waiting,
+  });
+  if (knownClasses === null) return allSections.map(toOption);
+
+  const sectionByKey = new Map(allSections.map((s) => [s.key, s]));
+  const listed = new Set(knownClasses);
+  const options: FilterOption[] = [...new Set(knownClasses)].map((name) => {
+    const section = sectionByKey.get(name);
+    return section ? toOption(section) : { key: name, label: name, waiting: 0 };
+  });
+  const unlisted = allSections.filter(
+    (s) => s.classGroup !== null && !listed.has(s.classGroup),
+  );
+  const ungrouped = sectionByKey.get(NO_CLASS_KEY);
+  return [
+    ...options,
+    ...unlisted.map(toOption),
+    ...(ungrouped ? [toOption(ungrouped)] : []),
+  ];
+}
+
 export function groupIntoSections(
   students: readonly StudentWithClasses[],
   filter: DisplayFilter,
-  classOrder: readonly string[] = DEFAULT_CLASS_ORDER,
+  classOrder?: readonly string[],
 ): GroupedSections {
+  // Only a real, non-empty class list makes every class selectable. Without
+  // one (not loaded yet, failed to load, a caller that has none) the dropdown
+  // is derived from the sections, as it always was, rather than flickering
+  // through a worse state while the list loads.
+  const knownClasses =
+    classOrder !== undefined && classOrder.length > 0 ? classOrder : null;
+  const sortOrder = knownClasses ?? DEFAULT_CLASS_ORDER;
   const byKey = new Map<string, StudentWithClasses[]>();
   for (const student of students) {
     for (const key of sectionKeysFor(student)) {
@@ -140,7 +182,7 @@ export function groupIntoSections(
     .sort((a, b) => {
       if (a.key === NO_CLASS_KEY) return 1;
       if (b.key === NO_CLASS_KEY) return -1;
-      return compareClasses(a.classGroup, b.classGroup, classOrder);
+      return compareClasses(a.classGroup, b.classGroup, sortOrder);
     });
 
   const sections =
@@ -161,11 +203,7 @@ export function groupIntoSections(
     }
   }
 
-  const options: FilterOption[] = allSections.map((section) => ({
-    key: section.key,
-    label: section.label,
-    waiting: section.waiting,
-  }));
+  const options = buildOptions(allSections, knownClasses);
 
   return {
     allSections,
