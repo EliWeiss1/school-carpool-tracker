@@ -286,7 +286,7 @@ export function ClassManager({
             className={INPUT_CLASS}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="New class name, like Choir"
+            placeholder="New class name, like MS Boys"
           />
         </div>
         <Button

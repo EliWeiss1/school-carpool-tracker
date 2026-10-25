@@ -148,7 +148,7 @@ export function CsvImportPanel({
         <p className="mt-1 text-curb-600">
           Columns can be in any order. Required: first name, last name.
           Optional: aliases (comma or semicolon separated), classes (separate
-          several with a semicolon, like K1; Choir, each matching a class under
+          several with a semicolon, like K1; MS Boys, each matching a class under
           Classes), carpool, parent 1 name, parent 2 name. If the carpool column
           names a carpool that already exists, this student is added to it; if
           it doesn&apos;t exist yet, it&apos;s created with that exact name and
