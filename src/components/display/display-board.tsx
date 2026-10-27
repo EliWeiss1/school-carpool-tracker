@@ -6,6 +6,7 @@ import { BoardGrid } from "@/components/display/board-grid";
 import { ClassFilter } from "@/components/display/class-filter";
 import { EmptyClassState } from "@/components/display/empty-class-state";
 import { SoundToggle } from "@/components/display/sound-toggle";
+import { VoiceToggle } from "@/components/display/voice-toggle";
 import {
   EmptyState,
   ErrorBanner,
@@ -19,6 +20,12 @@ import {
   resolveSectionKey,
 } from "@/lib/display-filter";
 import { groupIntoSections } from "@/lib/display-sections";
+import {
+  createBrowserSpeechEngine,
+  createVoiceAnnouncer,
+  pageHasUserGesture,
+  type VoiceAnnouncer,
+} from "@/lib/display-voice";
 import {
   mockArrivalOrder,
   mockClassOrder,
@@ -66,6 +73,26 @@ function writeStoredFilter(sectionKey: string): void {
   }
 }
 
+/** Whether this screen reads names aloud. Per browser, like the filter: one
+ *  classroom may want it while the hallway TV next door does not. */
+const VOICE_STORAGE_KEY = "display-voice";
+
+function readStoredVoice(): boolean {
+  try {
+    return window.localStorage.getItem(VOICE_STORAGE_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredVoice(on: boolean): void {
+  try {
+    window.localStorage.setItem(VOICE_STORAGE_KEY, on ? "on" : "off");
+  } catch {
+    // Same as the filter: not remembered next visit, nothing else breaks.
+  }
+}
+
 /**
  * The realtime status grid. Public, unauthenticated, read-only -- the anon
  * key grants `select` on `students` and nothing else (see the migration),
@@ -92,6 +119,12 @@ const FLASH_DURATION_MS = 15_000;
 /** Several children can arrive in the same second; this is the floor between two audible chimes. */
 const CHIME_COALESCE_WINDOW_MS = 2000;
 
+/** The chime is under a second (scripts/generate-chime.mjs); names start once it has rung. */
+const VOICE_AFTER_CHIME_MS = 900;
+
+/** A child already read aloud this recently is not read again (a redelivered payload, strict mode). */
+const VOICE_REPEAT_WINDOW_MS = 5000;
+
 type ConnectionState = "connecting" | "live" | "error";
 
 export function DisplayBoard({
@@ -116,6 +149,15 @@ export function DisplayBoard({
   const [soundBlocked, setSoundBlocked] = useState(false);
   const [sectionKey, setSectionKey] = useState("");
   const initialFilterResolvedRef = useRef(false);
+  // Voice starts unsupported and off until the mount effect below looks at
+  // the browser: the server render has no speechSynthesis to ask about.
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [voiceBlocked, setVoiceBlocked] = useState(false);
+  const announcerRef = useRef<VoiceAnnouncer | null>(null);
+  // Read by handleArrivals, which the subscription captured once.
+  const voiceOnRef = useRef(voiceOn);
+  voiceOnRef.current = voiceOn;
 
   const coalescerRef = useRef(
     createChimeCoalescer({ windowMs: CHIME_COALESCE_WINDOW_MS }),
@@ -189,15 +231,45 @@ export function DisplayBoard({
     writeStoredFilter(nextKey);
   }
 
+  useEffect(() => {
+    const announcer = createVoiceAnnouncer({
+      engine: createBrowserSpeechEngine(),
+      repeatWindowMs: VOICE_REPEAT_WINDOW_MS,
+      delayMs: VOICE_AFTER_CHIME_MS,
+      onBlocked: () => setVoiceBlocked(true),
+      onSpoken: () => setVoiceBlocked(false),
+    });
+    announcerRef.current = announcer;
+    setVoiceSupported(announcer.supported);
+
+    if (announcer.supported && readStoredVoice()) {
+      setVoiceOn(true);
+      // Left on and reloaded: the browser will refuse until someone taps the
+      // page, so say so now rather than silently missing the first arrival.
+      setVoiceBlocked(!pageHasUserGesture());
+    }
+
+    return () => announcer.stop();
+  }, []);
+
   /**
-   * Flashes the given tiles and fires at most one chime for the whole batch.
-   * The chime is driven directly by `arrivals` from `reconcile`, never by an
-   * `animationend` listener -- so `prefers-reduced-motion`, which collapses
-   * the CSS animation to near-zero duration, cannot silence it as a side
-   * effect. Read the phase 5 report for why that separation matters.
+   * Flashes the given tiles, fires at most one chime for the whole batch,
+   * and -- when voice is on -- reads the batch's names once the chime has
+   * rung. Both sounds are driven directly by `arrivals` from `reconcile`,
+   * never by an `animationend` listener -- so `prefers-reduced-motion`, which
+   * collapses the CSS animation to near-zero duration, cannot silence them
+   * as a side effect. Read the phase 5 report for why that separation
+   * matters. `ids` are already scoped to the viewer's class filter, so the
+   * voice follows the filter exactly as the chime does.
    */
-  const handleArrivals = useCallback((ids: string[]) => {
+  const handleArrivals = useCallback((ids: string[], current: DisplayRoster) => {
     if (ids.length === 0) return;
+
+    if (voiceOnRef.current) {
+      announcerRef.current?.announce(
+        ids.flatMap((id) => (current[id] ? [current[id]] : [])),
+      );
+    }
 
     setFlashingIds((prev) => {
       const next = new Set(prev);
@@ -260,6 +332,7 @@ export function DisplayBoard({
               result.arrivals.filter((arrivalId) =>
                 visibleIdsRef.current.has(arrivalId),
               ),
+              result.roster,
             );
             return result.roster;
           });
@@ -335,6 +408,7 @@ export function DisplayBoard({
           const result = reconcile(prev, changePayload);
           handleArrivals(
             result.arrivals.filter((id) => visibleIdsRef.current.has(id)),
+            result.roster,
           );
           return result.roster;
         }),
@@ -361,6 +435,26 @@ export function DisplayBoard({
     void playerRef.current.play().then((played) => setSoundBlocked(!played));
   }
 
+  function handleVoiceToggle() {
+    const announcer = announcerRef.current;
+    if (!announcer) return;
+
+    if (voiceOn && !voiceBlocked) {
+      announcer.stop();
+      setVoiceOn(false);
+      writeStoredVoice(false);
+      return;
+    }
+
+    // This click is the gesture the browser wants before it will speak, so
+    // speak now, inside it. It unlocks a blocked chime too: one tap, both
+    // sounds working.
+    setVoiceOn(true);
+    writeStoredVoice(true);
+    void announcer.unlock();
+    if (soundBlocked) enableSound();
+  }
+
   const rosterIsEmpty = students.length === 0;
   const emptyClass = emptyClassLabel(
     sectionKey,
@@ -381,9 +475,17 @@ export function DisplayBoard({
       <PageHeader
         eyebrow="Pickup line · live"
         title="Display"
+        dense
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {soundBlocked && <SoundToggle onEnable={enableSound} />}
+            {voiceSupported && !configError && (
+              <VoiceToggle
+                on={voiceOn}
+                blocked={voiceBlocked}
+                onToggle={handleVoiceToggle}
+              />
+            )}
             {!configError && (
               <p className="whitespace-nowrap font-mono text-xs">
                 <span className="text-waiting-lift">
