@@ -81,8 +81,13 @@ function writeStoredFilter(sectionKey: string): void {
  * `realtime-reconcile.ts` actually understands.
  */
 
-/** Two 1.6s animation iterations, plus a small margin -- see tailwind.config.ts. */
-const FLASH_DURATION_MS = 3400;
+/**
+ * How long a just-arrived tile stays gold. The flash animation itself only
+ * runs for the first ~3.2s (two 1.6s iterations, see tailwind.config.ts); the
+ * rest is a static gold hold so a teacher who glanced away when the chime
+ * sounded can still see who was just announced.
+ */
+const FLASH_DURATION_MS = 15_000;
 
 /** Several children can arrive in the same second; this is the floor between two audible chimes. */
 const CHIME_COALESCE_WINDOW_MS = 2000;

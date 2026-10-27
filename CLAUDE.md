@@ -616,7 +616,12 @@ distance, to people who are not looking directly at it.
 else, anywhere in the app.** No red delete buttons outside a genuine
 back-to-waiting action, no green success toasts. That is why the brand colour is
 marigold — it is unmistakable against both at twenty feet. Marigold never fills a
-status tile.
+status tile, with one deliberate exception: on `/display`, a tile that just
+arrived is held `marigold-400` (ink text) for 15 seconds so a teacher who
+missed the chime can still see who was announced. It is a transient "look
+here" state layered over the white arrived tile (an opacity layer that fades
+back), not a third status, and it drops at once if the student is sent back
+to waiting.
 
 `/display` is the one route on an ink ground. That is not a dark theme and does
 not follow the OS: it is fixed, because a wall-mounted TV in a lit corridor
