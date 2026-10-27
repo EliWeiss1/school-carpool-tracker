@@ -1,9 +1,17 @@
+import { cookies } from "next/headers";
+
 import { DisplayBoard } from "@/components/display/display-board";
+import { DisplayGate } from "@/components/display/display-gate";
+import {
+  configuredDisplayPassword,
+  cookieIsValid,
+  DISPLAY_COOKIE,
+} from "@/lib/display-auth";
 
 /**
- * The wall-mounted board: red/green status for the whole roster, updated by
- * Supabase Realtime with no reload. Public and read-only -- no PIN gate here,
- * unlike /announce and /admin.
+ * The wall-mounted board: status for the whole roster, updated by Supabase
+ * Realtime with no reload. Read-only, behind its own password (DISPLAY_PASSWORD,
+ * distinct from the staff PIN) checked on the server before the board renders.
  *
  * Stays a Server Component; all the state, effects, and the realtime socket
  * live in the client `DisplayBoard` it renders. The one thing it does itself
@@ -15,11 +23,18 @@ import { DisplayBoard } from "@/components/display/display-board";
  * component, means a production bundle never even ships the branch that
  * would honour the query param.
  */
-export default function DisplayPage({
+export default async function DisplayPage({
   searchParams,
 }: {
   searchParams: { mock?: string; flash?: string; class?: string };
 }) {
+  const password = configuredDisplayPassword();
+  const signedIn = await cookieIsValid(
+    cookies().get(DISPLAY_COOKIE)?.value,
+    password,
+  );
+  if (!signedIn) return <DisplayGate configured={password !== null} />;
+
   const devPreviewAllowed = process.env.NODE_ENV !== "production";
   const mockMode = devPreviewAllowed && (searchParams.mock === "1" || searchParams.mock === "empty");
   const mockEmpty = devPreviewAllowed && searchParams.mock === "empty";
