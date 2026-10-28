@@ -18,7 +18,7 @@ Three screens:
   drawer of that class's students to tap and announce without speaking or
   typing. Between calls, the screen lists the last few names announced from
   that device, each with "Send back" to undo a wrong tap. PIN-protected.
-- **`/display`** — inside, on the big screen. Live blue (waiting) / white (arrived) grid, grouped by class. A student in several classes appears under each one. No login.
+- **`/display`** — inside, on the big screen. Live blue (waiting) / white (arrived) grid, grouped by class. A student in several classes appears under each one. Optionally reads each arrival's name aloud after the chime ("Read names" in the header; free, uses the browser's built-in voice). No login.
 - **`/admin`** — roster management, the class list, and a manual "Reset all to waiting". PIN-protected.
 
 ## Classes and the roster

@@ -166,7 +166,9 @@ src/
     layout.tsx          root layout, light-only color scheme, registers sw.js
     globals.css         Tailwind entry + reduced-motion guard
     announce/           phase 4 — mic capture, candidate confirm, search fallback
-    display/            phase 5 — realtime status grid, flash + chime
+    display/            phase 5 — realtime status grid, flash + chime, and
+                        optional spoken names (components/display/
+                        voice-toggle.tsx, lib/display-voice.ts)
     admin/              phase 6 — roster CRUD, CSV import, reset
   components/
     ui/                 the shared kit: Button, PageHeader, HazardRule, PinGate,
@@ -1068,6 +1070,25 @@ browser blocks sound before a gesture, a "sound off" control appears in the
 header and the board stays fully functional without it. The chime is fired from
 the reconciler's `arrivals`, never from an `animationend` listener, so reduced
 motion cannot silence it as a side effect.
+
+**Spoken names (optional).** A "Read names" toggle in the header makes the
+board say each arrival's first and last name about a second after the chime
+("Maya Cohen. Aaron Cohen."). It uses the browser's built-in
+`speechSynthesis`: free, on-device, no key and no request, so it costs nothing
+per arrival. The trade is that the voice and how well it pronounces Hebrew
+names depend on the display PC's OS. The fix, if that turns out badly, is an
+optional per-student "pronounced as" field, which has not been built.
+`src/lib/display-voice.ts` follows the `display-chime.ts` split: batching and
+a 5-second repeat filter are tested with an injected engine and clock (the
+filter also absorbs strict mode's second run of the `setRoster` updater), and
+the browser wrapper returns `null` where there is no speech engine, which
+hides the toggle. Voice is off by default and remembered per browser in
+`localStorage` (`display-voice`), like the class filter, and it follows that
+filter exactly as the chime does. Browsers will not speak before a click or
+tap, so the toggle's own click is the unlock (and it unlocks a blocked chime
+in the same tap). A board reloaded with voice left on shows "Tap to read
+names" until someone taps it. Below `sm` the toggle is icon-only, so the
+one-line `dense` header still fits on a phone.
 
 `?mock=1`, `?empty`, `?flash=1` are dev-only preview modes, gated so they
 cannot activate in production. They exist because there is no backend here.
