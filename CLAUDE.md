@@ -118,7 +118,7 @@ defensive fix on its own merits. See `HANDOFF.md` for the full account.
 | Speech-to-text   | Deepgram Nova-3 streaming with **Keyterm Prompting** seeded from roster surnames                               |
 | Deepgram auth    | An Edge Function mints a short-lived token per session. The permanent key never reaches the browser.           |
 | Matching         | Server-side fuzzy + phonetic resolver in the Edge Function, three-tier confidence policy                       |
-| Auth             | None. `/display` is public read-only; `/announce` and `/admin` require a shared staff PIN checked server-side. |
+| Auth             | No accounts. `/display` needs its own password (`DISPLAY_PASSWORD`, checked by a Next route handler, remembered in an httpOnly cookie); `/announce` and `/admin` require the shared staff PIN checked server-side. |
 
 **Non-negotiables:**
 
@@ -303,6 +303,7 @@ template.
 | `SUPABASE_SERVICE_ROLE_KEY`          | Edge Functions, `scripts/seed.ts` | The only credential allowed to write rows                            |
 | `DEEPGRAM_API_KEY`                   | Edge Function only                | Permanent Deepgram key used to mint short-lived tokens               |
 | `STAFF_PIN`                          | Edge Function only                | Shared staff PIN gating every write                                  |
+| `DISPLAY_PASSWORD`                   | Next.js server only (Vercel)      | Password for `/display`; unset keeps the board locked                |
 | `MOCK_SPEECH`                        | Edge Function                     | `true` returns canned tokens/transcripts instead of calling Deepgram |
 
 ## Edge Function endpoints
