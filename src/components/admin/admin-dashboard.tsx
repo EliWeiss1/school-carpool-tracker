@@ -9,6 +9,7 @@ import { adminApi, type RosterStudent } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
 import { usePinSession } from "@/lib/use-pin-session";
 import { useClassGroups } from "@/lib/use-class-groups";
+import { verifyStaffPin } from "@/lib/verify-pin";
 import type { Carpool } from "@/types/db";
 
 import { CarpoolManager } from "./carpool-manager";
@@ -131,7 +132,10 @@ function AdminContent() {
 
 export function AdminDashboard() {
   return (
-    <PinGate purpose="Manage the roster, import a CSV, or reset the board.">
+    <PinGate
+      purpose="Manage the roster, import a CSV, or reset the board."
+      verify={verifyStaffPin}
+    >
       <AdminContent />
     </PinGate>
   );
