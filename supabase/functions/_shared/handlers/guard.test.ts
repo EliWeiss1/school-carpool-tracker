@@ -1,15 +1,31 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { guardRequest } from "./guard.ts";
+import { LEGACY_SCHOOL_ID } from "../schools.ts";
+import { createFakeAccess } from "./fake-access.ts";
+import {
+  authenticateRequest,
+  type GuardDeps,
+  guardRequest as guardRequestFor,
+  guardSessionRequest,
+} from "./guard.ts";
+
+/**
+ * The staff-PIN tests below predate capabilities. A PIN holder may do
+ * everything in the legacy school, so which capability they ask for does not
+ * matter; `office` is the strictest.
+ */
+const guardRequest = (request: Request, d: GuardDeps) =>
+  guardRequestFor(request, d, "office");
 
 const STAFF_PIN = "4821";
 
-function deps(overrides: Partial<Parameters<typeof guardRequest>[1]> = {}) {
+function deps(overrides: Partial<GuardDeps> = {}): GuardDeps {
   return {
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 1000, windowMs: 60_000 }),
     pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
+    access: createFakeAccess(),
     ...overrides,
   };
 }
@@ -216,5 +232,412 @@ describe("guardRequest", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.response.status).toBe(401);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Supabase sessions: the only way in for every school but the first.  */
+/* ------------------------------------------------------------------ */
+
+const SCHOOL_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const SCHOOL_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+/** Two schools, an office login for each, and one device of each kind in A. */
+function world() {
+  const access = createFakeAccess();
+  access.addUser("office-a", { userId: "user-office-a" });
+  access.grant("user-office-a", SCHOOL_A, { kind: "member", role: "owner" });
+  access.addUser("office-b", { userId: "user-office-b" });
+  access.grant("user-office-b", SCHOOL_B, { kind: "member", role: "owner" });
+
+  access.addUser("curb-phone-a", { userId: "user-curb-a", isAnonymous: true });
+  access.grant("user-curb-a", SCHOOL_A, {
+    kind: "device",
+    canAnnounce: true,
+    canDisplay: false,
+  });
+  access.addUser("wall-board-a", { userId: "user-wall-a", isAnonymous: true });
+  access.grant("user-wall-a", SCHOOL_A, {
+    kind: "device",
+    canAnnounce: false,
+    canDisplay: true,
+  });
+  // Signed in, but nothing to any school: a device that never paired.
+  access.addUser("stranger", { userId: "user-stranger", isAnonymous: true });
+  return access;
+}
+
+function withToken(token: string, body: Record<string, unknown>): Request {
+  return post(
+    { deviceId: "phone-1", ...body },
+    { authorization: `Bearer ${token}` },
+  );
+}
+
+describe("guardRequest with a Supabase session", () => {
+  it("lets an office login use an office endpoint in its own school", async () => {
+    const result = await guardRequestFor(
+      withToken("office-a", { schoolId: SCHOOL_A, n: 2 }),
+      deps({ access: world() }),
+      "office",
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.schoolId).toBe(SCHOOL_A);
+    expect(result.caller).toEqual({
+      kind: "member",
+      userId: "user-office-a",
+      role: "owner",
+    });
+    expect(result.body.n).toBe(2);
+    expect(result.deviceId).toBe("phone-1");
+  });
+
+  it("lets an office login announce in its own school", async () => {
+    const result = await guardRequestFor(
+      withToken("office-a", { schoolId: SCHOOL_A }),
+      deps({ access: world() }),
+      "announce",
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses an office login naming another school, without saying the school exists", async () => {
+    const real = await guardRequestFor(
+      withToken("office-a", { schoolId: SCHOOL_B }),
+      deps({ access: world() }),
+      "office",
+    );
+    const invented = await guardRequestFor(
+      withToken("office-a", {
+        schoolId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      }),
+      deps({ access: world() }),
+      "office",
+    );
+
+    expect(real.ok).toBe(false);
+    expect(invented.ok).toBe(false);
+    if (real.ok || invented.ok) return;
+    expect(real.response.status).toBe(403);
+    expect(invented.response.status).toBe(403);
+    // Identical answers: a school id cannot be confirmed by probing.
+    expect(await real.response.json()).toEqual(await invented.response.json());
+  });
+
+  it("lets a curb phone announce but not reach the office", async () => {
+    const access = world();
+    const announce = await guardRequestFor(
+      withToken("curb-phone-a", { schoolId: SCHOOL_A }),
+      deps({ access }),
+      "announce",
+    );
+    const office = await guardRequestFor(
+      withToken("curb-phone-a", { schoolId: SCHOOL_A }),
+      deps({ access }),
+      "office",
+    );
+
+    expect(announce.ok).toBe(true);
+    if (announce.ok) {
+      expect(announce.caller).toEqual({
+        kind: "device",
+        userId: "user-curb-a",
+      });
+    }
+    expect(office.ok).toBe(false);
+    if (office.ok) return;
+    expect(office.response.status).toBe(403);
+    await expect(office.response.json()).resolves.toEqual({
+      error: expect.stringMatching(/office account/i),
+    });
+  });
+
+  it("refuses a wall board on every endpoint: a board only reads", async () => {
+    const access = world();
+    for (const capability of ["announce", "office"] as const) {
+      const result = await guardRequestFor(
+        withToken("wall-board-a", { schoolId: SCHOOL_A }),
+        deps({ access }),
+        capability,
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.response.status).toBe(403);
+    }
+  });
+
+  it("refuses a curb phone naming another school", async () => {
+    const result = await guardRequestFor(
+      withToken("curb-phone-a", { schoolId: SCHOOL_B }),
+      deps({ access: world() }),
+      "announce",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(403);
+  });
+
+  it("refuses a signed-in device that never paired with any school", async () => {
+    const result = await guardRequestFor(
+      withToken("stranger", { schoolId: SCHOOL_A }),
+      deps({ access: world() }),
+      "announce",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(403);
+  });
+
+  it("stops a device the moment the office disconnects it", async () => {
+    const access = world();
+    const d = deps({ access });
+    const before = await guardRequestFor(
+      withToken("curb-phone-a", { schoolId: SCHOOL_A }),
+      d,
+      "announce",
+    );
+    access.revoke("user-curb-a", SCHOOL_A);
+    const after = await guardRequestFor(
+      withToken("curb-phone-a", { schoolId: SCHOOL_A }),
+      d,
+      "announce",
+    );
+
+    expect(before.ok).toBe(true);
+    expect(after.ok).toBe(false);
+  });
+
+  it("never treats an anonymous session as an office account, whatever a row says", async () => {
+    const access = world();
+    access.addUser("odd", { userId: "user-odd", isAnonymous: true });
+    access.grant("user-odd", SCHOOL_A, { kind: "member", role: "owner" });
+
+    const result = await guardRequestFor(
+      withToken("odd", { schoolId: SCHOOL_A }),
+      deps({ access }),
+      "office",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(403);
+  });
+
+  it("refuses a token the sign-in service does not recognise", async () => {
+    const result = await guardRequestFor(
+      withToken("made-up", { schoolId: SCHOOL_A }),
+      deps({ access: world() }),
+      "announce",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(401);
+    await expect(result.response.json()).resolves.toEqual({
+      error: expect.stringMatching(/sign in/i),
+    });
+  });
+
+  it("refuses a request with no token and no PIN", async () => {
+    const result = await guardRequestFor(
+      post({ deviceId: "phone-1", schoolId: SCHOOL_A }),
+      deps({ access: world() }),
+      "announce",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(401);
+  });
+
+  it("refuses a missing or malformed school id before looking anything up", async () => {
+    for (const schoolId of [undefined, "", "school-a", 7, `${SCHOOL_A}'--`]) {
+      const result = await guardRequestFor(
+        withToken("office-a", { schoolId }),
+        deps({ access: world() }),
+        "office",
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.response.status).toBe(400);
+    }
+  });
+
+  it("says the sign-in service is down rather than that the sign-in is wrong", async () => {
+    const access = world();
+    access.failNextVerify();
+    const result = await guardRequestFor(
+      withToken("office-a", { schoolId: SCHOOL_A }),
+      deps({ access }),
+      "office",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(503);
+  });
+
+  it("works with no staff PIN configured: sessions do not depend on it", async () => {
+    const result = await guardRequestFor(
+      withToken("office-a", { schoolId: SCHOOL_A }),
+      deps({ access: world(), staffPin: undefined }),
+      "office",
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("still applies the per-device spam limit", async () => {
+    const d = deps({
+      access: world(),
+      rateLimiter: createRateLimiter({ limit: 1, windowMs: 60_000 }),
+    });
+    await guardRequestFor(
+      withToken("office-a", { schoolId: SCHOOL_A }),
+      d,
+      "office",
+    );
+    const second = await guardRequestFor(
+      withToken("office-a", { schoolId: SCHOOL_A }),
+      d,
+      "office",
+    );
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.response.status).toBe(429);
+  });
+});
+
+describe("guardRequest with the staff PIN, now that schools exist", () => {
+  it("always means the legacy school, whatever school the body names", async () => {
+    const result = await guardRequestFor(
+      post({ pin: STAFF_PIN, deviceId: "phone-1", schoolId: SCHOOL_B }),
+      deps({ access: world() }),
+      "office",
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.schoolId).toBe(LEGACY_SCHOOL_ID);
+    expect(result.caller).toEqual({ kind: "legacy-pin" });
+  });
+
+  it("does not let a wrong PIN be rescued by a valid session", async () => {
+    const access = world();
+    const result = await guardRequestFor(
+      post(
+        { pin: "0000", deviceId: "phone-1", schoolId: SCHOOL_A },
+        { authorization: "Bearer office-a" },
+      ),
+      deps({ access }),
+      "office",
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(401);
+    // Judged by the PIN alone: the token was never even looked at.
+    expect(access.verified).toEqual([]);
+  });
+
+  it("does not ask the sign-in service about a PIN request", async () => {
+    const access = world();
+    await guardRequestFor(
+      post({ pin: STAFF_PIN, deviceId: "phone-1" }),
+      deps({ access }),
+      "announce",
+    );
+    expect(access.verified).toEqual([]);
+  });
+});
+
+describe("authenticateRequest", () => {
+  it("returns the signed-in user, anonymous or not, with no school involved", async () => {
+    const result = await authenticateRequest(
+      withToken("stranger", { code: "ABC123" }),
+      deps({ access: world() }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.user).toEqual({
+      userId: "user-stranger",
+      isAnonymous: true,
+      emailConfirmed: true,
+    });
+    expect(result.body.code).toBe("ABC123");
+  });
+
+  it("has no staff-PIN way through", async () => {
+    const result = await authenticateRequest(
+      post({ pin: STAFF_PIN, deviceId: "phone-1" }),
+      deps({ access: world() }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(401);
+  });
+
+  it("refuses the project's public key, which is a token but not a person", async () => {
+    const result = await authenticateRequest(
+      withToken("anon-public-key", {}),
+      deps({ access: world() }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(401);
+  });
+
+  it("refuses anything but POST", async () => {
+    const result = await authenticateRequest(
+      new Request("https://example.test/fn", { method: "GET" }),
+      deps({ access: world() }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(405);
+  });
+});
+
+describe("guardSessionRequest", () => {
+  it("accepts a session exactly as guardRequest does", async () => {
+    const result = await guardSessionRequest(
+      withToken("office-a", { schoolId: SCHOOL_A }),
+      deps({ access: world() }),
+      "office",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.schoolId).toBe(SCHOOL_A);
+  });
+
+  it("gives the staff PIN nothing, even the right one", async () => {
+    const result = await guardSessionRequest(
+      post({ pin: STAFF_PIN, deviceId: "phone-1" }),
+      deps({ access: world() }),
+      "office",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(401);
+  });
+
+  it("keeps devices out of office endpoints", async () => {
+    const result = await guardSessionRequest(
+      withToken("curb-phone-a", { schoolId: SCHOOL_A }),
+      deps({ access: world() }),
+      "office",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(403);
+  });
+
+  it("refuses another school", async () => {
+    const result = await guardSessionRequest(
+      withToken("office-a", { schoolId: SCHOOL_B }),
+      deps({ access: world() }),
+      "office",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(403);
   });
 });
