@@ -100,3 +100,73 @@ describe("auth boundary", () => {
     },
   );
 });
+
+/**
+ * The per-entrypoint check above only reads the one module an entrypoint
+ * imports, and only knows a few spellings. This one reads every file a handler
+ * could delegate to and knows the shape instead: outside the guard, the school
+ * is only ever something handed down (`guard.schoolId`, a `schoolId` parameter),
+ * never something looked up by name in what the caller sent.
+ */
+describe("no handler file takes the school from the request body", () => {
+  const files = readdirSync(HANDLERS_DIR).filter(
+    (name) =>
+      name.endsWith(".ts") &&
+      !name.endsWith(".test.ts") &&
+      !name.startsWith("fake-") &&
+      // The guard is the one place the body's claim is read, and checked.
+      name !== "guard.ts",
+  );
+
+  /** Comments may say "body.schoolId" in prose; only code counts. */
+  function stripComments(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  const FORBIDDEN: [string, RegExp][] = [
+    ["the body key by name", /["'`]schoolId["'`]/],
+    ["a property read off a body", /\bbody\s*(\?\.|\.)\s*schoolId\b/],
+    [
+      "destructuring from a body",
+      /\{[^{}]*\bschoolId\b[^{}]*\}\s*=\s*[^;]*\bbody\b/,
+    ],
+  ];
+
+  it("finds the handler files", () => {
+    expect(files.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it.each(files)("%s", (name) => {
+    const code = stripComments(readFileSync(join(HANDLERS_DIR, name), "utf8"));
+    for (const [what, pattern] of FORBIDDEN) {
+      expect(pattern.test(code), `${name} uses ${what}`).toBe(false);
+    }
+  });
+
+  it("would catch each spelling", () => {
+    const samples = [
+      'const id = readString(body, "schoolId");',
+      "const id = guard.body.schoolId;",
+      "const id = body?.schoolId;",
+      "const { schoolId } = guard.body;",
+      "const { action, schoolId: id } = body;",
+    ];
+    for (const sample of samples) {
+      expect(
+        FORBIDDEN.some(([, pattern]) => pattern.test(sample)),
+        sample,
+      ).toBe(true);
+    }
+    // And leaves the legitimate spellings alone.
+    for (const fine of [
+      "const store = deps.stores.forSchool(guard.schoolId);",
+      "forSchool(schoolId: string): RosterStore;",
+      "const { schoolId, body } = guard;",
+    ]) {
+      expect(
+        FORBIDDEN.some(([, pattern]) => pattern.test(fine)),
+        fine,
+      ).toBe(false);
+    }
+  });
+});
