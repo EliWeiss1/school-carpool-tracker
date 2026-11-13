@@ -6,7 +6,9 @@ import type { MetadataRoute } from "next";
  * Colours are the Curbside tokens, spelled out because a manifest is JSON the
  * browser reads, not CSS Tailwind can resolve: ink `#10151f` for both the splash
  * ground and the status bar, so the app opens straight into its own header with
- * no white flash. `start_url` is the landing page rather than /announce so
+ * no white flash. `start_url` is /app, a launcher that sends an installed app
+ * to the screen picker: not to the public landing page at `/`, which is for
+ * visitors who do not have the app yet, and not to one lane, so
  * nobody is stranded on one lane when they wanted another.
  */
 export default function manifest(): MetadataRoute.Manifest {
@@ -14,7 +16,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "CarpoolCaller",
     short_name: "CarpoolCaller",
     description: "Live pickup-line status board for the school carpool queue.",
-    start_url: "/",
+    start_url: "/app",
     scope: "/",
     display: "standalone",
     background_color: "#10151f",

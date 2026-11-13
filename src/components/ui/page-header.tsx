@@ -44,7 +44,7 @@ export function PageHeader({
         )}
       >
         <Link
-          href="/"
+          href="/screens"
           className={cn(
             "focus-ring rounded-lg text-marigold-400 transition-opacity hover:opacity-80 active:opacity-60",
             dense && "flex min-h-tap items-center",

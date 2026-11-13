@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import Link from "next/link";
+import type { ButtonHTMLAttributes, ComponentProps, ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
 
@@ -47,6 +48,32 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
+/** The classes shared by `Button` and `ButtonLink`, so the two never drift. */
+function buttonClasses({
+  variant,
+  size,
+  fullWidth,
+  className,
+}: {
+  variant: ButtonVariant;
+  size: ButtonSize;
+  fullWidth: boolean;
+  className?: string;
+}): string {
+  return cn(
+    "focus-ring inline-flex items-center justify-center gap-3 rounded-xl font-display font-semibold",
+    // Never `transition-all`: on the /display machine that is a repaint of
+    // every tile. Only the properties that actually change are animated.
+    "transition-[transform,background-color,border-color,box-shadow,opacity] duration-150 ease-spring",
+    "active:scale-[0.98]",
+    "disabled:pointer-events-none disabled:opacity-50",
+    VARIANTS[variant],
+    SIZES[size],
+    fullWidth && "w-full",
+    className,
+  );
+}
+
 export function Button({
   variant = "primary",
   size = "md",
@@ -58,18 +85,34 @@ export function Button({
   return (
     <button
       type={type}
-      className={cn(
-        "focus-ring inline-flex items-center justify-center gap-3 rounded-xl font-display font-semibold",
-        // Never `transition-all`: on the /display machine that is a repaint of
-        // every tile. Only the properties that actually change are animated.
-        "transition-[transform,background-color,border-color,box-shadow,opacity] duration-150 ease-spring",
-        "active:scale-[0.98]",
-        "disabled:pointer-events-none disabled:opacity-50",
-        VARIANTS[variant],
-        SIZES[size],
-        fullWidth && "w-full",
-        className,
-      )}
+      className={buttonClasses({ variant, size, fullWidth, className })}
+      {...props}
+    />
+  );
+}
+
+export interface ButtonLinkProps extends ComponentProps<typeof Link> {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  fullWidth?: boolean;
+  children: ReactNode;
+}
+
+/**
+ * The same button, for an action that is really navigation ("Get started",
+ * "Sign in"). A link keeps middle-click, the status-bar URL and the right
+ * screen-reader role, none of which a `<button>` with a router push has.
+ */
+export function ButtonLink({
+  variant = "primary",
+  size = "md",
+  fullWidth = false,
+  className,
+  ...props
+}: ButtonLinkProps) {
+  return (
+    <Link
+      className={buttonClasses({ variant, size, fullWidth, className })}
       {...props}
     />
   );

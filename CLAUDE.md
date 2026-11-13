@@ -160,8 +160,14 @@ Supabase CLI is intentionally not a project dependency — use `npx`:
 ```
 src/
   app/
-    page.tsx            landing page linking to the three screens, plus the
-                        bottom-pinned install card (components/home/)
+    page.tsx            the public landing page for schools that do not use
+                        the app yet (components/landing/); links to /signup
+                        and /login
+    screens/            the screen picker linking to the three screens, plus
+                        the bottom-pinned install card (components/home/).
+                        PageHeader's back arrow comes here
+    app/                where an installed app opens (manifest start_url):
+                        redirects to the screen picker, never the landing page
     manifest.ts         the PWA web app manifest (installable on Android/iOS)
     layout.tsx          root layout, light-only color scheme, registers sw.js
     globals.css         Tailwind entry + reduced-motion guard
@@ -187,7 +193,13 @@ src/
                         and the bottom sheet of class chips it opens
                         recent-announcements.tsx: the idle screen's last
                         five names this device announced, each with Send back
-    home/               install-card.tsx: the "add to home screen" prompt on /
+    landing/            the public landing page: landing-hero.tsx (nav + hero),
+                        pickup-demo.tsx (the hero's looping demo, drawn with
+                        the real board tile; script in lib/landing-demo.ts,
+                        one still frame under reduced motion),
+                        landing-sections.tsx (the sections below the rule)
+    home/               install-card.tsx: the "add to home screen" prompt on
+                        /screens
                         (logic in lib/install-prompt.ts, hook in
                         lib/use-install-prompt.ts; sw.js in public/ caches
                         nothing on purpose -- it only satisfies Chrome's
@@ -679,6 +691,13 @@ Three levels and nothing in between. Shadows are ink-tinted and layered — neve
 
 Radii: `rounded-xl` for controls, `rounded-2xl` for surfaces. Nothing else.
 
+**Atmosphere, landing page only.** The public landing page's two ink bands
+use `bg-curb-dusk` (two layered radial washes, cobalt and marigold, defined in
+`tailwind.config.ts`) over `bg-curb-900`, with the `.grain` utility
+(`globals.css`: a static SVG noise layer on a pseudo-element; needs
+`relative isolate` on its element). Nowhere else: `/display` stays flat ink,
+because a wall board needs every bit of contrast.
+
 ### Motion
 
 Only `transform` and `opacity`. **Never `transition-all`** — on the slow stick PC
@@ -720,7 +739,8 @@ focus treatment in the app and it reads on both the light routes and the ink
 
 ### Shared components — reuse, do not reimplement
 
-`src/components/ui/`: `Button` (variants `primary` | `secondary` | `quiet` |
+`src/components/ui/`: `Button` and its link twin `ButtonLink` (same classes, for
+navigation such as "Get started"; variants `primary` | `secondary` | `quiet` |
 `quiet-ink` | `danger`; sizes `sm` | `md` | `tap` | `candidate`), `PageHeader`,
 `HazardRule`, `PinGate`, `ErrorBanner`, `EmptyState`, `LoadingState`.
 

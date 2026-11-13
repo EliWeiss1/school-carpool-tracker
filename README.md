@@ -58,8 +58,10 @@ checklist.
 ## Installing on a phone
 
 The site is an installable PWA, so staff can keep it on a phone's home screen
-instead of using an app store. The landing page (`/`) shows an "add to home
-screen" card at the bottom, on phones and tablets only:
+instead of using an app store. The screen picker (`/screens`) shows an "add to
+home screen" card at the bottom, on phones and tablets only. (`/` is the public
+landing page for schools that do not use the app yet; an installed app opens at
+`/app`, which goes to the screen picker.)
 
 - **Android (Chrome):** the card has an **Install** button that opens the
   browser's own install dialog.

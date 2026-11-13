@@ -99,6 +99,16 @@ const config: Config = {
           "0 1px 0 0 rgb(255 255 255 / 0.06) inset, 0 8px 32px -10px rgb(251 252 255 / 0.4)",
       },
 
+      backgroundImage: {
+        // The ink ground at dusk: a cobalt wash from the top right (the board
+        // glow) and a faint marigold one from the bottom left (the kerb). Used
+        // on the landing page ink bands only, always over `bg-curb-900` and
+        // under `.grain`. /display stays flat ink: a wall board needs every
+        // bit of contrast and gains nothing from atmosphere.
+        "curb-dusk":
+          "radial-gradient(64rem 32rem at 88% -10%, rgb(34 98 232 / 0.26), transparent 62%), radial-gradient(44rem 26rem at 4% 108%, rgb(245 165 36 / 0.13), transparent 60%)",
+      },
+
       transitionTimingFunction: {
         // Spring for anything a finger touches; ease-out for everything else.
         spring: "cubic-bezier(0.34, 1.56, 0.64, 1)",
