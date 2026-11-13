@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { CarpoolDemo } from "@/components/landing/carpool-demo";
 import { ButtonLink } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
@@ -203,6 +204,40 @@ export function ScreensSection() {
   );
 }
 
+/* -------------------------------------------------------------- carpool */
+
+/**
+ * The carpool band, on ink so the demo's board sits on the ground the real
+ * board does. The picture is the argument here: the visitor calls a carpool
+ * themselves, so the copy is one headline and one line.
+ */
+export function CarpoolSection() {
+  return (
+    <div className="grain relative isolate overflow-hidden bg-curb-900 bg-curb-dusk text-white">
+      <Section
+        labelledBy="carpool-heading"
+        className="grid gap-12 py-16 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:items-center lg:gap-16 lg:py-24"
+      >
+        <div>
+          <h2
+            id="carpool-heading"
+            className="font-display text-5xl font-extrabold tracking-display"
+          >
+            Say one name. Call the whole carpool.
+          </h2>
+          <p className="mt-6 text-xl text-curb-300">
+            Untick anyone staying late, then tap once.
+          </p>
+          <p className="mt-6 font-display text-xl font-bold text-marigold-400">
+            Try it.
+          </p>
+        </div>
+        <CarpoolDemo />
+      </Section>
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------- confirm */
 
 const lookalikes = [
@@ -314,6 +349,74 @@ export function SetupSection() {
         </ol>
       </Section>
     </div>
+  );
+}
+
+/* --------------------------------------------------------- testimonials */
+
+/**
+ * STAND-INS. These three quotes are placeholders written to size the section,
+ * not things anyone said. The attribution says "Name to come" so the page
+ * cannot be mistaken for carrying real endorsements. Replace all three with
+ * real quotes, names and positions before the page is shown to the public.
+ */
+const testimonials = [
+  {
+    quote:
+      "Teachers hear the chime and send the child out. Nobody watches the door any more.",
+    name: "Name to come",
+    position: "Front office manager",
+    bar: "bg-marigold-500",
+  },
+  {
+    quote: "One name calls the whole carpool. That alone was worth the switch.",
+    name: "Name to come",
+    position: "Dismissal coordinator",
+    bar: "bg-waiting-screen",
+  },
+  {
+    quote: "We set it up at lunch and used it at pickup the same day.",
+    name: "Name to come",
+    position: "Head of school",
+    bar: "bg-curb-900",
+  },
+];
+
+/** Three voices from the pickup line, each under its own lane colour. */
+export function TestimonialsSection() {
+  return (
+    <Section labelledBy="testimonials-heading" className="py-16 lg:py-24">
+      <h2
+        id="testimonials-heading"
+        className="max-w-3xl font-display text-5xl font-extrabold tracking-display text-curb-900"
+      >
+        Heard at pickup.
+      </h2>
+      <ul className="mt-12 grid gap-4 lg:grid-cols-3">
+        {testimonials.map((testimonial) => (
+          <li
+            key={testimonial.quote}
+            className="flex flex-col overflow-hidden rounded-2xl border border-curb-200 bg-white shadow-card"
+          >
+            <span
+              aria-hidden="true"
+              className={cn("h-3 w-full", testimonial.bar)}
+            />
+            <figure className="flex flex-1 flex-col p-6 sm:p-8">
+              <blockquote className="flex-1 font-display text-2xl font-bold text-curb-900">
+                &ldquo;{testimonial.quote}&rdquo;
+              </blockquote>
+              <figcaption className="mt-8">
+                <p className="font-display text-lg font-bold text-curb-900">
+                  {testimonial.name}
+                </p>
+                <p className="text-curb-600">{testimonial.position}</p>
+              </figcaption>
+            </figure>
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
 }
 

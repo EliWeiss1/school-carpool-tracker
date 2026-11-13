@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 
 import { LandingHero } from "@/components/landing/landing-hero";
 import {
+  CarpoolSection,
   ClosingBand,
   ConfirmSection,
   ScreensSection,
   PrivacySection,
   SetupSection,
+  TestimonialsSection,
 } from "@/components/landing/landing-sections";
 import { HazardRule } from "@/components/ui";
 
@@ -31,8 +33,10 @@ export default function LandingPage() {
       {/* The one hazard rule, in its usual place: directly under the header. */}
       <HazardRule />
       <ScreensSection />
+      <CarpoolSection />
       <ConfirmSection />
       <SetupSection />
+      <TestimonialsSection />
       <PrivacySection />
       <ClosingBand />
     </main>
