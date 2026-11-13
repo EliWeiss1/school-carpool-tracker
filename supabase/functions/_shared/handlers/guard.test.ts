@@ -506,6 +506,47 @@ describe("guardRequest with a Supabase session", () => {
 });
 
 describe("guardRequest with the staff PIN, now that schools exist", () => {
+  it("holds the wrong-PIN budget against a burst sent all at once", async () => {
+    // The PIN check awaits, so guesses that arrive together used to all read
+    // the budget before any of them had spent it.
+    const d = deps({ access: world() });
+    const results = await Promise.all(
+      Array.from({ length: 50 }, (_, i) =>
+        guardRequestFor(
+          post(
+            { pin: String(1000 + i), deviceId: `burst-${i}` },
+            { "x-forwarded-for": "203.0.113.9" },
+          ),
+          d,
+          "announce",
+        ),
+      ),
+    );
+
+    const statuses = results.map((r) => (r.ok ? 200 : r.response.status));
+    expect(statuses.filter((status) => status === 401)).toHaveLength(10);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(40);
+  });
+
+  it("does not charge correct PINs, however many arrive together", async () => {
+    const d = deps({ access: world() });
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        guardRequestFor(
+          post(
+            { pin: STAFF_PIN, deviceId: `phone-${i}` },
+            { "x-forwarded-for": "203.0.113.9" },
+          ),
+          d,
+          "announce",
+        ),
+      ),
+    );
+
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(d.pinAttemptLimiter.peek("203.0.113.9").remaining).toBe(10);
+  });
+
   it("always means the legacy school, whatever school the body names", async () => {
     const result = await guardRequestFor(
       post({ pin: STAFF_PIN, deviceId: "phone-1", schoolId: SCHOOL_B }),

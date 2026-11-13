@@ -225,10 +225,15 @@ async function guardWithPin(
 
   // The device limiter cannot protect the PIN: deviceId comes out of the
   // request body, so a guesser just sends a new one each time. The guessing
-  // budget is therefore keyed on the client address and spends only on failure,
+  // budget is therefore keyed on the client address and counts only failures,
   // which costs staff who type their PIN correctly exactly nothing.
+  //
+  // It is charged BEFORE the PIN is checked and handed back if the PIN turns
+  // out to be right. Checking first and charging afterwards looks the same but
+  // is not: verifying awaits, so a burst of guesses sent together would all
+  // read an untouched budget before any of them had spent it.
   const clientIp = clientIpOf(request);
-  const guesses = deps.pinAttemptLimiter.peek(clientIp);
+  const guesses = deps.pinAttemptLimiter.check(clientIp);
   if (!guesses.allowed) {
     return refuse(
       429,
@@ -242,9 +247,9 @@ async function guardWithPin(
     deps.staffPin,
   );
   if (!pinIsValid) {
-    deps.pinAttemptLimiter.check(clientIp);
     return refuse(401, "That PIN was not recognised. Check with the office.");
   }
+  deps.pinAttemptLimiter.forgive(clientIp);
 
   return {
     ok: true,

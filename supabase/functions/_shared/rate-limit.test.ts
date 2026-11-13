@@ -121,3 +121,36 @@ describe("createRateLimiter", () => {
     expect(limiter.size()).toBe(1);
   });
 });
+
+describe("forgive", () => {
+  it("hands back what a check spent, so only failures add up", () => {
+    const limiter = createRateLimiter({ limit: 2, windowMs: 60_000 });
+    for (let i = 0; i < 10; i++) {
+      expect(limiter.check("ip").allowed).toBe(true);
+      limiter.forgive("ip");
+    }
+    expect(limiter.peek("ip").remaining).toBe(2);
+  });
+
+  it("does not forgive what was never forgiven: failures still run out", () => {
+    const limiter = createRateLimiter({ limit: 2, windowMs: 60_000 });
+    expect(limiter.check("ip").allowed).toBe(true);
+    expect(limiter.check("ip").allowed).toBe(true);
+    expect(limiter.check("ip").allowed).toBe(false);
+  });
+
+  it("never takes a key below zero", () => {
+    const limiter = createRateLimiter({ limit: 1, windowMs: 60_000 });
+    limiter.forgive("ip");
+    limiter.forgive("ip");
+    expect(limiter.check("ip").allowed).toBe(true);
+    expect(limiter.check("ip").allowed).toBe(false);
+  });
+
+  it("leaves other keys alone", () => {
+    const limiter = createRateLimiter({ limit: 1, windowMs: 60_000 });
+    limiter.check("a");
+    limiter.forgive("b");
+    expect(limiter.peek("a").allowed).toBe(false);
+  });
+});

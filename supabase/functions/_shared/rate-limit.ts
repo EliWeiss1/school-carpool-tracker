@@ -35,6 +35,14 @@ export interface RateLimiter {
   check(key: string): RateLimitResult;
   /** What `check` would say, without spending any of the key's budget. */
   peek(key: string): RateLimitResult;
+  /**
+   * Hands back one unit a `check` spent. For budgets that should only count
+   * failures (a wrong PIN, a wrong code): `check` first, so the attempt is
+   * counted before the slow part starts and a burst of parallel guesses cannot
+   * all slip in under the limit, then `forgive` once it turns out to be right.
+   * Never takes a key below zero and never revives an expired window.
+   */
+  forgive(key: string): void;
   /** Number of devices currently tracked. Operational readout. */
   size(): number;
 }
@@ -97,6 +105,12 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         remaining: Math.max(limit - spent, 0),
         retryAfterSeconds: allowed ? 0 : Math.ceil((windowMs - elapsed) / 1000),
       };
+    },
+
+    forgive(key: string): void {
+      const window = windows.get(key);
+      if (!window || now() - window.startedAt >= windowMs) return;
+      window.count = Math.max(window.count - 1, 0);
     },
 
     size(): number {
