@@ -117,6 +117,29 @@ names only. The Deepgram key, the Supabase service-role key, and the staff PIN
 are server-side only — they live in Supabase and Vercel project settings and
 never appear in the client bundle.
 
+## Multi-school (in progress, `preview/multi-school` only)
+
+This branch is turning the app into a service many schools can sign up for.
+None of it is deployed. What is built so far:
+
+- A public landing page at `/`.
+- Office accounts: `/signup`, `/login`, `/forgot-password`, `/reset-password`,
+  then `/welcome` to name the school and choose its web address
+  (`/s/<school>`). One email and password per school; it can be used on
+  several office computers.
+- Curb phones and wall boards have no account. The office sets a short code,
+  a device enters it once and stays connected until the office disconnects
+  it. (The screens that ask for the code are the next phase.)
+- Every school's students, classes, carpools and history are kept separate in
+  the database and by every server function.
+- An optional captcha on the account forms: set
+  `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (see `.env.example`).
+
+The existing school keeps working exactly as before, with its staff PIN, until
+a deliberate cutover. Design and phases:
+[docs/superpowers/specs/2026-11-12-multi-school-design.md](docs/superpowers/specs/2026-11-12-multi-school-design.md);
+current state: the "Multi-school conversion" section of [CLAUDE.md](CLAUDE.md).
+
 ## Build status
 
 Phase 1 (scaffold) complete. Phases 2–7 — data layer, Edge Function and

@@ -107,6 +107,96 @@ against the real 36-student roster (fixed, verified at both 26 and 36
 students), and a Puppeteer-only false alarm on the mic button that led to a
 defensive fix on its own merits. See `HANDOFF.md` for the full account.
 
+## Multi-school conversion (in progress on `preview/multi-school`, nothing deployed)
+
+The app is being converted from one school to a service many schools sign up
+for. The approved design and phase list is
+`docs/superpowers/specs/2026-11-12-multi-school-design.md`. **Phases 0 to 4 are
+built on this branch. None of it is applied to the live database, deployed as
+a function, or merged to `master`.** Everything below this section still
+describes production truthfully until the cutover in phase 7.
+
+**What exists on this branch**
+
+- **Landing page** at `/` (`components/landing/`); the old screen picker is at
+  `/screens` and an installed app opens `/app`.
+- **Tenancy schema** (`20261112120000_multi_school_expand.sql`): `schools`,
+  `school_secrets`, `school_members`, `school_devices`, `school_usage`, and a
+  `school_id` on all six data tables with composite `(school_id, id)` foreign
+  keys. Existing rows belong to school #1
+  (`00000000-0000-4000-8000-000000000001`). `school_id` has a column DEFAULT of
+  school #1 until the contract migration, so **an insert that omits
+  `school_id` does not fail, it files the row under school #1** — the reason
+  every store query goes through `scopedClient`.
+- **School functions** (`20261113120000_school_functions.sql`):
+  `create_school`, `note_pair_failure`, `set_school_code`, `pair_device`;
+  service-role only.
+- **The guard** (`_shared/handlers/guard.ts`). `guardRequest(request, deps,
+  capability)` accepts a Supabase session (`Authorization: Bearer <access
+  token>` plus `schoolId` in the body) or, until cutover, the legacy staff PIN
+  (`pin` in the body, which always means school #1 whatever the body says).
+  Capabilities: `announce` (office login, or a device paired with the announce
+  code) and `office` (office login only). A wall board has no capability: it
+  only reads, through RLS. `guardSessionRequest` and `authenticateRequest` are
+  the PIN-free variants used by the two new functions. A handler takes the
+  school from `guard.schoolId` and never from the body
+  (`auth-boundary.test.ts` enforces both).
+- **School-scoped stores.** `createSupabaseStores(env).forSchool(id)` returns a
+  `RosterStore` for one school; `scopedClient` is the only place a query is
+  built (`store-scoping.test.ts` fails on a raw `.from(` / `.rpc(`).
+  `handlers/tenant-isolation.test.ts` runs every store method and every
+  endpoint against two schools with identical names.
+- **Two new Edge Functions**, neither of which accepts the staff PIN
+  (`pin-budget.test.ts` asserts it):
+
+  | Endpoint | Body | Returns |
+  | --- | --- | --- |
+  | `pair-device` | `schoolSlug`, `code`, `label?` (Bearer: the device's anonymous session) | `{ school: { id, name, slug }, canAnnounce, canDisplay }`; the same 403 for an unknown school, a malformed code and a wrong code; 429 when the network or the school is locked out |
+  | `school-write` — `create` | `name`, `slug`, `timezone` (Bearer: a confirmed office login) | `{ school, created }` (`created: false` returns the account's existing school); 409 when the web address is taken |
+  | `school-write` — `update-settings` | `schoolId`, `name?`, `timezone?`, `resetHour?`, `resetDays?` | `{ school }` |
+  | `school-write` — `get-codes` | `schoolId` | `{ announceCode, displayCode }` |
+  | `school-write` — `set-code` | `schoolId`, `which: "announce"\|"display"\|"both"`, `code` (6 to 20 letters and digits, or null to turn pairing off), `disconnectDevices?` | `{ announceCode, displayCode, disconnected }` |
+  | `school-write` — `list-devices` | `schoolId` | `{ devices[] }` (never a user id) |
+  | `school-write` — `disconnect-device` | `schoolId`, `deviceRowId` | `{ disconnected }`; also deletes that device's anonymous session |
+
+  Wrong device codes: 5 per 10 minutes per network (in the function), and 10
+  per 10 minutes per school locks **new pairings** for 15 minutes (in the
+  database). A lockout never disconnects a device that is already connected.
+- **Office accounts** (Supabase Auth, `@supabase/ssr`): `/signup`, `/login`,
+  `/forgot-password`, `/reset-password`, `/auth/confirm`, `/welcome` (creates
+  the school), `/app` (launcher), `/s/[school]` (the school's hub).
+  `src/middleware.ts` refreshes the office session on those routes only; it
+  never runs on `/`, `/display`, `/announce`, `/admin` or `/screens`. The
+  office session lives in cookies; a paired device's session lives in
+  `localStorage` under its own key (`lib/supabase/device.ts`), so an office
+  login on a wall board's browser never knocks the board off.
+- **API clients** (`lib/api.ts`, `lib/admin-api.ts`, `lib/school-api.ts`):
+  `Credentials` is either `{ pin, deviceId }` (legacy, unchanged on the wire)
+  or `{ schoolId, accessToken, deviceId }`.
+- `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (optional): shows a Cloudflare Turnstile
+  widget on sign-up, login and forgot-password when set.
+
+**What does not exist yet**
+
+- Phase 5: `/s/[school]/announce`, `/display`, `/admin`, the device code gate,
+  the Devices and School settings panels, and the live board on per-school
+  Broadcast topics. The hub's three links lead nowhere until then.
+- Phase 6: per-school nightly reset and voice caps.
+- Phase 7: rollout, cutover, and removing the PIN and `DISPLAY_PASSWORD`.
+
+**Not yet proven.** No Deno and no Docker on this machine, so
+`supabase-store.deno.ts`, `access-store.deno.ts`, `school-store.deno.ts` and
+the entrypoints have never run; their scoping rests on reading, the static
+tests and PGlite. Nothing in the auth pages has run against a real Auth
+server. Both need a Supabase test branch or the rollout to confirm.
+
+**Rule that changes at cutover.** "The staff PIN is held in memory only"
+becomes "no code or password is ever stored on a device; a device holds only a
+revocable session."
+
+**The landing page's testimonials are stand-ins** ("Name to come"). Replace
+them with real quotes before the page is public.
+
 ## Architecture — decided, do not re-litigate
 
 | Concern          | Decision                                                                                                       |
