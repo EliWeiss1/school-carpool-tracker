@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { createFakeStore, makeStudent } from "./fake-store.ts";
+import { createFakeStore, makeStudent, legacyStores } from "./fake-store.ts";
+import { createFakeAccess } from "./fake-access.ts";
 import { createRosterDeleteHandler } from "./roster-delete.ts";
 
 const STAFF_PIN = "4821";
@@ -15,7 +16,8 @@ function setup() {
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 20, windowMs: 60_000 }),
     pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-    store,
+    stores: legacyStores(store),
+    access: createFakeAccess(),
   });
   return { store, handle };
 }

@@ -37,14 +37,18 @@ import {
 } from "./roster-input.ts";
 
 export interface RosterImportHandlerDeps extends GuardDeps {
-  store: Pick<
-    RosterStore,
-    | "bulkCreateStudents"
-    | "list"
-    | "listCarpools"
-    | "createCarpool"
-    | "listClassGroups"
-  >;
+  stores: {
+    forSchool(
+      schoolId: string,
+    ): Pick<
+      RosterStore,
+      | "bulkCreateStudents"
+      | "list"
+      | "listCarpools"
+      | "createCarpool"
+      | "listClassGroups"
+    >;
+  };
 }
 
 /** Comfortably above any real school roster; a stop against a malformed body. */
@@ -116,7 +120,7 @@ function readStudentsInput(body: Record<string, unknown>): ParseResult {
  * first unknown name, in row order, refuses the whole import.
  */
 async function resolveClasses(
-  store: RosterImportHandlerDeps["store"],
+  store: ReturnType<RosterImportHandlerDeps["stores"]["forSchool"]>,
   rows: ParsedRow[],
 ): Promise<{ ok: true; rows: ImportRow[] } | { ok: false; unknown: string }> {
   const classes = await store.listClassGroups();
@@ -137,7 +141,7 @@ async function resolveClasses(
  * new row rather than each creating their own.
  */
 async function resolveCarpools(
-  store: RosterImportHandlerDeps["store"],
+  store: ReturnType<RosterImportHandlerDeps["stores"]["forSchool"]>,
   rows: ImportRow[],
 ): Promise<StudentWriteInput[]> {
   const existing = await store.listCarpools();
@@ -169,8 +173,9 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "office");
     if (!guard.ok) return guard.response;
+    const store = deps.stores.forSchool(guard.schoolId);
 
     const parsed = readStudentsInput(guard.body);
     if (!parsed.ok) return errorResponse(400, parsed.message);
@@ -185,7 +190,7 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
     }
 
     return await withStoreErrors(async () => {
-      const withClasses = await resolveClasses(deps.store, parsed.rows);
+      const withClasses = await resolveClasses(store, parsed.rows);
       if (!withClasses.ok) {
         return errorResponse(422, unknownClassMessage(withClasses.unknown));
       }
@@ -206,7 +211,7 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
       // computer, a term at a time -- but a unique index on
       // (lower(first_name), lower(last_name)) is the real fix and is the
       // recommended follow-up.
-      const existing = await deps.store.list({});
+      const existing = await store.list({});
       const onRoster = new Set(
         existing.map((student) =>
           nameKey(student.first_name, student.last_name),
@@ -226,9 +231,9 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
       // Carpools named in the file are created (or matched by name) before
       // any student row is written, so every row that names one lands with
       // its carpool_id already set rather than needing a second pass.
-      const withCarpools = await resolveCarpools(deps.store, students);
+      const withCarpools = await resolveCarpools(store, students);
 
-      const created = await deps.store.bulkCreateStudents(withCarpools);
+      const created = await store.bulkCreateStudents(withCarpools);
       return jsonResponse({ created: created.length, students: created });
     });
   };

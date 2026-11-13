@@ -18,7 +18,9 @@ import { type GuardDeps, guardRequest } from "./guard.ts";
 import { rosterFilterFrom } from "./filter.ts";
 
 export interface TokenHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "list" | "listCarpools">;
+  stores: {
+    forSchool(schoolId: string): Pick<RosterStore, "list" | "listCarpools">;
+  };
   /** Closes over the permanent key and mock flag; see deepgram.ts. */
   mintToken: () => Promise<DeepgramToken>;
 }
@@ -28,13 +30,14 @@ export function createTokenHandler(deps: TokenHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "announce");
     if (!guard.ok) return guard.response;
+    const store = deps.stores.forSchool(guard.schoolId);
 
     return await withStoreErrors(async () => {
       const [roster, carpools] = await Promise.all([
-        deps.store.list(rosterFilterFrom(guard.body)),
-        deps.store.listCarpools(),
+        store.list(rosterFilterFrom(guard.body)),
+        store.listCarpools(),
       ]);
       const keyterms = buildKeyterms(roster, carpools);
 

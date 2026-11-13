@@ -34,15 +34,24 @@ import type { RosterStore } from "../ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
 import { MAX_NAME_LENGTH, nameTooLong } from "./roster-input.ts";
 
+/** What the helpers below need: one school's store, already chosen by the guard. */
+type ScopedDeps = {
+  store: ReturnType<ClassesWriteHandlerDeps["stores"]["forSchool"]>;
+};
+
 export interface ClassesWriteHandlerDeps extends GuardDeps {
-  store: Pick<
-    RosterStore,
-    | "listClassGroups"
-    | "createClassGroup"
-    | "removeClassGroup"
-    | "changeClassMembers"
-    | "reorderClassGroups"
-  >;
+  stores: {
+    forSchool(
+      schoolId: string,
+    ): Pick<
+      RosterStore,
+      | "listClassGroups"
+      | "createClassGroup"
+      | "removeClassGroup"
+      | "changeClassMembers"
+      | "reorderClassGroups"
+    >;
+  };
 }
 
 const ACTIONS = ["create", "delete", "reorder", "members"] as const;
@@ -103,8 +112,11 @@ export function createClassesWriteHandler(deps: ClassesWriteHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "office");
     if (!guard.ok) return guard.response;
+    const scoped: ScopedDeps = {
+      store: deps.stores.forSchool(guard.schoolId),
+    };
 
     const action = readAction(guard.body.action);
     if (action === null) {
@@ -115,16 +127,16 @@ export function createClassesWriteHandler(deps: ClassesWriteHandlerDeps) {
     }
 
     return await withStoreErrors(async () => {
-      if (action === "delete") return await remove(deps, guard.body);
-      if (action === "reorder") return await reorder(deps, guard.body);
-      if (action === "members") return await changeMembers(deps, guard.body);
-      return await create(deps, guard.body);
+      if (action === "delete") return await remove(scoped, guard.body);
+      if (action === "reorder") return await reorder(scoped, guard.body);
+      if (action === "members") return await changeMembers(scoped, guard.body);
+      return await create(scoped, guard.body);
     });
   };
 }
 
 async function create(
-  deps: ClassesWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const name = readString(body, "name");
@@ -157,7 +169,7 @@ async function create(
 }
 
 async function remove(
-  deps: ClassesWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const classId = readString(body, "classId");
@@ -199,7 +211,7 @@ async function remove(
 }
 
 async function changeMembers(
-  deps: ClassesWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const classId = readString(body, "classId");
@@ -234,7 +246,7 @@ async function changeMembers(
 }
 
 async function reorder(
-  deps: ClassesWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const orderedIds = readOrderedIds(body);

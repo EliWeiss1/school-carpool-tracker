@@ -1,9 +1,16 @@
 /**
- * The RosterStore backed by Postgres, using the service-role key.
+ * The RosterStores backed by Postgres, using the service-role key.
  *
  * Deno-only. This is the single place in the app that can write to the database:
  * RLS gives anon nothing but `select` on students, and the service-role key
  * exists only in this process's environment.
+ *
+ * The service-role key bypasses row-level security, so nothing in the database
+ * stops a query from touching another school. That is this file's job, and it
+ * does it structurally: every query goes through `scopedClient`, which adds the
+ * school to every read, update and delete, stamps it on every insert, and sends
+ * it to every function. `store-scoping.test.ts` fails the build if a raw
+ * `.from(` or `.rpc(` appears anywhere else in this file.
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2.114.0";
@@ -25,13 +32,67 @@ import type {
   RemoveClassGroupOutcome,
   RosterFilter,
   RosterStore,
+  RosterStores,
   StatusEventInput,
   StudentRow,
   StudentStatus,
   StudentWriteInput,
 } from "./ports.ts";
+import { isUuid } from "./schools.ts";
 
 type Client = ReturnType<typeof createClient>;
+
+/** The tables that carry a `school_id`. Anything else cannot be queried here. */
+type SchoolTable =
+  | "students"
+  | "student_parents"
+  | "student_classes"
+  | "status_events"
+  | "carpools"
+  | "class_groups";
+
+/**
+ * The three functions that take `p_school_id`. The unscoped legacy overloads
+ * share these names and still exist during rollout; they are never called from
+ * here, and `scopedClient` always sends `p_school_id` so PostgREST can only
+ * resolve the scoped one.
+ */
+type SchoolRpc =
+  "set_student_classes" | "change_class_members" | "remove_class_group";
+
+type Row = Record<string, unknown>;
+
+/**
+ * The only door to the database in this file. A `school_id` column has a
+ * DEFAULT of school #1 during the rollout, so an insert that forgot it would not
+ * fail -- it would silently file the row under the wrong school. Routing every
+ * query through here makes forgetting impossible instead of unlikely.
+ *
+ * `school_id` is applied after the caller's values, so a row or filter built
+ * from request data can never override it.
+ */
+function scopedClient(client: Client, schoolId: string) {
+  const stamp = (row: Row): Row => ({ ...row, school_id: schoolId });
+  return {
+    select: (table: SchoolTable, columns: string) =>
+      client.from(table).select(columns).eq("school_id", schoolId),
+    update: (table: SchoolTable, patch: Row) =>
+      client.from(table).update(patch).eq("school_id", schoolId),
+    remove: (table: SchoolTable) =>
+      client.from(table).delete().eq("school_id", schoolId),
+    insert: (table: SchoolTable, rows: Row | Row[]) =>
+      client
+        .from(table)
+        .insert(Array.isArray(rows) ? rows.map(stamp) : stamp(rows)),
+    upsert: (table: SchoolTable, row: Row, onConflict: string) =>
+      client.from(table).upsert(stamp(row), { onConflict }),
+    rpc: (name: SchoolRpc, args: Row & { p_school_id?: never }) =>
+      // The school goes last, like `stamp`: nothing in `args` can replace it.
+      client.rpc(name, { ...args, p_school_id: schoolId }),
+  };
+}
+
+type ScopedClient = ReturnType<typeof scopedClient>;
 
 /**
  * A students row joined with its (possibly absent) student_parents row and its
@@ -151,18 +212,22 @@ const PAGE_SIZE = 1000;
  * logged so a persistent failure is at least visible somewhere.
  */
 async function upsertParentNames(
-  client: Client,
+  db: ScopedClient,
   studentId: string,
   parent1Name: string | null,
   parent2Name: string | null,
 ): Promise<void> {
-  const { error } = await client.from("student_parents").upsert(
+  // onConflict names the (school_id, student_id) unique key rather than the
+  // student_id primary key, so a row that somehow exists under another school
+  // is a conflict error here, never an update that would rewrite its school.
+  const { error } = await db.upsert(
+    "student_parents",
     {
       student_id: studentId,
       parent1_name: parent1Name,
       parent2_name: parent2Name,
     },
-    { onConflict: "student_id" },
+    "school_id,student_id",
   );
   if (error) {
     console.error(
@@ -183,12 +248,12 @@ async function upsertParentNames(
  * is at least visible somewhere.
  */
 async function deleteStudentsQuietly(
-  client: Client,
+  db: ScopedClient,
   ids: string[],
 ): Promise<void> {
   for (let start = 0; start < ids.length; start += ID_CHUNK) {
     const chunk = ids.slice(start, start + ID_CHUNK);
-    const { error } = await client.from("students").delete().in("id", chunk);
+    const { error } = await db.remove("students").in("id", chunk);
     if (error) {
       console.error(
         `compensating delete of ${chunk.length} student(s) failed`,
@@ -204,27 +269,38 @@ async function deleteStudentsQuietly(
  * write anything, so that a failed read cannot happen after a commit.
  */
 async function readClassGroups(
-  client: Client,
+  db: ScopedClient,
   failure: string,
 ): Promise<ClassGroupRow[]> {
-  const { data, error } = await client
-    .from("class_groups")
-    .select("*")
+  const { data, error } = await db
+    .select("class_groups", "*")
     .order("sort_order");
   if (error) throw new Error(`${failure}: ${error.message}`);
   return (data ?? []) as ClassGroupRow[];
 }
 
-export function createSupabaseStore(env: FunctionEnv): RosterStore {
+export function createSupabaseStores(env: FunctionEnv): RosterStores {
   const client = createClient(env.supabaseUrl, env.serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
   return {
+    forSchool(schoolId: string): RosterStore {
+      // The guard has already checked this; a malformed id here is a bug in a
+      // caller, and an empty or odd string must never reach a filter.
+      if (!isUuid(schoolId)) {
+        throw new Error("A roster store needs a valid school id.");
+      }
+      return createRosterStore(scopedClient(client, schoolId));
+    },
+  };
+}
+
+function createRosterStore(db: ScopedClient): RosterStore {
+  return {
     async list(filter: RosterFilter): Promise<StudentRow[]> {
-      const { data, error } = await client
-        .from("students")
-        .select(STUDENT_SELECT)
+      const { data, error } = await db
+        .select("students", STUDENT_SELECT)
         .order("last_name");
       if (error) throw new Error(`Could not read the roster: ${error.message}`);
       const rows = ((data ?? []) as unknown as StudentJoinRow[]).map(
@@ -246,9 +322,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
     },
 
     async get(id: string): Promise<StudentRow | null> {
-      const { data, error } = await client
-        .from("students")
-        .select(STUDENT_SELECT)
+      const { data, error } = await db
+        .select("students", STUDENT_SELECT)
         .eq("id", id)
         .maybeSingle();
       if (error)
@@ -264,9 +339,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // student is already in this status, so two simultaneous confirmations
       // produce exactly one change, one audit row and one flash on the display.
       // arrived_at and updated_at are left to the trigger on purpose.
-      const { data, error } = await client
-        .from("students")
-        .update({ status })
+      const { data, error } = await db
+        .update("students", { status })
         .eq("id", id)
         .neq("status", status)
         .select(STUDENT_SELECT)
@@ -292,7 +366,7 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // is the corpus MATCH_POLICY gets retuned from, and a hole in it is a
       // false accept nobody can review later.
       for (let attempt = 0; attempt < 2; attempt++) {
-        const { error } = await client.from("status_events").insert(row);
+        const { error } = await db.insert("status_events", row);
         if (!error) return true;
         console.error(
           `status_events insert failed (try ${attempt + 1})`,
@@ -308,16 +382,15 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // Read first: if this fails, nothing has been written yet.
       const groups =
         classIds.length > 0
-          ? await readClassGroups(client, "Could not add that student")
+          ? await readClassGroups(db, "Could not add that student")
           : [];
 
       // status/arrived_at are never in this payload: the table default and
       // the sync trigger are what put a new student in `waiting`, the same
       // path every other student took. Classes are not a column any more --
       // they are links, written below.
-      const { data, error } = await client
-        .from("students")
-        .insert({
+      const { data, error } = await db
+        .insert("students", {
           first_name: input.first_name,
           last_name: input.last_name,
           aliases: input.aliases,
@@ -333,7 +406,7 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
 
       // A brand-new student has no links, so an empty set needs no call.
       if (classIds.length > 0) {
-        const { error: classError } = await client.rpc("set_student_classes", {
+        const { error: classError } = await db.rpc("set_student_classes", {
           p_student_id: created.id,
           p_class_group_ids: classIds,
         });
@@ -341,13 +414,13 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
           // supabase-js has no transaction across the insert above and this
           // call, so undo the insert by hand: an admin told "could not add
           // that student" must not find them on the roster.
-          await deleteStudentsQuietly(client, [created.id]);
+          await deleteStudentsQuietly(db, [created.id]);
           throw classWriteFailure(classError, "Could not add that student");
         }
       }
 
       await upsertParentNames(
-        client,
+        db,
         created.id,
         input.parent1_name,
         input.parent2_name,
@@ -372,7 +445,7 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // Read first: if this fails, nothing has been written yet.
       const groups =
         class_group_ids !== undefined
-          ? await readClassGroups(client, "Could not update that student")
+          ? await readClassGroups(db, "Could not update that student")
           : [];
 
       // An empty PATCH body (a parent-name- or class-only edit, once
@@ -382,18 +455,16 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // never reach `.update({})` at all.
       let current: StudentRow | null;
       if (!hasStudentFields) {
-        const { data, error } = await client
-          .from("students")
-          .select(STUDENT_SELECT)
+        const { data, error } = await db
+          .select("students", STUDENT_SELECT)
           .eq("id", id)
           .maybeSingle();
         if (error)
           throw new Error(`Could not read that student: ${error.message}`);
         current = data ? toStudentRow(data as unknown as StudentJoinRow) : null;
       } else {
-        const { data, error } = await client
-          .from("students")
-          .update(studentPatch)
+        const { data, error } = await db
+          .update("students", studentPatch)
           .eq("id", id)
           .select(STUDENT_SELECT)
           .maybeSingle();
@@ -409,7 +480,7 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
         // The fields above are already saved, so there is nothing to undo --
         // re-sending the same edit converges. P0002 means the student was
         // removed between the two statements: the same "not found" as above.
-        const { error } = await client.rpc("set_student_classes", {
+        const { error } = await db.rpc("set_student_classes", {
           p_student_id: id,
           p_class_group_ids: class_group_ids,
         });
@@ -431,9 +502,13 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
         parent1_name !== undefined ? parent1_name : current.parent1_name;
       const nextParent2 =
         parent2_name !== undefined ? parent2_name : current.parent2_name;
-      await upsertParentNames(client, id, nextParent1, nextParent2);
+      await upsertParentNames(db, id, nextParent1, nextParent2);
 
-      return { ...current, parent1_name: nextParent1, parent2_name: nextParent2 };
+      return {
+        ...current,
+        parent1_name: nextParent1,
+        parent2_name: nextParent2,
+      };
     },
 
     async setStatusMany(
@@ -446,9 +521,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // row already in `status` matches `neq` and is simply absent from the
       // result, whether it got there from an earlier tap or a race with this
       // very request.
-      const { data, error } = await client
-        .from("students")
-        .update({ status })
+      const { data, error } = await db
+        .update("students", { status })
         .in("id", ids)
         .neq("status", status)
         .select(STUDENT_SELECT);
@@ -465,9 +539,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // `on delete cascade` (see the migrations), so removing these rows here
       // also removes any parent names and class links on file -- nothing here
       // has to do that separately.
-      const { data, error } = await client
-        .from("students")
-        .delete()
+      const { data, error } = await db
+        .remove("students")
         .in("id", ids)
         .select("id");
 
@@ -496,12 +569,12 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
 
       // Read first: if this fails, nothing has been written yet.
       const groups = withIds.some((input) => input.class_group_ids.length > 0)
-        ? await readClassGroups(client, "Could not import the roster")
+        ? await readClassGroups(db, "Could not import the roster")
         : [];
 
-      const { data, error } = await client
-        .from("students")
+      const { data, error } = await db
         .insert(
+          "students",
           withIds.map((input) => ({
             id: input.id,
             first_name: input.first_name,
@@ -529,15 +602,13 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
         })),
       );
       if (links.length > 0) {
-        const { error: linkError } = await client
-          .from("student_classes")
-          .insert(links);
+        const { error: linkError } = await db.insert("student_classes", links);
         if (linkError) {
           // All-or-nothing, like the CSV validation report promised: if the
           // links failed (a class deleted mid-import is the realistic case),
           // take the students back out so a retry does not 409 on every row.
           await deleteStudentsQuietly(
-            client,
+            db,
             withIds.map((input) => input.id),
           );
           throw classWriteFailure(linkError, "Could not import the roster");
@@ -555,9 +626,10 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
         }));
 
       if (parentRows.length > 0) {
-        const { error: parentError } = await client
-          .from("student_parents")
-          .insert(parentRows);
+        const { error: parentError } = await db.insert(
+          "student_parents",
+          parentRows,
+        );
         // Non-throwing, matching upsertParentNames: the roster import itself
         // already committed and must not become unretriable (a re-run would
         // 409 on every row as a duplicate) just because this second write
@@ -587,9 +659,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // never part of this UPDATE, so it never appears in `data`, is never
       // handed to logEvent, and never reaches Realtime as a change at all --
       // one bulk reset cannot manufacture hundreds of no-op flashes.
-      const { data, error } = await client
-        .from("students")
-        .update({ status: "waiting" })
+      const { data, error } = await db
+        .update("students", { status: "waiting" })
         .eq("status", "arrived")
         .select(STUDENT_SELECT);
 
@@ -599,19 +670,15 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
     },
 
     async listCarpools(): Promise<CarpoolRow[]> {
-      const { data, error } = await client
-        .from("carpools")
-        .select("*")
-        .order("name");
+      const { data, error } = await db.select("carpools", "*").order("name");
       if (error)
         throw new Error(`Could not read the carpools: ${error.message}`);
       return (data ?? []) as CarpoolRow[];
     },
 
     async createCarpool(input: CarpoolWriteInput): Promise<CarpoolRow> {
-      const { data, error } = await client
-        .from("carpools")
-        .insert({ name: input.name, aliases: input.aliases })
+      const { data, error } = await db
+        .insert("carpools", { name: input.name, aliases: input.aliases })
         .select()
         .single();
 
@@ -624,9 +691,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       id: string,
       patch: Partial<CarpoolWriteInput>,
     ): Promise<CarpoolRow | null> {
-      const { data, error } = await client
-        .from("carpools")
-        .update(patch)
+      const { data, error } = await db
+        .update("carpools", patch)
         .eq("id", id)
         .select()
         .maybeSingle();
@@ -640,9 +706,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // The FK on students.carpool_id is `on delete set null`, not cascade,
       // so this delete cannot remove a member from the roster -- Postgres
       // unlinks them for us, nothing here has to.
-      const { data, error } = await client
-        .from("carpools")
-        .delete()
+      const { data, error } = await db
+        .remove("carpools")
         .eq("id", id)
         .select("id")
         .maybeSingle();
@@ -658,9 +723,8 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
     ): Promise<StudentRow[]> {
       if (studentIds.length === 0) return [];
 
-      const { data, error } = await client
-        .from("students")
-        .update({ carpool_id: carpoolId })
+      const { data, error } = await db
+        .update("students", { carpool_id: carpoolId })
         .in("id", studentIds)
         .select(STUDENT_SELECT);
 
@@ -672,31 +736,29 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
     },
 
     async listClassGroups(): Promise<ClassGroupRow[]> {
-      return readClassGroups(client, "Could not read the class list");
+      return readClassGroups(db, "Could not read the class list");
     },
 
     async createClassGroup(
       input: ClassGroupWriteInput,
     ): Promise<ClassGroupRow> {
-      const { data: maxRow, error: maxError } = await client
-        .from("class_groups")
-        .select("sort_order")
+      const { data: maxRow, error: maxError } = await db
+        .select("class_groups", "sort_order")
         .order("sort_order", { ascending: false })
         .limit(1)
         .maybeSingle();
       if (maxError)
         throw new Error(`Could not add that class: ${maxError.message}`);
 
-      const nextOrder = ((maxRow as { sort_order: number } | null)?.sort_order ?? -1) + 1;
+      const nextOrder =
+        ((maxRow as { sort_order: number } | null)?.sort_order ?? -1) + 1;
 
-      const { data, error } = await client
-        .from("class_groups")
-        .insert({ name: input.name, sort_order: nextOrder })
+      const { data, error } = await db
+        .insert("class_groups", { name: input.name, sort_order: nextOrder })
         .select()
         .single();
 
-      if (error)
-        throw new Error(`Could not add that class: ${error.message}`);
+      if (error) throw new Error(`Could not add that class: ${error.message}`);
       return data as ClassGroupRow;
     },
 
@@ -706,15 +768,14 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
     ): Promise<RemoveClassGroupOutcome> {
       // The sole-member check, the optional move and the delete all happen
       // inside remove_class_group() in one transaction -- supabase-js cannot
-      // do that from here. Absent options are omitted (not sent as null) so
-      // the function's own defaults apply.
-      const args: Record<string, unknown> = { p_class_group_id: id };
-      if (options.moveToClassId !== undefined) {
-        args.p_move_to = options.moveToClassId;
-      }
-      if (options.force !== undefined) args.p_force = options.force;
-
-      const { data, error } = await client.rpc("remove_class_group", args);
+      // do that from here. The school-scoped overload has no defaults, so every
+      // parameter is sent by name: no move target is null and no force is false,
+      // the same values the legacy overload's defaults supplied.
+      const { data, error } = await db.rpc("remove_class_group", {
+        p_class_group_id: id,
+        p_move_to: options.moveToClassId ?? null,
+        p_force: options.force ?? false,
+      });
       if (error) {
         // The only two errcodes the function raises on purpose: the class is
         // gone (P0002), or the move target is the class itself / is gone
@@ -731,7 +792,7 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       addIds: string[],
       removeIds: string[],
     ): Promise<ChangeMembersOutcome | null> {
-      const { data, error } = await client.rpc("change_class_members", {
+      const { data, error } = await db.rpc("change_class_members", {
         p_class_group_id: classGroupId,
         p_add_ids: addIds,
         p_remove_ids: removeIds,
@@ -753,15 +814,16 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // the last page: keep going (advancing by what actually came back, so no
       // row is skipped) until a page is empty.
       const counts: Record<string, number> = {};
-      for (let from = 0; ; ) {
-        const { data, error } = await client
-          .from("student_classes")
-          .select("class_group_id")
+      for (let from = 0; ;) {
+        const { data, error } = await db
+          .select("student_classes", "class_group_id")
           .order("student_id")
           .order("class_group_id")
           .range(from, from + PAGE_SIZE - 1);
         if (error)
-          throw new Error(`Could not count the class members: ${error.message}`);
+          throw new Error(
+            `Could not count the class members: ${error.message}`,
+          );
 
         const rows = (data ?? []) as { class_group_id: string }[];
         for (const row of rows) {
@@ -778,15 +840,14 @@ export function createSupabaseStore(env: FunctionEnv): RosterStore {
       // has no "update N rows with N different values" primitive, and a
       // class list is at most a few dozen rows -- this is not a hot path.
       for (const [index, id] of orderedIds.entries()) {
-        const { error } = await client
-          .from("class_groups")
-          .update({ sort_order: index })
+        const { error } = await db
+          .update("class_groups", { sort_order: index })
           .eq("id", id);
         if (error)
           throw new Error(`Could not reorder the class list: ${error.message}`);
       }
 
-      return readClassGroups(client, "Could not reorder the class list");
+      return readClassGroups(db, "Could not reorder the class list");
     },
   };
 }

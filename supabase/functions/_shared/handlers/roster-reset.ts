@@ -17,7 +17,11 @@ import type { RosterStore } from "../ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
 
 export interface RosterResetHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "resetAllToWaiting" | "logEvent">;
+  stores: {
+    forSchool(
+      schoolId: string,
+    ): Pick<RosterStore, "resetAllToWaiting" | "logEvent">;
+  };
 }
 
 export function createRosterResetHandler(deps: RosterResetHandlerDeps) {
@@ -25,11 +29,12 @@ export function createRosterResetHandler(deps: RosterResetHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "office");
     if (!guard.ok) return guard.response;
+    const store = deps.stores.forSchool(guard.schoolId);
 
     return await withStoreErrors(async () => {
-      const changed = await deps.store.resetAllToWaiting();
+      const changed = await store.resetAllToWaiting();
 
       // One audit row per child actually moved. A failed row here must not
       // undo the reset the display has already shown -- the same rule
@@ -37,7 +42,7 @@ export function createRosterResetHandler(deps: RosterResetHandlerDeps) {
       // the whole reset over it.
       let logged = 0;
       for (const student of changed) {
-        const ok = await deps.store.logEvent({
+        const ok = await store.logEvent({
           studentId: student.id,
           changedTo: "waiting",
           source: "admin",

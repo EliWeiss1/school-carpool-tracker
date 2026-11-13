@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { createFakeStore, makeStudent } from "./fake-store.ts";
+import { createFakeStore, makeStudent, legacyStores } from "./fake-store.ts";
+import { createFakeAccess } from "./fake-access.ts";
 import { createRosterResetHandler } from "./roster-reset.ts";
 
 const STAFF_PIN = "4821";
@@ -31,7 +32,8 @@ function setup() {
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 5, windowMs: 60_000 }),
     pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-    store,
+    stores: legacyStores(store),
+    access: createFakeAccess(),
   });
   return { store, handle };
 }
@@ -120,7 +122,8 @@ describe("createRosterResetHandler", () => {
       staffPin: STAFF_PIN,
       rateLimiter: createRateLimiter({ limit: 5, windowMs: 60_000 }),
       pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-      store: flaky,
+      stores: legacyStores(flaky),
+      access: createFakeAccess(),
     });
 
     const response = await handle(reset());

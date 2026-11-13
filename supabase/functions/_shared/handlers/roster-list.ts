@@ -23,7 +23,11 @@ import { rosterFilterFrom } from "./filter.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
 
 export interface RosterListHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "list" | "listCarpools" | "countClassMembers">;
+  stores: {
+    forSchool(
+      schoolId: string,
+    ): Pick<RosterStore, "list" | "listCarpools" | "countClassMembers">;
+  };
 }
 
 export function createRosterListHandler(deps: RosterListHandlerDeps) {
@@ -31,14 +35,15 @@ export function createRosterListHandler(deps: RosterListHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "office");
     if (!guard.ok) return guard.response;
+    const store = deps.stores.forSchool(guard.schoolId);
 
     return await withStoreErrors(async () => {
       const [students, carpools, classMemberCounts] = await Promise.all([
-        deps.store.list(rosterFilterFrom(guard.body)),
-        deps.store.listCarpools(),
-        deps.store.countClassMembers(),
+        store.list(rosterFilterFrom(guard.body)),
+        store.listCarpools(),
+        store.countClassMembers(),
       ]);
       return jsonResponse({ students, carpools, classMemberCounts });
     });

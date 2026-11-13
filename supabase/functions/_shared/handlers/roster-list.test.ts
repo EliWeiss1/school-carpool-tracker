@@ -6,7 +6,9 @@ import {
   makeCarpool,
   makeClassGroup,
   makeStudent,
+  legacyStores,
 } from "./fake-store.ts";
+import { createFakeAccess } from "./fake-access.ts";
 import { createRosterListHandler } from "./roster-list.ts";
 
 const STAFF_PIN = "4821";
@@ -31,7 +33,8 @@ function setup() {
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 60, windowMs: 60_000 }),
     pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-    store,
+    stores: legacyStores(store),
+    access: createFakeAccess(),
   });
   return { store, handle };
 }
@@ -87,7 +90,8 @@ describe("createRosterListHandler", () => {
       staffPin: STAFF_PIN,
       rateLimiter: createRateLimiter({ limit: 60, windowMs: 60_000 }),
       pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-      store,
+      stores: legacyStores(store),
+      access: createFakeAccess(),
     });
 
     const response = await handle(list());
@@ -130,7 +134,8 @@ describe("createRosterListHandler", () => {
       staffPin: STAFF_PIN,
       rateLimiter: createRateLimiter({ limit: 60, windowMs: 60_000 }),
       pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-      store,
+      stores: legacyStores(store),
+      access: createFakeAccess(),
     });
 
     const response = await handle(list());
@@ -153,7 +158,8 @@ describe("createRosterListHandler", () => {
       staffPin: STAFF_PIN,
       rateLimiter: createRateLimiter({ limit: 60, windowMs: 60_000 }),
       pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-      store: broken,
+      stores: legacyStores(broken),
+      access: createFakeAccess(),
     });
 
     const response = await handleBroken(list());

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { createFakeStore, makeStudent } from "./fake-store.ts";
+import { createFakeStore, makeStudent, legacyStores } from "./fake-store.ts";
+import { createFakeAccess } from "./fake-access.ts";
 import { createStatusHandler } from "./status.ts";
 
 const STAFF_PIN = "4821";
@@ -32,7 +33,8 @@ function setup() {
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
     pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-    store,
+    stores: legacyStores(store),
+    access: createFakeAccess(),
   });
   return { store, handle };
 }
@@ -46,7 +48,8 @@ function setupWith(overrides: Partial<ReturnType<typeof createFakeStore>>) {
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
     pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-    store: { ...store, ...overrides },
+    stores: legacyStores({ ...store, ...overrides }),
+    access: createFakeAccess(),
   });
   return { store, handle };
 }
@@ -297,7 +300,15 @@ describe("createStatusHandler — a carpool confirmed in one tap", () => {
 
   it("is idempotent per member: one already arrived is absent from changed and logs nothing extra", async () => {
     const { handle, store } = setup();
-    await handle(post({ pin: STAFF_PIN, deviceId: "d", studentId: "weiss", status: "arrived", source: "manual" }));
+    await handle(
+      post({
+        pin: STAFF_PIN,
+        deviceId: "d",
+        studentId: "weiss",
+        status: "arrived",
+        source: "manual",
+      }),
+    );
 
     const response = await handle(confirmCarpool());
     const body = (await response.json()) as StatusBody;

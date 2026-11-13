@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { createFakeStore, makeCarpool, makeStudent } from "./fake-store.ts";
+import {
+  createFakeStore,
+  makeCarpool,
+  makeStudent,
+  legacyStores,
+} from "./fake-store.ts";
+import { createFakeAccess } from "./fake-access.ts";
 import { createResolveHandler } from "./resolve.ts";
 
 const STAFF_PIN = "4821";
@@ -35,7 +41,8 @@ function setup() {
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
     pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-    store,
+    stores: legacyStores(store),
+    access: createFakeAccess(),
   });
   return { store, handle };
 }
@@ -170,7 +177,8 @@ describe("createResolveHandler", () => {
         staffPin: STAFF_PIN,
         rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
         pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-        store: createFakeStore(MULTI),
+        stores: legacyStores(createFakeStore(MULTI)),
+        access: createFakeAccess(),
       });
     }
 
@@ -278,7 +286,8 @@ describe("createResolveHandler — carpools", () => {
       staffPin: STAFF_PIN,
       rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
       pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-      store,
+      stores: legacyStores(store),
+      access: createFakeAccess(),
     });
     return { store, handle };
   }
@@ -370,7 +379,8 @@ describe("createResolveHandler — carpools", () => {
       staffPin: STAFF_PIN,
       rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
       pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-      store,
+      stores: legacyStores(store),
+      access: createFakeAccess(),
     });
 
     const body = (await (
@@ -412,7 +422,8 @@ describe("createResolveHandler — carpools", () => {
       staffPin: STAFF_PIN,
       rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
       pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-      store,
+      stores: legacyStores(store),
+      access: createFakeAccess(),
     });
 
     const body = (await (
@@ -447,7 +458,8 @@ describe("createResolveHandler — parent names never reach the browser", () => 
       staffPin: STAFF_PIN,
       rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
       pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-      store,
+      stores: legacyStores(store),
+      access: createFakeAccess(),
     });
 
     const response = await handle(

@@ -15,11 +15,13 @@ import type {
   RemoveClassGroupOutcome,
   RosterFilter,
   RosterStore,
+  RosterStores,
   StatusEventInput,
   StudentRow,
   StudentStatus,
   StudentWriteInput,
 } from "../ports.ts";
+import { LEGACY_SCHOOL_ID } from "../schools.ts";
 
 /**
  * An audit row as it exists AFTER the roster row it points at may have been
@@ -519,6 +521,73 @@ export function createFakeStore(
           .sort((a, b) => a.sort_order - b.sort_order)
           .map((group) => ({ ...group })),
       );
+    },
+  };
+}
+
+/** What one school starts with in `createFakeStores`. */
+export interface FakeSchoolSeed {
+  students?: StudentRow[];
+  carpools?: CarpoolRow[];
+  classGroups?: ClassGroupRow[];
+}
+
+export interface FakeStores extends RosterStores {
+  /** The school's store, created empty on first use like a school with no rows. */
+  forSchool(schoolId: string): FakeStore;
+}
+
+/**
+ * A multi-tenant in-memory roster: one fully separate `FakeStore` per school,
+ * so two schools can hold students, classes and carpools with identical names
+ * and never see each other. Each school's data lives in its own closure; there
+ * is no shared table to forget a filter on.
+ */
+export function createFakeStores(
+  seeds: Record<string, FakeSchoolSeed> = {},
+): FakeStores {
+  const bySchool = new Map<string, FakeStore>();
+  for (const [schoolId, seed] of Object.entries(seeds)) {
+    bySchool.set(
+      schoolId,
+      createFakeStore(
+        seed.students ?? [],
+        seed.carpools ?? [],
+        seed.classGroups ?? [],
+      ),
+    );
+  }
+
+  return {
+    forSchool(schoolId: string): FakeStore {
+      let store = bySchool.get(schoolId);
+      if (!store) {
+        store = createFakeStore([]);
+        bySchool.set(schoolId, store);
+      }
+      return store;
+    },
+  };
+}
+
+/**
+ * Wraps one existing store as the only school there is -- the legacy school, by
+ * default, which is whom a `pin` request always means. Asking for any other
+ * school throws, so a test that meant to be single-school cannot quietly read
+ * the wrong data.
+ */
+export function legacyStores<T extends RosterStore>(
+  store: T,
+  schoolId: string = LEGACY_SCHOOL_ID,
+): { forSchool(requested: string): T } {
+  return {
+    forSchool(requested: string): T {
+      if (requested !== schoolId) {
+        throw new Error(
+          `This fake only holds school ${schoolId}, not ${requested}.`,
+        );
+      }
+      return store;
     },
   };
 }

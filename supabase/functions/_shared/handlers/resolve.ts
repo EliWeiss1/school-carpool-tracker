@@ -39,7 +39,9 @@ import { rosterFilterFrom } from "./filter.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
 
 export interface ResolveHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "list" | "listCarpools">;
+  stores: {
+    forSchool(schoolId: string): Pick<RosterStore, "list" | "listCarpools">;
+  };
 }
 
 /** Just enough of a student for a tap target. */
@@ -194,8 +196,9 @@ export function createResolveHandler(deps: ResolveHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "announce");
     if (!guard.ok) return guard.response;
+    const store = deps.stores.forSchool(guard.schoolId);
 
     const alternatives = readAlternatives(guard.body);
     if (alternatives.length === 0) {
@@ -207,8 +210,8 @@ export function createResolveHandler(deps: ResolveHandlerDeps) {
 
     return await withStoreErrors(async () => {
       const [roster, carpools] = await Promise.all([
-        deps.store.list(rosterFilterFrom(guard.body)),
-        deps.store.listCarpools(),
+        store.list(rosterFilterFrom(guard.body)),
+        store.listCarpools(),
       ]);
 
       const carpoolMembers = new Map<string, StudentRow[]>();

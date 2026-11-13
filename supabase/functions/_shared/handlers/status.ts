@@ -29,7 +29,9 @@ import type {
 import { type GuardDeps, guardRequest } from "./guard.ts";
 
 export interface StatusHandlerDeps extends GuardDeps {
-  store: RosterStore;
+  stores: {
+    forSchool(schoolId: string): RosterStore;
+  };
 }
 
 const STATUSES: StudentStatus[] = ["waiting", "arrived"];
@@ -75,12 +77,14 @@ function readCarpoolId(body: Record<string, unknown>): string | null {
  * displays after a confirm, not an admin surface, so it gets the same
  * public-facing shape rather than the admin-only StudentRow.
  */
-function publicStudent(student: StudentRow): Omit<
-  StudentRow,
-  "parent1_name" | "parent2_name"
-> {
-  const { parent1_name: _parent1Name, parent2_name: _parent2Name, ...rest } =
-    student;
+function publicStudent(
+  student: StudentRow,
+): Omit<StudentRow, "parent1_name" | "parent2_name"> {
+  const {
+    parent1_name: _parent1Name,
+    parent2_name: _parent2Name,
+    ...rest
+  } = student;
   return rest;
 }
 
@@ -89,8 +93,9 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "announce");
     if (!guard.ok) return guard.response;
+    const store = deps.stores.forSchool(guard.schoolId);
 
     const studentIds = readIdOrIds(
       guard.body,
@@ -123,7 +128,7 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
     return await withStoreErrors(async () => {
       // arrived_at is never read off the request: a database trigger derives it
       // from the transition, so a stale phone cannot rewrite a pickup time.
-      const changedRows = await deps.store.setStatusMany(studentIds, status);
+      const changedRows = await store.setStatusMany(studentIds, status);
       const changedIds = new Set(changedRows.map((row) => row.id));
 
       // A student absent from `changedRows` is either already in the
@@ -136,7 +141,7 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
       const missing: string[] = [];
       for (const id of studentIds) {
         if (changedIds.has(id)) continue;
-        const existing = await deps.store.get(id);
+        const existing = await store.get(id);
         if (existing === null) {
           missing.push(id);
         } else {
@@ -153,7 +158,7 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
       // but the caller is told, so a persistent failure is visible to someone.
       let logged = 0;
       for (const row of changedRows) {
-        const ok = await deps.store.logEvent({
+        const ok = await store.logEvent({
           studentId: row.id,
           changedTo: status,
           source,

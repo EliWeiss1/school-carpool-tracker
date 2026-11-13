@@ -10,7 +10,8 @@
 import { readEnv } from "../_shared/env.deno.ts";
 import { createRosterImportHandler } from "../_shared/handlers/roster-import.ts";
 import { createRateLimiter } from "../_shared/rate-limit.ts";
-import { createSupabaseStore } from "../_shared/supabase-store.deno.ts";
+import { createAccessStore } from "../_shared/access-store.deno.ts";
+import { createSupabaseStores } from "../_shared/supabase-store.deno.ts";
 
 const env = readEnv();
 
@@ -32,7 +33,8 @@ const handle = createRosterImportHandler({
   // the total near where it started. Do this arithmetic again before adding
   // another endpoint.
   pinAttemptLimiter: createRateLimiter({ limit: 3, windowMs: 600_000 }),
-  store: createSupabaseStore(env),
+  access: createAccessStore(env),
+  stores: createSupabaseStores(env),
 });
 
 Deno.serve(handle);

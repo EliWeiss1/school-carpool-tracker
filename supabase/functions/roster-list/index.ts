@@ -9,7 +9,8 @@
 import { readEnv } from "../_shared/env.deno.ts";
 import { createRosterListHandler } from "../_shared/handlers/roster-list.ts";
 import { createRateLimiter } from "../_shared/rate-limit.ts";
-import { createSupabaseStore } from "../_shared/supabase-store.deno.ts";
+import { createAccessStore } from "../_shared/access-store.deno.ts";
+import { createSupabaseStores } from "../_shared/supabase-store.deno.ts";
 
 const env = readEnv();
 
@@ -25,7 +26,8 @@ const handle = createRosterListHandler({
   // -- a guesser gets the SUM across every deployed endpoint. See
   // supabase/functions/pin-budget.test.ts, which enforces the total.
   pinAttemptLimiter: createRateLimiter({ limit: 3, windowMs: 600_000 }),
-  store: createSupabaseStore(env),
+  access: createAccessStore(env),
+  stores: createSupabaseStores(env),
 });
 
 Deno.serve(handle);

@@ -10,7 +10,8 @@
 import { readEnv } from "../_shared/env.deno.ts";
 import { createClassesWriteHandler } from "../_shared/handlers/classes-write.ts";
 import { createRateLimiter } from "../_shared/rate-limit.ts";
-import { createSupabaseStore } from "../_shared/supabase-store.deno.ts";
+import { createAccessStore } from "../_shared/access-store.deno.ts";
+import { createSupabaseStores } from "../_shared/supabase-store.deno.ts";
 
 const env = readEnv();
 
@@ -26,7 +27,8 @@ const handle = createClassesWriteHandler({
   // class list is edited far less often than the roster itself, so the
   // tighter allowance costs a legitimate admin nothing.
   pinAttemptLimiter: createRateLimiter({ limit: 2, windowMs: 600_000 }),
-  store: createSupabaseStore(env),
+  access: createAccessStore(env),
+  stores: createSupabaseStores(env),
 });
 
 Deno.serve(handle);

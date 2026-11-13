@@ -234,3 +234,13 @@ export interface RosterStore {
   /** Rewrites sort_order to match this exact id order. Ids not on the list are left untouched. */
   reorderClassGroups(orderedIds: string[]): Promise<ClassGroupRow[]>;
 }
+
+/**
+ * Hands out one school's roster at a time. A `RosterStore` is exactly one
+ * school's data and has no way to name another; the only way to get one is
+ * through here, with the school id the guard checked. Nothing else in the
+ * handlers may build a store from an id that came out of a request body.
+ */
+export interface RosterStores {
+  forSchool(schoolId: string): RosterStore;
+}

@@ -25,16 +25,25 @@ import type { RosterStore } from "../ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
 import { MAX_NAME_LENGTH, nameTooLong, readAliases } from "./roster-input.ts";
 
+/** What the helpers below need: one school's store, already chosen by the guard. */
+type ScopedDeps = {
+  store: ReturnType<CarpoolWriteHandlerDeps["stores"]["forSchool"]>;
+};
+
 export interface CarpoolWriteHandlerDeps extends GuardDeps {
-  store: Pick<
-    RosterStore,
-    | "list"
-    | "listCarpools"
-    | "createCarpool"
-    | "updateCarpool"
-    | "removeCarpool"
-    | "setCarpoolMembers"
-  >;
+  stores: {
+    forSchool(
+      schoolId: string,
+    ): Pick<
+      RosterStore,
+      | "list"
+      | "listCarpools"
+      | "createCarpool"
+      | "updateCarpool"
+      | "removeCarpool"
+      | "setCarpoolMembers"
+    >;
+  };
 }
 
 const ACTIONS = ["create", "update", "delete"] as const;
@@ -69,8 +78,11 @@ export function createCarpoolWriteHandler(deps: CarpoolWriteHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "office");
     if (!guard.ok) return guard.response;
+    const scoped: ScopedDeps = {
+      store: deps.stores.forSchool(guard.schoolId),
+    };
 
     const action = readAction(guard.body.action);
     if (action === null) {
@@ -81,15 +93,15 @@ export function createCarpoolWriteHandler(deps: CarpoolWriteHandlerDeps) {
     }
 
     return await withStoreErrors(async () => {
-      if (action === "delete") return await remove(deps, guard.body);
-      if (action === "update") return await update(deps, guard.body);
-      return await create(deps, guard.body);
+      if (action === "delete") return await remove(scoped, guard.body);
+      if (action === "update") return await update(scoped, guard.body);
+      return await create(scoped, guard.body);
     });
   };
 }
 
 async function create(
-  deps: CarpoolWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const name = readString(body, "name");
@@ -129,7 +141,7 @@ async function create(
 }
 
 async function update(
-  deps: CarpoolWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const carpoolId = readString(body, "carpoolId");
@@ -156,10 +168,7 @@ async function update(
         carpool.name.toLowerCase() === name.toLowerCase(),
     );
     if (collidesWithAnother) {
-      return errorResponse(
-        409,
-        `A carpool named "${name}" already exists.`,
-      );
+      return errorResponse(409, `A carpool named "${name}" already exists.`);
     }
     patch.name = name;
   }
@@ -193,7 +202,7 @@ async function update(
 }
 
 async function remove(
-  deps: CarpoolWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const carpoolId = readString(body, "carpoolId");

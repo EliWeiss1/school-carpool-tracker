@@ -27,7 +27,9 @@ import type { RosterStore } from "../ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
 
 export interface RosterDeleteHandlerDeps extends GuardDeps {
-  store: Pick<RosterStore, "removeStudents">;
+  stores: {
+    forSchool(schoolId: string): Pick<RosterStore, "removeStudents">;
+  };
 }
 
 /** Comfortably above a real bad-import clean-up (the school's actual
@@ -39,8 +41,9 @@ export function createRosterDeleteHandler(deps: RosterDeleteHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "office");
     if (!guard.ok) return guard.response;
+    const store = deps.stores.forSchool(guard.schoolId);
 
     const studentIds = readIdOrIds(
       guard.body,
@@ -53,7 +56,7 @@ export function createRosterDeleteHandler(deps: RosterDeleteHandlerDeps) {
     }
 
     return await withStoreErrors(async () => {
-      const deletedIds = await deps.store.removeStudents(studentIds);
+      const deletedIds = await store.removeStudents(studentIds);
       const deleted = new Set(deletedIds);
       const missingIds = studentIds.filter((id) => !deleted.has(id));
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
-import { createFakeStore, makeStudent } from "./fake-store.ts";
+import { createFakeStore, makeStudent, legacyStores } from "./fake-store.ts";
+import { createFakeAccess } from "./fake-access.ts";
 import { createTokenHandler } from "./token.ts";
 
 const STAFF_PIN = "4821";
@@ -31,7 +32,8 @@ function handler(
     staffPin: STAFF_PIN,
     rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
     pinAttemptLimiter: createRateLimiter({ limit: 10, windowMs: 600_000 }),
-    store: createFakeStore(ROSTER),
+    stores: legacyStores(createFakeStore(ROSTER)),
+    access: createFakeAccess(),
     mintToken:
       overrides.mintToken ??
       (() => Promise.resolve({ token: "dg_temp", expiresIn: 300 })),

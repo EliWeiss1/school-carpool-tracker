@@ -40,11 +40,20 @@ import {
   resolveClassNames,
 } from "./roster-input.ts";
 
+/** What the helpers below need: one school's store, already chosen by the guard. */
+type ScopedDeps = {
+  store: ReturnType<RosterWriteHandlerDeps["stores"]["forSchool"]>;
+};
+
 export interface RosterWriteHandlerDeps extends GuardDeps {
-  store: Pick<
-    RosterStore,
-    "createStudent" | "updateStudent" | "list" | "listClassGroups"
-  >;
+  stores: {
+    forSchool(
+      schoolId: string,
+    ): Pick<
+      RosterStore,
+      "createStudent" | "updateStudent" | "list" | "listClassGroups"
+    >;
+  };
 }
 
 const BAD_CLASS_LIST = "class_groups must be a list of class names.";
@@ -54,8 +63,11 @@ export function createRosterWriteHandler(deps: RosterWriteHandlerDeps) {
     const options = preflight(request);
     if (options) return options;
 
-    const guard = await guardRequest(request, deps);
+    const guard = await guardRequest(request, deps, "office");
     if (!guard.ok) return guard.response;
+    const scoped: ScopedDeps = {
+      store: deps.stores.forSchool(guard.schoolId),
+    };
 
     if (sendsLegacyClassGroup(guard.body)) {
       return errorResponse(400, OUT_OF_DATE_MESSAGE);
@@ -65,9 +77,9 @@ export function createRosterWriteHandler(deps: RosterWriteHandlerDeps) {
 
     return await withStoreErrors(async () => {
       if (studentId === null) {
-        return await create(deps, guard.body);
+        return await create(scoped, guard.body);
       }
-      return await update(deps, studentId, guard.body);
+      return await update(scoped, studentId, guard.body);
     });
   };
 }
@@ -77,7 +89,7 @@ export function createRosterWriteHandler(deps: RosterWriteHandlerDeps) {
  * undefined when the request says nothing about classes.
  */
 async function classIdsFrom(
-  deps: RosterWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<{ ids: string[] | undefined } | { response: Response }> {
   const read = readClassNames(body);
@@ -99,7 +111,7 @@ async function classIdsFrom(
 }
 
 async function create(
-  deps: RosterWriteHandlerDeps,
+  deps: ScopedDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
   const firstName = readString(body, "first_name");
@@ -153,7 +165,7 @@ async function create(
 }
 
 async function update(
-  deps: RosterWriteHandlerDeps,
+  deps: ScopedDeps,
   studentId: string,
   body: Record<string, unknown>,
 ): Promise<Response> {

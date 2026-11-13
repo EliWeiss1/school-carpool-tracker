@@ -10,7 +10,8 @@
 import { readEnv } from "../_shared/env.deno.ts";
 import { createCarpoolWriteHandler } from "../_shared/handlers/carpool-write.ts";
 import { createRateLimiter } from "../_shared/rate-limit.ts";
-import { createSupabaseStore } from "../_shared/supabase-store.deno.ts";
+import { createAccessStore } from "../_shared/access-store.deno.ts";
+import { createSupabaseStores } from "../_shared/supabase-store.deno.ts";
 
 const env = readEnv();
 
@@ -28,7 +29,8 @@ const handle = createCarpoolWriteHandler({
   // endpoint is driven by the same office computer as the other roster
   // endpoints, so 3 matches theirs and keeps the total from creeping.
   pinAttemptLimiter: createRateLimiter({ limit: 3, windowMs: 600_000 }),
-  store: createSupabaseStore(env),
+  access: createAccessStore(env),
+  stores: createSupabaseStores(env),
 });
 
 Deno.serve(handle);
