@@ -198,6 +198,10 @@ src/
                         the real board tile; script in lib/landing-demo.ts,
                         one still frame under reduced motion),
                         landing-sections.tsx (the sections below the rule)
+                        carpool-demo.tsx (the one interactive piece: untick a
+                        rider, announce the rest; rules in lib/landing-carpool.ts)
+                        The testimonials in landing-sections.tsx are STAND-INS
+                        ("Name to come") until real quotes are supplied
     home/               install-card.tsx: the "add to home screen" prompt on
                         /screens
                         (logic in lib/install-prompt.ts, hook in
@@ -691,7 +695,7 @@ Three levels and nothing in between. Shadows are ink-tinted and layered — neve
 
 Radii: `rounded-xl` for controls, `rounded-2xl` for surfaces. Nothing else.
 
-**Atmosphere, landing page only.** The public landing page's two ink bands
+**Atmosphere, landing page only.** The public landing page's ink bands
 use `bg-curb-dusk` (two layered radial washes, cobalt and marigold, defined in
 `tailwind.config.ts`) over `bg-curb-900`, with the `.grain` utility
 (`globals.css`: a static SVG noise layer on a pseudo-element; needs

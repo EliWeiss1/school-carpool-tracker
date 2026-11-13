@@ -37,6 +37,15 @@ const MAX_TOTAL_PIN_ATTEMPTS_PER_WINDOW = 50;
 /** The window every limiter must share, or the totals above are meaningless. */
 const REQUIRED_WINDOW_MS = "600_000";
 
+/**
+ * Functions born after schools existed. They authenticate with a Supabase
+ * session only (`authenticateRequest` / `guardSessionRequest`), so the staff
+ * PIN cannot be tried against them at all and they spend none of the budget.
+ * That is a claim about their wiring, so it is asserted below rather than
+ * assumed: a function listed here that starts accepting a PIN fails the build.
+ */
+const PIN_FREE_FUNCTIONS = new Set(["pair-device", "school-write"]);
+
 function entrypoints(): { name: string; source: string }[] {
   return readdirSync(FUNCTIONS_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
@@ -57,6 +66,20 @@ describe("the PIN-guessing budget across every deployed endpoint", () => {
   });
 
   for (const { name, source } of found) {
+    if (PIN_FREE_FUNCTIONS.has(name)) {
+      it(`${name} gives the staff PIN no way in`, () => {
+        expect(source).not.toMatch(/staffPin/);
+        expect(source).not.toMatch(/pinAttemptLimiter/);
+      });
+
+      it(`${name} passes a real per-device rateLimiter`, () => {
+        expect(source).toMatch(
+          /rateLimiter:\s*createRateLimiter\(\{\s*limit:\s*\d+/,
+        );
+      });
+      continue;
+    }
+
     it(`${name} passes a real pinAttemptLimiter`, () => {
       // Not merely "mentions pinAttemptLimiter": the phase-3 bug was a dep that
       // was accepted as optional and simply never supplied.
