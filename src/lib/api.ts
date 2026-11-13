@@ -209,10 +209,53 @@ async function readErrorBody(response: Response): Promise<ErrorBody> {
 /* Client                                                                      */
 /* -------------------------------------------------------------------------- */
 
-/** Present on every request: the PIN is the only real authorization we have. */
-export interface Credentials {
+/**
+ * Who is calling. Two wire formats live side by side until the cutover:
+ *
+ * - `pin`: the legacy kerb/office screens. The shared staff PIN goes in the
+ *   body and the anon key is the Bearer token, exactly as before.
+ * - `session`: a signed-in office user or a paired device. The user's access
+ *   token is the Bearer token and the body names the school; no PIN exists.
+ *
+ * A union rather than optional fields so a call can never carry both: the type
+ * system, not a runtime check, is what keeps a PIN off a session call.
+ */
+export interface PinCredentials {
   pin: string;
   deviceId: string;
+}
+
+export interface SessionCredentials {
+  schoolId: string;
+  /** The Supabase access token. Goes in the Authorization header only. */
+  accessToken: string;
+  deviceId: string;
+}
+
+export type Credentials = PinCredentials | SessionCredentials;
+
+function isSession(
+  credentials: Credentials,
+): credentials is SessionCredentials {
+  return "accessToken" in credentials;
+}
+
+/**
+ * The identity fields that go in the JSON body. For a session call this is
+ * `schoolId` and `deviceId`; the access token is deliberately absent because it
+ * travels as a header (see `bearerOf`), and `pin` never appears.
+ */
+export function credentialFields(
+  credentials: Credentials,
+): Record<string, unknown> {
+  return isSession(credentials)
+    ? { schoolId: credentials.schoolId, deviceId: credentials.deviceId }
+    : { pin: credentials.pin, deviceId: credentials.deviceId };
+}
+
+/** The access token to send as Bearer, or undefined to use the anon key. */
+export function bearerOf(credentials: Credentials): string | undefined {
+  return isSession(credentials) ? credentials.accessToken : undefined;
 }
 
 /**
@@ -322,6 +365,8 @@ export function createEdgeFunctionPost(options: ApiClientOptions = {}) {
     endpoint: string,
     body: Record<string, unknown>,
     signal: AbortSignal | undefined,
+    /** A signed-in user's token. Omitted: the anon key is the Bearer, as for the PIN screens. */
+    accessToken?: string,
   ): Promise<T> {
     const doFetch = options.fetchImpl ?? fetch;
 
@@ -350,8 +395,9 @@ export function createEdgeFunctionPost(options: ApiClientOptions = {}) {
         headers: {
           // Supabase's gateway wants the anon key before it will route to the
           // function at all. It grants nothing on its own: RLS gives anon only
-          // `select` on students, and the PIN is what guards the write path.
-          authorization: `Bearer ${anonKey}`,
+          // `select` on students, and the PIN (or a user's token, in the
+          // Authorization header above) is what guards the write path.
+          authorization: `Bearer ${accessToken ?? anonKey}`,
           apikey: anonKey,
           "content-type": "application/json; charset=utf-8",
         },
@@ -389,39 +435,40 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   const post = createEdgeFunctionPost(options);
 
   return {
-    requestToken({ pin, deviceId, classGroups, signal }) {
+    requestToken({ classGroups, signal, ...credentials }) {
       return post<TokenResponse>(
         "deepgram-token",
-        compact({ pin, deviceId, classGroups: nonEmpty(classGroups) }),
+        compact({
+          ...credentialFields(credentials),
+          classGroups: nonEmpty(classGroups),
+        }),
         signal,
+        bearerOf(credentials),
       );
     },
 
     resolveName({
-      pin,
-      deviceId,
       alternatives,
       transcript,
       classGroups,
       signal,
+      ...credentials
     }) {
       return post<ResolveResponse>(
         "resolve-name",
         compact({
-          pin,
-          deviceId,
+          ...credentialFields(credentials),
           alternatives:
             alternatives && alternatives.length > 0 ? alternatives : undefined,
           transcript,
           classGroups: nonEmpty(classGroups),
         }),
         signal,
+        bearerOf(credentials),
       );
     },
 
     setStatus({
-      pin,
-      deviceId,
       studentId,
       studentIds,
       status,
@@ -430,12 +477,12 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       transcript,
       carpoolId,
       signal,
+      ...credentials
     }) {
       return post<SetStatusResponse>(
         "set-status",
         compact({
-          pin,
-          deviceId,
+          ...credentialFields(credentials),
           studentId,
           studentIds,
           status,
@@ -447,6 +494,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
           carpoolId,
         }),
         signal,
+        bearerOf(credentials),
       );
     },
   };

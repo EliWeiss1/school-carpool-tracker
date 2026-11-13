@@ -82,6 +82,48 @@ export type StudentClassInsert = Pick<
 export type StatusEventInsert = Pick<StatusEvent, "changed_to" | "source"> &
   Partial<Omit<StatusEvent, "changed_to" | "source">>;
 
+/**
+ * A school (tenant). Read-only from the browser: RLS lets a signed-in user
+ * select only the schools they belong to, and every write goes through the
+ * `school-write` Edge Function.
+ */
+export type School = {
+  id: string;
+  name: string;
+  /** The web address segment: /s/<slug>. 3 to 48 chars of a-z, 0-9, hyphen. */
+  slug: string;
+  timezone: string;
+  reset_hour: number;
+  /** Days of the week the nightly reset runs, 0 = Sunday. */
+  reset_days: number[];
+  last_reset_on: string | null;
+  voice_enabled: boolean;
+  voice_monthly_limit: number | null;
+  created_at: string;
+};
+
+export type SchoolMemberRole = "owner" | "admin";
+
+export type SchoolMember = {
+  school_id: string;
+  user_id: string;
+  role: SchoolMemberRole;
+};
+
+/** A paired screen or phone. Code versions let a code change disconnect it. */
+export type SchoolDevice = {
+  id: string;
+  school_id: string;
+  user_id: string;
+  can_announce: boolean;
+  can_display: boolean;
+  announce_code_version: number;
+  display_code_version: number;
+  label: string | null;
+  created_at: string;
+  last_seen_at: string | null;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -113,6 +155,24 @@ export type Database = {
         Row: StudentClass;
         Insert: StudentClassInsert;
         Update: Partial<StudentClass>;
+        Relationships: [];
+      };
+      schools: {
+        Row: School;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      school_members: {
+        Row: SchoolMember;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      school_devices: {
+        Row: SchoolDevice;
+        Insert: never;
+        Update: never;
         Relationships: [];
       };
     };

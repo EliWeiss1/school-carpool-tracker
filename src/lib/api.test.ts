@@ -359,3 +359,61 @@ describe("base url handling", () => {
     );
   });
 });
+
+describe("credential wire formats", () => {
+  const SESSION = {
+    schoolId: "school-1",
+    accessToken: "user-jwt",
+    deviceId: "device-a",
+  };
+
+  it("a PIN call keeps the legacy shape: anon Bearer, pin in the body, no schoolId", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ token: "t", expiresIn: 30, keyterms: [] }),
+    );
+
+    await client.requestToken(CREDENTIALS);
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.headers.authorization).toBe("Bearer anon-key");
+    expect(sent.body).toEqual({ pin: "123456", deviceId: "device-a" });
+    expect(sent.body).not.toHaveProperty("schoolId");
+    expect(sent.body).not.toHaveProperty("accessToken");
+  });
+
+  it("a session call sends the user's token as Bearer and never sends a pin", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ tier: "none", transcript: "x", candidates: [] }),
+    );
+
+    await client.resolveName({ ...SESSION, transcript: "Cohen" });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.headers.authorization).toBe("Bearer user-jwt");
+    expect(sent.headers.apikey).toBe("anon-key");
+    expect(sent.body).toEqual({
+      schoolId: "school-1",
+      deviceId: "device-a",
+      transcript: "Cohen",
+    });
+    expect(sent.body).not.toHaveProperty("pin");
+    expect(sent.body).not.toHaveProperty("accessToken");
+  });
+
+  it("a session setStatus carries the school and no pin", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ students: [], changed: [], logged: 0, missing: [] }),
+    );
+
+    await client.setStatus({
+      ...SESSION,
+      studentId: "s1",
+      status: "arrived",
+      source: "manual",
+    });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.body).toMatchObject({ schoolId: "school-1", studentId: "s1" });
+    expect(sent.body).not.toHaveProperty("pin");
+  });
+});

@@ -16,8 +16,11 @@
 import {
   ApiError,
   type ApiClientOptions,
+  bearerOf,
   compact,
   createEdgeFunctionPost,
+  credentialFields,
+  type Credentials,
 } from "@/lib/api";
 import type { Carpool, ClassGroup, StudentWithClasses } from "@/types/db";
 import type { CsvImportStudent } from "@/lib/csv-import";
@@ -26,11 +29,8 @@ import type { CsvImportStudent } from "@/lib/csv-import";
 /* Shared shapes                                                              */
 /* -------------------------------------------------------------------------- */
 
-/** Present on every request: the PIN is the only real authorization we have. */
-export interface Credentials {
-  pin: string;
-  deviceId: string;
-}
+/** Who is calling: the legacy PIN, or a signed-in session. See `Credentials` in api.ts. */
+export type { Credentials } from "@/lib/api";
 
 /** The optional narrowing /roster-list accepts, mirroring the announce endpoints. */
 export interface RosterScope {
@@ -306,17 +306,16 @@ export function createAdminApiClient(
   });
 
   return {
-    listRoster({ pin, deviceId, classGroup, signal }) {
+    listRoster({ classGroup, signal, ...credentials }) {
       return post<RosterListResponse>(
         "roster-list",
-        compact({ pin, deviceId, classGroup }),
+        compact({ ...credentialFields(credentials), classGroup }),
         signal,
+        bearerOf(credentials),
       );
     },
 
     createStudent({
-      pin,
-      deviceId,
       first_name,
       last_name,
       aliases,
@@ -325,12 +324,12 @@ export function createAdminApiClient(
       parent1_name,
       parent2_name,
       signal,
+      ...credentials
     }) {
       return post<RosterWriteResponse>(
         "roster-write",
         compact({
-          pin,
-          deviceId,
+          ...credentialFields(credentials),
           first_name,
           last_name,
           aliases,
@@ -340,12 +339,11 @@ export function createAdminApiClient(
           parent2_name,
         }),
         signal,
+        bearerOf(credentials),
       );
     },
 
     updateStudent({
-      pin,
-      deviceId,
       studentId,
       first_name,
       last_name,
@@ -355,6 +353,7 @@ export function createAdminApiClient(
       parent1_name,
       parent2_name,
       signal,
+      ...credentials
     }) {
       // Not `compact()` here: that helper drops `null` along with
       // `undefined`, but an edit needs to say "clear this field" by sending
@@ -363,7 +362,10 @@ export function createAdminApiClient(
       // which fields are *present* in the body, so `undefined` (not sent) and
       // an explicit value (`null`, or `[]` for class_groups) have to stay
       // distinguishable here too.
-      const body: Record<string, unknown> = { pin, deviceId, studentId };
+      const body: Record<string, unknown> = {
+        ...credentialFields(credentials),
+        studentId,
+      };
       if (first_name !== undefined) body.first_name = first_name;
       if (last_name !== undefined) body.last_name = last_name;
       if (aliases !== undefined) body.aliases = aliases;
@@ -372,57 +374,72 @@ export function createAdminApiClient(
       if (parent1_name !== undefined) body.parent1_name = parent1_name;
       if (parent2_name !== undefined) body.parent2_name = parent2_name;
 
-      return post<RosterWriteResponse>("roster-write", body, signal);
-    },
-
-    deleteStudent({ pin, deviceId, studentId, signal }) {
-      return post<RosterDeleteResponse>(
-        "roster-delete",
-        compact({ pin, deviceId, studentId }),
+      return post<RosterWriteResponse>(
+        "roster-write",
+        body,
         signal,
+        bearerOf(credentials),
       );
     },
 
-    deleteStudents({ pin, deviceId, studentIds, signal }) {
+    deleteStudent({ studentId, signal, ...credentials }) {
       return post<RosterDeleteResponse>(
         "roster-delete",
-        compact({ pin, deviceId, studentIds }),
+        compact({ ...credentialFields(credentials), studentId }),
         signal,
+        bearerOf(credentials),
       );
     },
 
-    importRoster({ pin, deviceId, students, signal }) {
+    deleteStudents({ studentIds, signal, ...credentials }) {
+      return post<RosterDeleteResponse>(
+        "roster-delete",
+        compact({ ...credentialFields(credentials), studentIds }),
+        signal,
+        bearerOf(credentials),
+      );
+    },
+
+    importRoster({ students, signal, ...credentials }) {
       return post<RosterImportResponse>(
         "roster-import",
-        compact({ pin, deviceId, students }),
+        compact({ ...credentialFields(credentials), students }),
         signal,
+        bearerOf(credentials),
       );
     },
 
-    resetAllToWaiting({ pin, deviceId, signal }) {
+    resetAllToWaiting({ signal, ...credentials }) {
       return post<RosterResetResponse>(
         "roster-reset",
-        compact({ pin, deviceId }),
+        compact({ ...credentialFields(credentials) }),
         signal,
+        bearerOf(credentials),
       );
     },
 
-    createCarpool({ pin, deviceId, name, aliases, memberIds, signal }) {
+    createCarpool({ name, aliases, memberIds, signal, ...credentials }) {
       return post<CarpoolWriteResponse>(
         "carpool-write",
-        compact({ pin, deviceId, action: "create", name, aliases, memberIds }),
+        compact({
+          ...credentialFields(credentials),
+          action: "create",
+          name,
+          aliases,
+          memberIds,
+        }),
         signal,
+        bearerOf(credentials),
       );
     },
 
     updateCarpool({
-      pin,
-      deviceId,
       carpoolId,
       name,
       aliases,
       memberIds,
       signal,
+      ...credentials
     }) {
       // Not `compact()` for the same reason as updateStudent: `memberIds: []`
       // (clear every member) has to survive, and compact() would drop it as
@@ -431,8 +448,7 @@ export function createAdminApiClient(
       // roster-write.ts's pattern relies on, so this stays explicit rather
       // than reaching for compact() out of habit.
       const body: Record<string, unknown> = {
-        pin,
-        deviceId,
+        ...credentialFields(credentials),
         action: "update",
         carpoolId,
       };
@@ -440,69 +456,84 @@ export function createAdminApiClient(
       if (aliases !== undefined) body.aliases = aliases;
       if (memberIds !== undefined) body.memberIds = memberIds;
 
-      return post<CarpoolWriteResponse>("carpool-write", body, signal);
+      return post<CarpoolWriteResponse>(
+        "carpool-write",
+        body,
+        signal,
+        bearerOf(credentials),
+      );
     },
 
-    deleteCarpool({ pin, deviceId, carpoolId, signal }) {
+    deleteCarpool({ carpoolId, signal, ...credentials }) {
       return post<CarpoolDeleteResponse>(
         "carpool-write",
-        compact({ pin, deviceId, action: "delete", carpoolId }),
+        compact({
+          ...credentialFields(credentials),
+          action: "delete",
+          carpoolId,
+        }),
         signal,
+        bearerOf(credentials),
       );
     },
 
-    createClass({ pin, deviceId, name, signal }) {
+    createClass({ name, signal, ...credentials }) {
       return post<ClassWriteResponse>(
         "classes-write",
-        compact({ pin, deviceId, action: "create", name }),
+        compact({ ...credentialFields(credentials), action: "create", name }),
         signal,
+        bearerOf(credentials),
       );
     },
 
-    deleteClass({ pin, deviceId, classId, moveToClassId, force, signal }) {
+    deleteClass({ classId, moveToClassId, force, signal, ...credentials }) {
       // compact() drops undefined/null, so an unset moveToClassId or force
       // never reaches the wire.
       return post<ClassDeleteResponse>(
         "classes-write",
         compact({
-          pin,
-          deviceId,
+          ...credentialFields(credentials),
           action: "delete",
           classId,
           moveToClassId,
           force,
         }),
         signal,
+        bearerOf(credentials),
       );
     },
 
-    reorderClasses({ pin, deviceId, orderedIds, signal }) {
+    reorderClasses({ orderedIds, signal, ...credentials }) {
       return post<ClassReorderResponse>(
         "classes-write",
-        compact({ pin, deviceId, action: "reorder", orderedIds }),
+        compact({
+          ...credentialFields(credentials),
+          action: "reorder",
+          orderedIds,
+        }),
         signal,
+        bearerOf(credentials),
       );
     },
 
     changeClassMembers({
-      pin,
-      deviceId,
       classId,
       addStudentIds,
       removeStudentIds,
       signal,
+      ...credentials
     }) {
       return post<ClassMembersResponse>(
         "classes-write",
         compact({
-          pin,
-          deviceId,
+          ...credentialFields(credentials),
           action: "members",
           classId,
           addStudentIds,
           removeStudentIds,
         }),
         signal,
+        bearerOf(credentials),
       );
     },
   };

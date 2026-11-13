@@ -31,6 +31,24 @@ export const publicEnv = {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     );
   },
+  /**
+   * True when the Supabase address and anon key are both present. Middleware
+   * checks this instead of the throwing getters above: a missing variable must
+   * pass the request through untouched, not 500 every office page.
+   */
+  get supabaseConfigured() {
+    return Boolean(
+      process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    );
+  },
+  /**
+   * Cloudflare Turnstile site key (public by design). Optional: when unset the
+   * auth forms render no captcha widget and load no third-party script.
+   */
+  get turnstileSiteKey(): string | undefined {
+    return process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || undefined;
+  },
   /** When true the announce page fakes Deepgram instead of opening a socket. */
   get mockSpeech() {
     return process.env.NEXT_PUBLIC_MOCK_SPEECH === "true";

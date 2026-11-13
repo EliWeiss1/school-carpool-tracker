@@ -547,3 +547,62 @@ describe("admin-api shares the app's transport", () => {
     expect(error.retryAfterSeconds).toBe(30);
   });
 });
+
+describe("credential wire formats", () => {
+  const SESSION = {
+    schoolId: "school-1",
+    accessToken: "user-jwt",
+    deviceId: "device-a",
+  };
+
+  it("a PIN call sends pin and never a schoolId, with the anon key as Bearer", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ students: [], classGroups: [], classMemberCounts: {} }),
+    );
+
+    await client.listRoster(CREDENTIALS);
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.headers.authorization).toBe("Bearer anon-key");
+    expect(sent.body).toEqual({ pin: "123456", deviceId: "device-a" });
+    expect(sent.body).not.toHaveProperty("schoolId");
+  });
+
+  it("a session call sends the token as Bearer and never a pin", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ students: [], classGroups: [], classMemberCounts: {} }),
+    );
+
+    await client.listRoster({ ...SESSION, classGroup: "3rd" });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.headers.authorization).toBe("Bearer user-jwt");
+    expect(sent.body).toEqual({
+      schoolId: "school-1",
+      deviceId: "device-a",
+      classGroup: "3rd",
+    });
+    expect(sent.body).not.toHaveProperty("pin");
+    expect(sent.body).not.toHaveProperty("accessToken");
+  });
+
+  it("keeps explicit nulls on a session update, like the PIN path", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ student: {} }),
+    );
+
+    await client.updateStudent({
+      ...SESSION,
+      studentId: "s1",
+      carpool_id: null,
+    });
+    const sent = firstRequest(fetchImpl);
+
+    expect(sent.body).toEqual({
+      schoolId: "school-1",
+      deviceId: "device-a",
+      studentId: "s1",
+      carpool_id: null,
+    });
+  });
+});
