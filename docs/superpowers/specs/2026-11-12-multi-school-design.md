@@ -104,6 +104,8 @@ Model tiers: **H** Haiku (mechanical), **S** Sonnet (normal), **O** Opus (`caref
 
 **7. Rollout (each step with your go-ahead).** Backup; apply the expand migration and check the live board; deploy the dual-auth functions; merge the frontend (new routes alongside old); you sign up and I attach your account to school #1; set codes and re-pair TVs and phones on the new address; switch the reset job; cutover (old routes redirect, `STAFF_PIN` and `DISPLAY_PASSWORD` unset, contract migration drops the defaults, public-key policies and old RPC signatures); only then open sign-ups. Remove `pin.ts`, `pin-session.ts`, `verify-pin.ts`, `pin-budget.test.ts` and master's `display-auth` pieces. Update `CLAUDE.md`, `README.md`, `HANDOFF.md`, `.env.example`. Rollback before cutover is reverting frontend and functions; the expand migration is harmless to leave.
 
+**Rollout gate (from the Phase 2 security review).** Between the expand migration and the cutover, the old deployed functions read with the service role and the reset functions are not school-aware, so they are only correct while school #1 is the only school. No second school may be created (not even a test one on the live project) until every function is redeployed with school scoping and the per-school reset is live. Apply the expand migration outside pickup hours and away from the 8 PM reset, and first confirm how the Supabase CLI wraps a migration file in a transaction.
+
 ## Verification
 
 - **Database:** PGlite tests in `schema.test.ts` for isolation, composite keys, backfill and the reset replay.

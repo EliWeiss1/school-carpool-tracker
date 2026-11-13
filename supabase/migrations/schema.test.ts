@@ -857,7 +857,7 @@ describe("student_classes", () => {
       expect(await classesOf(s)).toEqual([]);
     });
 
-    it("has RLS on with exactly one SELECT policy", async () => {
+    it("has RLS on with only SELECT policies (legacy anon + scoped authenticated)", async () => {
       const rls = await db.query<{ relrowsecurity: boolean }>(
         "select relrowsecurity from pg_class where relname = 'student_classes'",
       );
@@ -865,7 +865,9 @@ describe("student_classes", () => {
       const policies = await db.query<{ cmd: string }>(
         "select cmd from pg_policies where schemaname = 'public' and tablename = 'student_classes'",
       );
-      expect(policies.rows.map((r) => r.cmd)).toEqual(["SELECT"]);
+      // The multi-school expand migration split the one open policy into a
+      // temporary anon policy (school #1) and a scoped authenticated one.
+      expect(policies.rows.map((r) => r.cmd)).toEqual(["SELECT", "SELECT"]);
     });
 
     it("is in the realtime publication and has the class-first index", async () => {
