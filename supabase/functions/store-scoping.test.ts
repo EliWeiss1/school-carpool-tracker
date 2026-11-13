@@ -7,11 +7,14 @@ import { describe, expect, it } from "vitest";
  * The Deno store cannot run in Vitest, and the service-role key it uses
  * bypasses row-level security, so nothing in the database stops a query from
  * crossing schools. This test is the substitute guard: it reads the file and
- * fails if any query is made outside `scopedClient`, the one function that adds
- * the school to every read and write.
+ * fails if the store builds any query itself instead of asking `scopedClient`
+ * (scoped-client.ts), the one function that adds the school to every read and
+ * write. What `scopedClient` does with a query is not checked here by reading:
+ * it is runtime-neutral and unit-tested in scoped-client.test.ts.
  */
 
 const STORE_FILE = join(__dirname, "_shared", "supabase-store.deno.ts");
+const SCOPE_FILE = join(__dirname, "_shared", "scoped-client.ts");
 
 const SCOPED_RPCS = [
   "set_student_classes",
@@ -62,51 +65,61 @@ function blank(source: string, span: { start: number; end: number }): string {
 
 describe("supabase-store.deno.ts query scoping", () => {
   const code = stripComments(readFileSync(STORE_FILE, "utf8"));
-  const scoped = bodyOf(code, "scopedClient");
-  const outside = blank(code, scoped);
+  const scope = stripComments(readFileSync(SCOPE_FILE, "utf8"));
 
-  it("makes no .from( call outside scopedClient", () => {
-    expect(outside.match(/\.from\(/g) ?? []).toEqual([]);
+  it("builds no query itself: there is no .from( anywhere in the store", () => {
+    expect(code.match(/\.from\(/g) ?? []).toEqual([]);
   });
 
-  it("makes no raw client.rpc( call outside scopedClient", () => {
+  it("calls no database function except through the scope", () => {
     // `db.rpc(` is the scoped helper; any other receiver is a bare client.
-    const raw = [...outside.matchAll(/(\w+)\s*\.rpc\(/g)].filter(
+    const raw = [...code.matchAll(/(\w+)\s*\.rpc\(/g)].filter(
       (match) => match[1] !== "db",
     );
     expect(raw).toEqual([]);
   });
 
+  it("takes its scope from scoped-client.ts and defines none of its own", () => {
+    expect(code).toMatch(
+      /import \{[^}]*\bscopedClient\b[^}]*\} from "\.\/scoped-client\.ts";/,
+    );
+    expect(code).not.toMatch(/function scopedClient\(/);
+    expect(code).not.toMatch(/const scopedClient\b/);
+  });
+
   it("creates one supabase client, and only to scope it", () => {
     expect(code.match(/createClient\(/g)).toHaveLength(1);
-    expect(code.match(/scopedClient\(client,/g)).toHaveLength(1);
+    expect(code.match(/\bscopedClient\(/g)).toHaveLength(1);
 
-    // Outside the factory and the helper, nothing may even name the bare client.
-    const withoutFactory = blank(outside, bodyOf(code, "createSupabaseStores"));
-    expect(withoutFactory.match(/\bclient\b(?!:\s*Client)/g) ?? []).toEqual([]);
+    // Outside the factory, nothing may even name the bare client. (The
+    // lookbehind keeps the import path "scoped-client.ts" from counting.)
+    const outsideFactory = blank(code, bodyOf(code, "createSupabaseStores"));
+    expect(outsideFactory.match(/(?<![-\w])client\b/g) ?? []).toEqual([]);
+
+    // Inside it, the client is created, and handed to the scope. Nothing else.
+    const factory = bodyOf(code, "createSupabaseStores");
+    const uses = code
+      .slice(factory.start, factory.end)
+      .match(/(?<![-\w])client\b(?!\s*=)/g);
+    expect(uses).toHaveLength(1);
   });
 
   it("calls only the three p_school_id functions", () => {
-    const used = [...outside.matchAll(/\.rpc\(\s*"([a-z_]+)"/g)].map(
+    const used = [...code.matchAll(/\.rpc\(\s*"([a-z_]+)"/g)].map(
       (match) => match[1],
     );
     expect(used.length).toBeGreaterThan(0);
     for (const name of used) expect(SCOPED_RPCS).toContain(name);
 
-    // The helper can only be asked for those three, and always sends the school.
-    const declared = /type SchoolRpc =([^;]*);/.exec(code)?.[1] ?? "";
+    // The scope can only be asked for those three.
+    const declared = /type SchoolRpc =([^;]*);/.exec(scope)?.[1] ?? "";
     expect(
       [...declared.matchAll(/"([a-z_]+)"/g)].map((match) => match[1]).sort(),
     ).toEqual([...SCOPED_RPCS].sort());
-    expect(code.slice(scoped.start, scoped.end)).toContain(
-      "p_school_id: schoolId",
-    );
   });
 
-  it("stamps school_id after the caller's values and filters every read", () => {
-    const helper = code.slice(scoped.start, scoped.end);
-    expect(helper).toMatch(/\{\s*\.\.\.row,\s*school_id:\s*schoolId\s*\}/);
-    // select, update and delete each carry the school filter.
-    expect(helper.match(/\.eq\("school_id", schoolId\)/g)).toHaveLength(3);
+  it("proves it can fail: a raw query added to the store is caught", () => {
+    const tampered = `${code}\nclient.from("students").select("*");`;
+    expect(tampered.match(/\.from\(/g) ?? []).not.toEqual([]);
   });
 });

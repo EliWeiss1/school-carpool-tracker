@@ -39,60 +39,24 @@ import type {
   StudentWriteInput,
 } from "./ports.ts";
 import { isUuid } from "./schools.ts";
+import {
+  type ScopableClient,
+  type ScopedClient as ScopedClientOf,
+  scopedClient,
+} from "./scoped-client.ts";
 
 type Client = ReturnType<typeof createClient>;
 
-/** The tables that carry a `school_id`. Anything else cannot be queried here. */
-type SchoolTable =
-  | "students"
-  | "student_parents"
-  | "student_classes"
-  | "status_events"
-  | "carpools"
-  | "class_groups";
+/** What supabase-js hands back from a query: awaitable, and chainable. */
+type Query = ReturnType<ReturnType<Client["from"]>["select"]>;
 
 /**
- * The three functions that take `p_school_id`. The unscoped legacy overloads
- * share these names and still exist during rollout; they are never called from
- * here, and `scopedClient` always sends `p_school_id` so PostgREST can only
- * resolve the scoped one.
+ * This file never builds a query itself. Every read and write goes through a
+ * `ScopedClient` (see scoped-client.ts, where the school is added and where
+ * that is unit-tested), and `store-scoping.test.ts` fails if a `.from(` or a
+ * bare `.rpc(` ever appears here.
  */
-type SchoolRpc =
-  "set_student_classes" | "change_class_members" | "remove_class_group";
-
-type Row = Record<string, unknown>;
-
-/**
- * The only door to the database in this file. A `school_id` column has a
- * DEFAULT of school #1 during the rollout, so an insert that forgot it would not
- * fail -- it would silently file the row under the wrong school. Routing every
- * query through here makes forgetting impossible instead of unlikely.
- *
- * `school_id` is applied after the caller's values, so a row or filter built
- * from request data can never override it.
- */
-function scopedClient(client: Client, schoolId: string) {
-  const stamp = (row: Row): Row => ({ ...row, school_id: schoolId });
-  return {
-    select: (table: SchoolTable, columns: string) =>
-      client.from(table).select(columns).eq("school_id", schoolId),
-    update: (table: SchoolTable, patch: Row) =>
-      client.from(table).update(patch).eq("school_id", schoolId),
-    remove: (table: SchoolTable) =>
-      client.from(table).delete().eq("school_id", schoolId),
-    insert: (table: SchoolTable, rows: Row | Row[]) =>
-      client
-        .from(table)
-        .insert(Array.isArray(rows) ? rows.map(stamp) : stamp(rows)),
-    upsert: (table: SchoolTable, row: Row, onConflict: string) =>
-      client.from(table).upsert(stamp(row), { onConflict }),
-    rpc: (name: SchoolRpc, args: Row & { p_school_id?: never }) =>
-      // The school goes last, like `stamp`: nothing in `args` can replace it.
-      client.rpc(name, { ...args, p_school_id: schoolId }),
-  };
-}
-
-type ScopedClient = ReturnType<typeof scopedClient>;
+type ScopedClient = ScopedClientOf<Query>;
 
 /**
  * A students row joined with its (possibly absent) student_parents row and its
@@ -291,7 +255,14 @@ export function createSupabaseStores(env: FunctionEnv): RosterStores {
       if (!isUuid(schoolId)) {
         throw new Error("A roster store needs a valid school id.");
       }
-      return createRosterStore(scopedClient(client, schoolId));
+      return createRosterStore(
+        scopedClient(
+          // supabase-js's builder types are wider than the few methods the
+          // scope needs; the shapes match at runtime.
+          client as unknown as ScopableClient<Query>,
+          schoolId,
+        ),
+      );
     },
   };
 }
