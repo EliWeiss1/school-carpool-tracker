@@ -107,6 +107,14 @@ const config: Config = {
         // bit of contrast and gains nothing from atmosphere.
         "curb-dusk":
           "radial-gradient(64rem 32rem at 88% -10%, rgb(34 98 232 / 0.26), transparent 62%), radial-gradient(44rem 26rem at 4% 108%, rgb(245 165 36 / 0.13), transparent 60%)",
+        // The two colour bands on the landing page, same recipe as curb-dusk:
+        // a lighter wash from one top corner, a deeper one from the opposite
+        // bottom corner. Always over the flat colour (`bg-marigold-500` /
+        // `bg-waiting-screen`) and under `.grain`. Landing page only.
+        "marigold-noon":
+          "radial-gradient(48rem 28rem at 10% -10%, rgb(255 217 138 / 0.8), transparent 60%), radial-gradient(40rem 24rem at 100% 112%, rgb(217 134 11 / 0.6), transparent 62%)",
+        "board-sky":
+          "radial-gradient(52rem 30rem at 92% -12%, rgb(141 184 255 / 0.5), transparent 60%), radial-gradient(44rem 26rem at 0% 112%, rgb(16 21 31 / 0.38), transparent 62%)",
       },
 
       transitionTimingFunction: {

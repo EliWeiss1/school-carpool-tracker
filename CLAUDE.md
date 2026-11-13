@@ -698,6 +698,16 @@ use `bg-curb-dusk` (two layered radial washes, cobalt and marigold, defined in
 `relative isolate` on its element). Nowhere else: `/display` stays flat ink,
 because a wall board needs every bit of contrast.
 
+**Colour bands, landing page only.** Below the hero the landing page is built
+from full-bleed colour grounds, one idea per band, with a picture of the
+product and a headline rather than paragraphs: `bg-marigold-500
+bg-marigold-noon` (ink text) and `bg-waiting-screen bg-board-sky` (white
+text), each under `.grain`. This is the one place the board blue is a ground
+rather than a waiting tile, and the one place marigold fills a large surface;
+neither is a status there. Red and green still never appear on that page. A
+visitor decides in the time it takes to scroll, so supporting copy on the
+landing page is one sentence at `text-xl` at most, never `text-sm`.
+
 ### Motion
 
 Only `transform` and `opacity`. **Never `transition-all`** — on the slow stick PC

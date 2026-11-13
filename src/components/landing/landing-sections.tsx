@@ -4,28 +4,27 @@ import { ButtonLink } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
 /**
- * The landing page below the hero. Each section answers one question a school
- * office asks before trying something new, in the order they ask it: what is
- * it, can I trust it with names, how long does it take, and whose data is it.
+ * The landing page below the hero: colour bands, one idea each, a picture of
+ * the product and very few words. A school office decides on this page in the
+ * time it takes to scroll it, so nothing here is a paragraph.
  *
- * Nothing here moves and nothing is red or green: those two colours mean
- * waiting and arrived everywhere in the app, including on its front door.
+ * The colours are the product's own, used at full strength: school-bus
+ * marigold, the board's waiting blue, and ink. Red and green never appear:
+ * those two mean waiting and arrived on the staff screens and nothing else,
+ * including on the front door.
  */
 
 function Section({
-  id,
   labelledBy,
   className,
   children,
 }: {
-  id?: string;
   labelledBy: string;
   className?: string;
   children: ReactNode;
 }) {
   return (
     <section
-      id={id}
       aria-labelledby={labelledBy}
       className={cn("mx-auto w-full max-w-6xl px-6 sm:px-12", className)}
     >
@@ -34,67 +33,172 @@ function Section({
   );
 }
 
-/* ---------------------------------------------------------------- lanes */
+/** A 24px line icon. Decorative: always paired with the words it stands for. */
+function Icon({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      {children}
+    </svg>
+  );
+}
 
-const lanes = [
+const micPath = (
+  <>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+  </>
+);
+
+/* -------------------------------------------------------------- screens */
+
+/** Announce: the push-to-talk button mid-press, and the name it heard. */
+function AnnouncePicture() {
+  return (
+    <div className="flex items-center gap-4">
+      <span className="relative flex h-24 w-24 shrink-0 items-center justify-center">
+        <span className="absolute inset-0 animate-listen-pulse rounded-full bg-curb-900" />
+        <span className="relative flex h-24 w-24 items-center justify-center rounded-full bg-curb-900 text-marigold-400 shadow-float">
+          <Icon className="h-12 w-12">{micPath}</Icon>
+        </span>
+      </span>
+      <span className="rounded-2xl bg-white px-6 py-4 font-display text-3xl font-extrabold text-curb-900 shadow-float">
+        &ldquo;Cohen&rdquo;
+      </span>
+    </div>
+  );
+}
+
+const boardTiles = [
+  { name: "Cohen", tone: "called" },
+  { name: "Patel", tone: "arrived" },
+  { name: "Garcia", tone: "waiting" },
+  { name: "Nguyen", tone: "waiting" },
+  { name: "Okafor", tone: "arrived" },
+  { name: "Berg", tone: "waiting" },
+] as const;
+
+/** Display: the board in miniature, in the board's own three tile colours. */
+function DisplayPicture() {
+  return (
+    <ul className="grid w-full grid-cols-3 gap-2">
+      {boardTiles.map((tile) => (
+        <li
+          key={tile.name}
+          className={cn(
+            "flex h-16 items-center justify-center rounded-xl font-display text-lg font-bold",
+            tile.tone === "waiting" &&
+              "bg-waiting-screen text-white shadow-tile-waiting",
+            tile.tone === "arrived" &&
+              "bg-arrived-screen text-curb-900 shadow-tile-arrived",
+            tile.tone === "called" && "bg-marigold-400 text-curb-900",
+          )}
+        >
+          {tile.name}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const rosterRows = [
+  { name: "Maya Cohen", classGroup: "K2" },
+  { name: "Mateo Garcia", classGroup: "3rd" },
+  { name: "Layla Nguyen", classGroup: "2nd" },
+];
+
+/** Office: three roster rows, the way /admin lists them. */
+function OfficePicture() {
+  return (
+    <ul className="w-full overflow-hidden rounded-2xl bg-white text-curb-900 shadow-float">
+      {rosterRows.map((row, index) => (
+        <li
+          key={row.name}
+          className={cn(
+            "flex items-center justify-between gap-4 px-4 py-3",
+            index > 0 && "border-t border-curb-200",
+          )}
+        >
+          <span className="font-display text-lg font-bold">{row.name}</span>
+          <span className="rounded-lg bg-marigold-100 px-2 py-1 font-mono text-base text-curb-800">
+            {row.classGroup}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const screens = [
   {
-    lane: "01",
     title: "Announce",
-    where: "Outside, at the curb",
-    blurb:
-      "Hold the button and say a last name, or type a few letters. CarpoolCaller offers the closest matches and waits for your tap.",
+    line: "Say or type a name at the curb.",
+    picture: <AnnouncePicture />,
+    ground: "bg-marigold-500 bg-marigold-noon text-curb-900",
   },
   {
-    lane: "02",
     title: "Display",
-    where: "Inside, on any screen",
-    blurb:
-      "Every child, waiting or called, grouped by class. A new arrival flashes and chimes, so a teacher hears it without watching the screen.",
+    line: "The child lights up inside, with a chime.",
+    picture: <DisplayPicture />,
+    ground: "bg-curb-900 bg-curb-dusk text-white",
   },
   {
-    lane: "03",
     title: "Office",
-    where: "At the front desk",
-    blurb:
-      "Add students and classes, import the roster from a spreadsheet, link siblings and carpools. The board resets itself every evening.",
+    line: "Roster, classes and carpools in one place.",
+    picture: <OfficePicture />,
+    ground: "bg-waiting-screen bg-board-sky text-white",
   },
 ];
 
 /**
- * The three screens, drawn as lanes on one surface with dashed lane markings
- * between them. The numbers are real: the screens are used in this order,
- * outside, then inside, then the office.
+ * The three screens as three panels, each in its own colour with a picture of
+ * the screen itself. Not numbered: they are places, not steps.
  */
-export function LanesSection() {
+export function ScreensSection() {
   return (
-    <Section labelledBy="lanes-heading" className="py-16 lg:py-24">
+    <Section labelledBy="screens-heading" className="py-16 lg:py-24">
       <h2
-        id="lanes-heading"
-        className="max-w-2xl font-display text-3xl font-bold"
+        id="screens-heading"
+        className="max-w-3xl font-display text-5xl font-extrabold tracking-display text-curb-900"
       >
-        Three screens, one pickup line
+        Three screens, one pickup line.
       </h2>
-      <ol className="mt-8 grid rounded-2xl border border-curb-200 bg-white shadow-card lg:grid-cols-3">
-        {lanes.map((lane, index) => (
+      <ul className="mt-12 grid gap-4 lg:grid-cols-3">
+        {screens.map((screen) => (
           <li
-            key={lane.lane}
+            key={screen.title}
             className={cn(
-              "p-6 sm:p-8",
-              index > 0 &&
-                "border-t-2 border-dashed border-curb-300 lg:border-l-2 lg:border-t-0",
+              "grain relative isolate flex flex-col overflow-hidden rounded-2xl p-6 shadow-float sm:p-8",
+              screen.ground,
             )}
           >
-            <p aria-hidden="true" className="font-mono text-sm text-curb-400">
-              {lane.lane}
-            </p>
-            <h3 className="mt-3 font-display text-2xl font-bold text-curb-900">
-              {lane.title}
+            <div
+              aria-hidden="true"
+              className="flex h-48 items-center justify-center"
+            >
+              {screen.picture}
+            </div>
+            <h3 className="mt-6 font-display text-3xl font-extrabold">
+              {screen.title}
             </h3>
-            <p className="mt-1 text-sm text-curb-500">{lane.where}</p>
-            <p className="mt-4 text-curb-600">{lane.blurb}</p>
+            <p className="mt-2 text-xl">{screen.line}</p>
           </li>
         ))}
-      </ol>
+      </ul>
     </Section>
   );
 }
@@ -107,55 +211,29 @@ const lookalikes = [
   { name: "Zoe Koen", classGroup: "1st" },
 ];
 
-const assurances = [
-  {
-    title: "One tap for a carpool",
-    body: "Siblings and ride-shares are linked once in the office, then arrive together.",
-  },
-  {
-    title: "Easy to take back",
-    body: "Tapped the wrong child? Tap the name again and it returns to waiting.",
-  },
-  {
-    title: "Works without the microphone",
-    body: "Typing a few letters finds the same matches, in a noisy line or a quiet one.",
-  },
-];
-
 /**
- * The trust section. The picture is the product's ambiguous case exactly as
- * /announce shows it: three names that sound alike, equal weight, nothing
- * chosen for you.
+ * The trust band, in full marigold. The picture is the product's ambiguous
+ * case exactly as /announce shows it: three names that sound alike, equal
+ * weight, nothing chosen for you.
  */
 export function ConfirmSection() {
   return (
-    <div className="border-y border-curb-200 bg-white">
+    <div className="grain relative isolate overflow-hidden bg-marigold-500 bg-marigold-noon text-curb-900">
       <Section
         labelledBy="confirm-heading"
-        className="grid gap-12 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:items-center lg:gap-16 lg:py-24"
+        className="grid gap-12 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-center lg:gap-16 lg:py-24"
       >
         <div>
           <h2
             id="confirm-heading"
-            className="max-w-xl font-display text-3xl font-bold"
+            className="max-w-xl font-display text-5xl font-extrabold tracking-display sm:text-6xl"
           >
-            It never puts a name on the board by itself
+            A person always taps.
           </h2>
-          <p className="mt-4 max-w-xl text-lg text-curb-600">
-            Cohen, Kohen and Koen sound the same through a phone in the wind.
-            When names are close, you see each one and choose. Nothing reaches
-            the board until a person taps.
+          <p className="mt-6 max-w-md text-xl text-curb-800">
+            Names that sound alike are shown side by side. Nothing reaches the
+            board by itself.
           </p>
-          <dl className="mt-8 grid max-w-xl gap-4">
-            {assurances.map((item) => (
-              <div key={item.title}>
-                <dt className="font-display font-semibold text-curb-900">
-                  {item.title}
-                </dt>
-                <dd className="text-curb-600">{item.body}</dd>
-              </div>
-            ))}
-          </dl>
         </div>
 
         <div>
@@ -165,25 +243,24 @@ export function ConfirmSection() {
           </p>
           <div
             aria-hidden="true"
-            className="rounded-2xl border border-curb-200 bg-curb-50 p-4 shadow-float sm:p-6"
+            className="rounded-2xl bg-white p-4 shadow-float sm:p-6"
           >
-            <p className="text-sm text-curb-500">Heard</p>
-            <p className="font-display text-2xl font-bold text-curb-900">
+            <p className="flex items-center gap-3 font-display text-3xl font-extrabold text-curb-900">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-curb-900 text-marigold-400">
+                <Icon className="h-6 w-6">{micPath}</Icon>
+              </span>
               &ldquo;Cohen&rdquo;
-            </p>
-            <p className="mt-1 text-sm text-curb-600">
-              Three close matches. Tap the right one.
             </p>
             <ul className="mt-4 flex flex-col gap-3">
               {lookalikes.map((candidate) => (
                 <li
                   key={candidate.name}
-                  className="flex min-h-tap-lg items-center justify-between gap-4 rounded-xl border border-curb-300 bg-white px-4 shadow-card"
+                  className="flex min-h-tap-lg items-center justify-between gap-4 rounded-xl border border-curb-300 bg-curb-50 px-4 shadow-card"
                 >
                   <span className="font-display text-xl font-bold text-curb-900">
                     {candidate.name}
                   </span>
-                  <span className="font-mono text-sm text-curb-500">
+                  <span className="font-mono text-base text-curb-600">
                     {candidate.classGroup}
                   </span>
                 </li>
@@ -199,51 +276,44 @@ export function ConfirmSection() {
 /* ---------------------------------------------------------------- setup */
 
 const steps = [
-  {
-    title: "Create your school's account",
-    body: "An email address and a password. It takes about a minute.",
-  },
-  {
-    title: "Add classes and the roster",
-    body: "Type students in, or import the spreadsheet you already keep.",
-  },
-  {
-    title: "Set a code for your devices",
-    body: "One short code for the curb phones, and one for the screens if you want them separate.",
-  },
-  {
-    title: "Open your school's link",
-    body: "On a phone outside and a screen inside. Type the code once and each stays connected.",
-  },
+  "Create your account",
+  "Add your roster",
+  "Set a device code",
+  "Open your link",
 ];
 
-/** A real sequence, so it is a numbered list, each step under a painted line. */
+/**
+ * A real sequence, so it is numbered. Each step sits under a dashed lane
+ * marking; together the four dashes read as one painted line across the band.
+ */
 export function SetupSection() {
   return (
-    <Section labelledBy="setup-heading" className="py-16 lg:py-24">
-      <h2
-        id="setup-heading"
-        className="max-w-2xl font-display text-3xl font-bold"
-      >
-        Ready by this afternoon&rsquo;s pickup
-      </h2>
-      <ol className="mt-8 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-        {steps.map((step, index) => (
-          <li key={step.title} className="border-t-4 border-curb-900 pt-4">
-            <p
-              aria-hidden="true"
-              className="font-display text-3xl font-extrabold text-marigold-600"
+    <div className="grain relative isolate overflow-hidden bg-waiting-screen bg-board-sky text-white">
+      <Section labelledBy="setup-heading" className="py-16 lg:py-24">
+        <h2
+          id="setup-heading"
+          className="max-w-3xl font-display text-5xl font-extrabold tracking-display"
+        >
+          Ready by this afternoon&rsquo;s pickup.
+        </h2>
+        <ol className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+          {steps.map((step, index) => (
+            <li
+              key={step}
+              className="border-t-4 border-dashed border-white/50 pt-6"
             >
-              {index + 1}
-            </p>
-            <h3 className="mt-2 font-display text-xl font-bold text-curb-900">
-              {step.title}
-            </h3>
-            <p className="mt-2 text-curb-600">{step.body}</p>
-          </li>
-        ))}
-      </ol>
-    </Section>
+              <p
+                aria-hidden="true"
+                className="font-display text-6xl font-extrabold tracking-display text-marigold-400"
+              >
+                {index + 1}
+              </p>
+              <h3 className="mt-3 font-display text-2xl font-bold">{step}</h3>
+            </li>
+          ))}
+        </ol>
+      </Section>
+    </div>
   );
 }
 
@@ -251,39 +321,59 @@ export function SetupSection() {
 
 const promises = [
   {
-    title: "Each school is separate",
-    body: "Your students, classes, carpools and history are yours. No other school can see them.",
+    statement: "Every school's data is separate.",
+    badge: "bg-marigold-500 text-curb-900",
+    icon: <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" />,
   },
   {
-    title: "Voice is not kept",
-    body: "What is said at the curb is turned into text to find the name, then discarded. Recordings are never stored.",
+    statement: "Voice is never recorded.",
+    badge: "bg-waiting-screen text-white",
+    icon: (
+      <>
+        {micPath}
+        <path d="M4 3l16 18" />
+      </>
+    ),
   },
   {
-    title: "You control the devices",
-    body: "Phones and screens join with a code you set. The office can disconnect any one of them, or change the code.",
+    statement: "You control every device.",
+    badge: "bg-curb-900 text-marigold-400",
+    icon: (
+      <>
+        <rect x="7" y="2" width="10" height="20" rx="2" />
+        <path d="M11 18h2" />
+      </>
+    ),
   },
 ];
 
 export function PrivacySection() {
   return (
-    <div className="border-t border-curb-200 bg-white">
+    <div className="bg-white">
       <Section labelledBy="privacy-heading" className="py-16 lg:py-24">
         <h2
           id="privacy-heading"
-          className="max-w-2xl font-display text-3xl font-bold"
+          className="max-w-3xl font-display text-5xl font-extrabold tracking-display text-curb-900"
         >
-          Your roster stays your school&rsquo;s
+          Your roster stays yours.
         </h2>
-        <dl className="mt-8 grid gap-8 lg:grid-cols-3">
+        <ul className="mt-12 grid gap-8 lg:grid-cols-3">
           {promises.map((promise) => (
-            <div key={promise.title}>
-              <dt className="font-display text-xl font-bold text-curb-900">
-                {promise.title}
-              </dt>
-              <dd className="mt-2 max-w-md text-curb-600">{promise.body}</dd>
-            </div>
+            <li key={promise.statement} className="flex items-center gap-4">
+              <span
+                className={cn(
+                  "flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl shadow-card",
+                  promise.badge,
+                )}
+              >
+                <Icon className="h-8 w-8">{promise.icon}</Icon>
+              </span>
+              <p className="font-display text-2xl font-bold text-curb-900">
+                {promise.statement}
+              </p>
+            </li>
           ))}
-        </dl>
+        </ul>
       </Section>
     </div>
   );
@@ -298,7 +388,7 @@ export function ClosingBand() {
       <Section labelledBy="closing-heading" className="py-16 lg:py-24">
         <h2
           id="closing-heading"
-          className="max-w-2xl font-display text-5xl font-extrabold tracking-display"
+          className="max-w-2xl font-display text-5xl font-extrabold tracking-display sm:text-6xl"
         >
           Set up your school before the next pickup.
         </h2>
@@ -306,7 +396,7 @@ export function ClosingBand() {
           <ButtonLink href="/signup" size="tap">
             Get started
           </ButtonLink>
-          <p className="text-curb-300">Free during early access.</p>
+          <p className="text-lg text-curb-300">Free during early access.</p>
         </div>
       </Section>
 

@@ -4,7 +4,7 @@ import { LandingHero } from "@/components/landing/landing-hero";
 import {
   ClosingBand,
   ConfirmSection,
-  LanesSection,
+  ScreensSection,
   PrivacySection,
   SetupSection,
 } from "@/components/landing/landing-sections";
@@ -30,7 +30,7 @@ export default function LandingPage() {
       <LandingHero />
       {/* The one hazard rule, in its usual place: directly under the header. */}
       <HazardRule />
-      <LanesSection />
+      <ScreensSection />
       <ConfirmSection />
       <SetupSection />
       <PrivacySection />
