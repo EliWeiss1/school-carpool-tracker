@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 
+import { BOOTSTRAP } from "./test-bootstrap";
+
 /**
  * Runs the real migration files against an in-process Postgres so the schema,
  * the arrived_at trigger, and — most importantly — the RLS boundary are checked
@@ -16,22 +18,6 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
  */
 
 const MIGRATIONS_DIR = dirname(fileURLToPath(import.meta.url));
-
-const BOOTSTRAP = `
-  create role anon nologin;
-  create role authenticated nologin;
-  create role service_role nologin bypassrls;
-  -- Supabase grants table privileges to anon, authenticated AND service_role
-  -- platform-side by default (RLS, and each migration's own explicit
-  -- REVOKE, are what actually narrow that); default privileges are the
-  -- closest local equivalent. Granting only service_role here would make
-  -- every "anon is denied" assertion below pass because anon was never
-  -- granted anything in the first place, not because a migration's REVOKE
-  -- did its job -- a regression guard that can't fail is not a guard.
-  alter default privileges in schema public
-    grant all on tables to anon, authenticated, service_role;
-  create publication supabase_realtime;
-`;
 
 let db: PGlite;
 

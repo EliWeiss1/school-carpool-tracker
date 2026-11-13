@@ -6,7 +6,7 @@
  * exists only in this process's environment.
  */
 
-import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.114.0";
 
 import { flattenClassNames } from "./class-embed.ts";
 import {
