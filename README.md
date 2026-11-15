@@ -32,11 +32,28 @@ column on the student. To put a whole group in a class, open the class's
 students with no class asks first: move everyone to another class, delete
 anyway, or cancel.
 
-CSV import columns: `first_name`, `last_name`, optional `aliases`, and the
-classes in a `class_groups` column (`classes` also works). Put several classes
-in one cell separated by a semicolon, for example `1st;2nd`. A class that does
-not exist yet is an error on that row, not a new class: add it under Classes
-first, then import.
+**Importing a roster** (Admin, "Import your roster") takes the list the school
+already has, in whatever shape it's in:
+
+- **Upload** an Excel file (`.xlsx`) or a CSV/text file, or **paste** cells
+  copied from Excel or Google Sheets. Comma, tab and semicolon files all work.
+- Columns can be in any order with the school's own headings ("Student Name",
+  "Surname", "Homeroom Teacher", "Mother's Name"...). Title rows above the
+  headings are skipped, and a single full-name column ("Cohen, Miriam" or
+  "Miriam Cohen") is split for you.
+- A **Check columns** step shows each column with sample values and what it
+  will be used for; change any of them from a dropdown.
+- A **Review** step says what will happen before anything is saved: students
+  to add, new classes and carpools to create, students already on the roster
+  (skipped), and rows that need fixing. Siblings who share a surname and a
+  parent are offered as a carpool, so one name calls them all.
+- For a really messy list, **Let your AI tool tidy it** copies a prompt (with
+  your class names) to paste into ChatGPT, Claude or similar along with the
+  file. Paste the reply back in. That shares students' names with the AI
+  service, so check school policy first.
+- Download a sample file from the import panel if you'd rather fill in a
+  template. Importing only adds students; **Undo import** removes exactly the
+  students it added.
 
 The board also clears itself: a `pg_cron` job in Supabase sends every arrived
 student back to waiting at **8:00 PM Pacific, Sunday through Thursday** (Friday and Saturday

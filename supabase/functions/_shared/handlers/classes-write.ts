@@ -32,6 +32,7 @@ import {
 } from "../http.ts";
 import type { RosterStore } from "../ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
+import { MAX_CLASSES } from "./class-input.ts";
 import { MAX_NAME_LENGTH, nameTooLong } from "./roster-input.ts";
 
 export interface ClassesWriteHandlerDeps extends GuardDeps {
@@ -49,7 +50,6 @@ const ACTIONS = ["create", "delete", "reorder", "members"] as const;
 type ClassAction = (typeof ACTIONS)[number];
 
 /** A class list longer than this is almost certainly a mistake. */
-const MAX_CLASSES = 100;
 
 /** The most student ids one `members` list may carry. */
 const MAX_MEMBER_IDS = 500;

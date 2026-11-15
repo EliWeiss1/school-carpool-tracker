@@ -12,6 +12,15 @@
  * exactly as /roster-write does. The first name that is not a class fails the
  * whole import (422) before anything -- including a new carpool -- is written.
  * The retired singular `class_group` on any row is a 400.
+ *
+ * `createMissingClasses: true` (the literal boolean only) is for a brand-new
+ * school whose classes do not exist yet: instead of 422, each unknown name is
+ * created once (case-insensitive, first spelling wins) and the rows link to
+ * it. It is opt-in so a typo in a mature school's file still fails loudly
+ * rather than minting a stray class. Classes are created only after every
+ * check that can reject the import has passed (name rules, roster collision),
+ * so a refused import leaves no orphan classes behind. The response lists
+ * them as `createdClasses`.
  */
 
 import {
@@ -23,8 +32,11 @@ import {
 } from "../http.ts";
 import type { RosterStore, StudentWriteInput } from "../ports.ts";
 import {
+  classNameProblem,
+  MAX_CLASSES,
   OUT_OF_DATE_MESSAGE,
   readClassNames,
+  tooManyClassesMessage,
   sendsLegacyClassGroup,
   unknownClassMessage,
 } from "./class-input.ts";
@@ -44,6 +56,7 @@ export interface RosterImportHandlerDeps extends GuardDeps {
     | "listCarpools"
     | "createCarpool"
     | "listClassGroups"
+    | "createClassGroup"
   >;
 }
 
@@ -111,16 +124,16 @@ function readStudentsInput(body: Record<string, unknown>): ParseResult {
   return { ok: true, rows: out };
 }
 
+type ClassList = readonly { id: string; name: string }[];
+
 /**
- * Resolves every row's class names to ids against the live class list. The
+ * Resolves every row's class names to ids against the given class list. The
  * first unknown name, in row order, refuses the whole import.
  */
-async function resolveClasses(
-  store: RosterImportHandlerDeps["store"],
+function resolveClasses(
+  classes: ClassList,
   rows: ParsedRow[],
-): Promise<{ ok: true; rows: ImportRow[] } | { ok: false; unknown: string }> {
-  const classes = await store.listClassGroups();
-
+): { ok: true; rows: ImportRow[] } | { ok: false; unknown: string } {
   const resolved: ImportRow[] = [];
   for (const { classNames, ...rest } of rows) {
     const result = resolveClassNames(classNames, classes);
@@ -128,6 +141,26 @@ async function resolveClasses(
     resolved.push({ ...rest, class_group_ids: result.ids });
   }
   return { ok: true, rows: resolved };
+}
+
+/**
+ * Class names used in the file that are not in `classes`, de-duplicated
+ * case-insensitively with the first spelling (trimmed) in row order kept.
+ */
+function missingClassNames(classes: ClassList, rows: ParsedRow[]): string[] {
+  const known = new Set(classes.map((c) => c.name.trim().toLowerCase()));
+  const out: string[] = [];
+  for (const { classNames } of rows) {
+    for (const raw of classNames) {
+      const name = raw.trim();
+      if (name === "") continue;
+      const key = name.toLowerCase();
+      if (known.has(key)) continue;
+      known.add(key);
+      out.push(name);
+    }
+  }
+  return out;
 }
 
 /**
@@ -185,11 +218,27 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
     }
 
     return await withStoreErrors(async () => {
-      const withClasses = await resolveClasses(deps.store, parsed.rows);
-      if (!withClasses.ok) {
-        return errorResponse(422, unknownClassMessage(withClasses.unknown));
+      const createMissing = guard.body.createMissingClasses === true;
+      const classes = await deps.store.listClassGroups();
+      const missing = createMissing
+        ? missingClassNames(classes, parsed.rows)
+        : [];
+
+      if (createMissing) {
+        for (const name of missing) {
+          const problem = classNameProblem(name);
+          if (problem) return errorResponse(400, problem);
+        }
+        if (classes.length + missing.length > MAX_CLASSES) {
+          return errorResponse(400, tooManyClassesMessage());
+        }
+      } else {
+        // Same 422 as ever: surfaces the first unknown name before any write.
+        const check = resolveClasses(classes, parsed.rows);
+        if (!check.ok) {
+          return errorResponse(422, unknownClassMessage(check.unknown));
+        }
       }
-      const students = withClasses.rows;
 
       // Reject the whole import if any child is already on the roster.
       //
@@ -213,7 +262,7 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
         ),
       );
 
-      const collision = students.find((student) =>
+      const collision = parsed.rows.find((student) =>
         onRoster.has(nameKey(student.first_name, student.last_name)),
       );
       if (collision) {
@@ -223,13 +272,33 @@ export function createRosterImportHandler(deps: RosterImportHandlerDeps) {
         );
       }
 
+      // Only now, with nothing left that can reject the import, make the
+      // missing classes so the rows below can link to real ids.
+      const createdClasses: string[] = [];
+      const allClasses: { id: string; name: string }[] = [...classes];
+      for (const name of missing) {
+        const group = await deps.store.createClassGroup({ name });
+        allClasses.push(group);
+        createdClasses.push(group.name);
+      }
+      const withClasses = resolveClasses(allClasses, parsed.rows);
+      if (!withClasses.ok) {
+        // Unreachable: every name is known or was just created.
+        return errorResponse(422, unknownClassMessage(withClasses.unknown));
+      }
+      const students = withClasses.rows;
+
       // Carpools named in the file are created (or matched by name) before
       // any student row is written, so every row that names one lands with
       // its carpool_id already set rather than needing a second pass.
       const withCarpools = await resolveCarpools(deps.store, students);
 
       const created = await deps.store.bulkCreateStudents(withCarpools);
-      return jsonResponse({ created: created.length, students: created });
+      return jsonResponse({
+        created: created.length,
+        students: created,
+        createdClasses,
+      });
     });
   };
 }

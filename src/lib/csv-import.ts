@@ -1,25 +1,30 @@
 /**
- * Turns a roster CSV into a validation report, never a crash.
+ * Turns a roster spreadsheet into a validation report, never a crash.
  *
  * Pure logic, no DOM and no network, so it runs the same in a unit test and in
- * the browser after a `<input type="file">` read. Nothing here writes
- * anywhere -- `/admin` shows this report and only calls `roster-import` after
- * a person has looked at it and confirmed.
+ * the browser. Nothing here writes anywhere -- `/admin` shows this report and
+ * only calls `roster-import` after a person has looked at it and confirmed.
  *
- * The parser is hand-rolled rather than a dependency for the same reason
- * `_shared/resolver.ts` is: a few hundred lines of well-tested state machine
- * is a smaller, more auditable surface than a new package for one file format,
- * and RFC 4180 quoting is not a large rule set to get right once.
+ * The pipeline, each step its own module under `src/lib/import/`:
+ *   source (file or paste) -> grid           read-source.ts
+ *   grid -> layout (headings, column fields)  detect-columns.ts
+ *   grid + layout -> this report              buildImportReport, below
+ *
+ * `parseRosterCsv` runs the whole pipeline on CSV text with every guess
+ * accepted; the import screen runs the steps separately so the admin can
+ * correct the layout between them.
  */
 
-export type CsvField =
-  | "first_name"
-  | "last_name"
-  | "aliases"
-  | "class_groups"
-  | "carpool"
-  | "parent1_name"
-  | "parent2_name";
+import type { ColumnAssignment } from "./import/fields";
+import {
+  type ImportLayout,
+  detectLayout,
+  layoutProblems,
+} from "./import/detect-columns";
+import { textToGrid } from "./import/read-source";
+import { splitFullName } from "./import/split-name";
+
+export type { CsvField } from "./import/fields";
 
 export interface CsvImportStudent {
   first_name: string;
@@ -37,227 +42,84 @@ export interface CsvImportStudent {
 }
 
 export interface CsvImportError {
-  /** 1-based, counting the header as row 1 -- the number a spreadsheet shows. */
+  /** 1-based, the row number the spreadsheet itself shows. */
   rowNumber: number;
   message: string;
 }
 
+export interface RosterMatch {
+  rowNumber: number;
+  name: string;
+}
+
 export interface CsvImportReport {
-  /** Non-empty only when the file cannot be read at all (bad or missing header). */
+  /** Non-empty only when the file cannot be read at all (no names, bad quoting). */
   headerErrors: string[];
   /** What will actually be written if the person confirms. */
   toImport: CsvImportStudent[];
+  /** The spreadsheet row each `toImport` entry came from, index for index. */
+  toImportRows: number[];
   /** Per-row problems, each skipped rather than aborting the whole file. */
   errors: CsvImportError[];
   /** Rows that were empty or whitespace-only. Not an error -- just not data. */
   blankRowsSkipped: number;
-  /** Data rows in the file, header excluded. errors + blankRowsSkipped + toImport.length <= this (duplicates and column-count mismatches also subtract). */
+  /** Rows above the headings (a title, a date). Not data. */
+  titleRowsSkipped: number;
+  /** Data rows below the headings, blank ones included. */
   totalDataRows: number;
   /**
-   * Header cells that did not match any known field's aliases, exactly as
-   * written in the file. Surfaced rather than silently dropped: a column the
-   * importer doesn't recognise used to vanish with no signal at all, which is
-   * exactly how a school's "Grade" column full of class names went missing
-   * with no error anywhere.
+   * Non-empty headings the layout ignores, exactly as written. Surfaced rather
+   * than silently dropped: a column the importer doesn't recognise used to
+   * vanish with no signal at all, which is exactly how a school's "Grade"
+   * column full of class names once went missing with no error anywhere.
    */
   unrecognizedHeaders: string[];
+  /**
+   * Classes the file names that don't exist yet, first spelling kept. Created
+   * on import when `unknownClasses` is "create"; otherwise always empty
+   * (those rows are errors instead).
+   */
+  newClasses: string[];
+  /** Students skipped because they are already on the roster. */
+  alreadyOnRoster: RosterMatch[];
+}
+
+export interface ImportContext {
+  /** The live class names. Empty means "unknown" and skips class checks. */
+  knownClassNames?: readonly string[];
+  /**
+   * "reject" makes a class the app doesn't have a row error (the original
+   * behaviour); "create" collects it into `newClasses` for the admin to
+   * approve. Defaults to "reject".
+   */
+  unknownClasses?: "reject" | "create";
+  /** The current roster, so re-importing a file skips who is already there. */
+  rosterNames?: readonly { first_name: string; last_name: string }[];
 }
 
 /**
- * Header names a school's own export is likely to use, matched
- * case-insensitively after trimming. `first_name` and `last_name` are the
- * only required columns; the rest default to empty/null when absent.
- */
-const HEADER_ALIASES: Record<CsvField, string[]> = {
-  first_name: ["first_name", "firstname", "first name", "first"],
-  last_name: ["last_name", "lastname", "last name", "last", "surname"],
-  aliases: [
-    "aliases",
-    "alias",
-    "alternate spellings",
-    "alt names",
-    "nicknames",
-  ],
-  // "grade" is here even though the app dropped grade as a concept (see the
-  // drop_grade migration): a school's own export still calls this column
-  // "Grade" and puts class names in it (e.g. "EC Hummingbirds"), and that
-  // real file is what class_groups needs to receive. The cell may list several
-  // classes separated by semicolons (see splitClasses).
-  class_groups: [
-    "class_groups",
-    "classes",
-    "class_group",
-    "class",
-    "classroom",
-    "class group",
-    "homeroom",
-    "grade",
-  ],
-  carpool: ["carpool", "carpool name", "car pool", "ride group", "ride"],
-  parent1_name: [
-    "parent1_name",
-    "parent 1",
-    "parent1",
-    "parent 1 name",
-    "mother",
-    "guardian 1",
-  ],
-  parent2_name: [
-    "parent2_name",
-    "parent 2",
-    "parent2",
-    "parent 2 name",
-    "father",
-    "guardian 2",
-  ],
-};
-
-const REQUIRED_FIELDS: CsvField[] = ["first_name", "last_name"];
-
-/**
- * Nothing between a CSV file and Postgres bounded a name, and the columns are
+ * Nothing between a file and Postgres bounded a name, and the columns are
  * bare `text`. An unbounded surname does not just sit there: keyterms.ts pushes
  * it into the Deepgram keyterm list, which plausibly breaks token minting for
  * the whole school, and /display renders it as one enormous tile.
  *
- * 120 is far past any real name and far short of a problem.
+ * 120 is far past any real name and far short of a problem. The server uses
+ * the same limit for class names.
  */
 export const MAX_NAME_LENGTH = 120;
 
-/**
- * RFC 4180 tokenizer: quoted fields, `""` as an escaped quote, commas and
- * newlines inside quotes taken literally, and either `\r\n` or `\n` as a row
- * terminator outside of quotes. A trailing terminator at end-of-file does not
- * manufacture a phantom empty row.
- */
-interface TokenizedCsv {
-  rows: string[][];
-  /**
-   * True when end-of-file arrived with a quoted field still open. Everything
-   * after the stray quote was absorbed into that one field, so the rows are
-   * not what the file's author wrote and must not be imported.
-   */
-  unterminatedQuote: boolean;
-}
+/** The server's cap on classes; creating past it would fail the whole import. */
+export const MAX_CLASSES = 100;
 
-function tokenizeCsv(text: string): TokenizedCsv {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-  let i = 0;
-  const len = text.length;
-
-  const pushField = () => {
-    row.push(field);
-    field = "";
-  };
-  const pushRow = () => {
-    pushField();
-    rows.push(row);
-    row = [];
-  };
-
-  while (i < len) {
-    const ch = text[i];
-
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i += 2;
-          continue;
-        }
-        inQuotes = false;
-        i++;
-        continue;
-      }
-      field += ch;
-      i++;
-      continue;
-    }
-
-    if (ch === '"') {
-      inQuotes = true;
-      i++;
-      continue;
-    }
-    if (ch === ",") {
-      pushField();
-      i++;
-      continue;
-    }
-    if (ch === "\r") {
-      if (text[i + 1] === "\n") {
-        pushRow();
-        i += 2;
-        continue;
-      }
-      pushRow();
-      i++;
-      continue;
-    }
-    if (ch === "\n") {
-      pushRow();
-      i++;
-      continue;
-    }
-
-    field += ch;
-    i++;
-  }
-
-  // Only flush a final row if something was actually read since the last
-  // terminator -- otherwise a trailing newline would add an empty row nobody
-  // typed.
-  if (field !== "" || row.length > 0) {
-    pushRow();
-  }
-
-  return { rows, unterminatedQuote: inQuotes };
-}
-
-function normalizeHeader(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-interface HeaderMap {
-  columnIndex: Partial<Record<CsvField, number>>;
-  /** Non-empty header cells that matched no field's aliases, as written. */
-  unrecognizedHeaders: string[];
-}
-
-function mapHeaders(headerRow: string[]): HeaderMap {
-  const normalized = headerRow.map(normalizeHeader);
-  const columnIndex: Partial<Record<CsvField, number>> = {};
-
-  // Walk the ALIASES in priority order and take the first that the file has,
-  // rather than walking the FILE and taking the first column matching any
-  // alias. The latter let "last" beat "last_name" purely by appearing to its
-  // left, which silently bound every surname to the wrong column.
-  for (const field of Object.keys(HEADER_ALIASES) as CsvField[]) {
-    for (const alias of HEADER_ALIASES[field]) {
-      const index = normalized.indexOf(alias);
-      if (index !== -1) {
-        columnIndex[field] = index;
-        break;
-      }
-    }
-  }
-
-  const claimedIndexes = new Set(Object.values(columnIndex));
-  const unrecognizedHeaders = headerRow.filter(
-    (cell, index) => cell.trim() !== "" && !claimedIndexes.has(index),
-  );
-
-  return { columnIndex, unrecognizedHeaders };
+function collapse(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
 }
 
 /** Aliases split on comma or semicolon, so a quoted "Kohen, Cohn" cell and a semicolon-delimited one both work. */
 function splitAliases(raw: string): string[] {
   return raw
     .split(/[,;]/)
-    .map((entry) => entry.trim())
+    .map(collapse)
     .filter((entry) => entry !== "");
 }
 
@@ -270,7 +132,7 @@ function splitClasses(raw: string): string[] {
   const seen = new Set<string>();
   const classes: string[] = [];
   for (const segment of raw.split(";")) {
-    const name = segment.trim();
+    const name = collapse(segment);
     if (name === "") continue;
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
@@ -280,107 +142,151 @@ function splitClasses(raw: string): string[] {
   return classes;
 }
 
-function nullableTrim(value: string | undefined): string | null {
-  const trimmed = (value ?? "").trim();
-  return trimmed === "" ? null : trimmed;
+function nullableCollapse(value: string | undefined): string | null {
+  const collapsed = collapse(value ?? "");
+  return collapsed === "" ? null : collapsed;
 }
 
-/**
- * @param knownClassNames the live class names. When non-empty, a class in the
- *   file that matches none of them (case-insensitively) rejects that row rather
- *   than silently creating or dropping a class. Empty skips the check.
- */
-export function parseRosterCsv(
-  text: string,
-  knownClassNames: readonly string[] = [],
+/** Same key as the server's duplicate guard (`roster-input.ts` nameKey). */
+export function studentNameKey(firstName: string, lastName: string): string {
+  return `${firstName.trim().toLowerCase()}\u0000${lastName.trim().toLowerCase()}`;
+}
+
+function emptyReport(
+  headerErrors: string[],
+  overrides: Partial<CsvImportReport> = {},
 ): CsvImportReport {
-  const stripped = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-  const { rows, unterminatedQuote } = tokenizeCsv(stripped);
+  return {
+    headerErrors,
+    toImport: [],
+    toImportRows: [],
+    errors: [],
+    blankRowsSkipped: 0,
+    titleRowsSkipped: 0,
+    totalDataRows: 0,
+    unrecognizedHeaders: [],
+    newClasses: [],
+    alreadyOnRoster: [],
+    ...overrides,
+  };
+}
 
-  if (unterminatedQuote) {
-    return {
-      headerErrors: [
-        "A quotation mark in this file is never closed, so the rows after it cannot be read. Fix the quotation mark and export the file again.",
-      ],
-      toImport: [],
-      errors: [],
-      blankRowsSkipped: 0,
-      totalDataRows: 0,
-      unrecognizedHeaders: [],
-    };
-  }
+export const UNTERMINATED_QUOTE_MESSAGE =
+  "A quotation mark in this file is never closed, so the rows after it cannot be read. Fix the quotation mark and export the file again.";
 
-  if (rows.length === 0) {
-    return {
-      headerErrors: ["The file is empty."],
-      toImport: [],
-      errors: [],
-      blankRowsSkipped: 0,
-      totalDataRows: 0,
-      unrecognizedHeaders: [],
-    };
-  }
+/**
+ * Validates every data row against a layout the admin has confirmed (or the
+ * detector proposed).
+ */
+export function buildImportReport(
+  grid: readonly (readonly string[])[],
+  layout: ImportLayout,
+  context: ImportContext = {},
+): CsvImportReport {
+  if (grid.length === 0) return emptyReport(["The file is empty."]);
 
-  const [headerRow, ...dataRows] = rows;
-  const { columnIndex, unrecognizedHeaders } = mapHeaders(headerRow);
+  const { headerRowIndex, assignments, nameOrder } = layout;
+  const dataStart = headerRowIndex + 1;
+  const dataRows = grid.slice(dataStart);
+  const titleRowsSkipped = Math.max(0, headerRowIndex);
 
-  const headerErrors = REQUIRED_FIELDS.filter(
-    (field) => columnIndex[field] === undefined,
-  ).map(
-    (field) =>
-      `Missing required column: ${field} (or "${field === "first_name" ? "First Name" : "Last Name"}").`,
-  );
-
-  if (headerErrors.length > 0) {
-    return {
-      headerErrors,
-      toImport: [],
-      errors: [],
-      blankRowsSkipped: 0,
+  const problems = layoutProblems(assignments);
+  if (problems.length > 0) {
+    return emptyReport(problems, {
       totalDataRows: dataRows.length,
-      unrecognizedHeaders: [],
-    };
+      titleRowsSkipped,
+    });
   }
 
-  const knownClassKeys = new Set(
-    knownClassNames.map((name) => name.trim().toLowerCase()),
+  const column = (field: ColumnAssignment): number | undefined => {
+    const index = assignments.indexOf(field);
+    return index === -1 ? undefined : index;
+  };
+  const firstCol = column("first_name");
+  const lastCol = column("last_name");
+  const useSplit = firstCol === undefined || lastCol === undefined;
+  const fullCol = column("full_name");
+  const classCol = column("class_groups");
+  const carpoolCol = column("carpool");
+  const aliasCol = column("aliases");
+  const parent1Col = column("parent1_name");
+  const parent2Col = column("parent2_name");
+
+  const headerRow = headerRowIndex >= 0 ? (grid[headerRowIndex] ?? []) : [];
+  const unrecognizedHeaders = headerRow.filter(
+    (cell, index) =>
+      cell.trim() !== "" && (assignments[index] ?? "ignore") === "ignore",
   );
-  const expectedColumns = headerRow.length;
+  // A data cell beyond the last heading is a value nobody named. Empty ones
+  // are just how spreadsheets pad; a filled one is a real misalignment.
+  const width = headerRowIndex >= 0 ? headerRow.length : assignments.length;
+
+  const knownClasses = new Map<string, string>();
+  for (const name of context.knownClassNames ?? []) {
+    knownClasses.set(collapse(name).toLowerCase(), name);
+  }
+  const createClasses = context.unknownClasses === "create";
+  // An empty list used to mean "not loaded, let the server decide". In create
+  // mode it is a brand-new school, and every class in the file is new.
+  const checkClasses = knownClasses.size > 0 || createClasses;
+  const newClasses = new Map<string, string>();
+
+  const onRoster = new Set(
+    (context.rosterNames ?? []).map((s) =>
+      studentNameKey(s.first_name, s.last_name),
+    ),
+  );
+
   const toImport: CsvImportStudent[] = [];
+  const toImportRows: number[] = [];
   const errors: CsvImportError[] = [];
+  const alreadyOnRoster: RosterMatch[] = [];
   let blankRowsSkipped = 0;
-  // Full name (case-folded) -> the row number it first appeared on, so a
-  // later duplicate can point back to it.
+  // Full name -> the row it first appeared on, so a later duplicate can point
+  // back to it.
   const seenNames = new Map<string, number>();
 
   dataRows.forEach((fields, offset) => {
-    const rowNumber = offset + 2; // the header occupies row 1
+    const rowNumber = dataStart + offset + 1;
 
     if (fields.every((field) => field.trim() === "")) {
       blankRowsSkipped++;
       return;
     }
 
-    // A row with FEWER columns than the header is almost always an exporter
-    // dropping trailing empties, so pad it. More columns than the header is a
-    // real structural problem -- the values no longer line up with the names.
-    if (fields.length > expectedColumns) {
+    if (fields.slice(width).some((field) => field.trim() !== "")) {
       errors.push({
         rowNumber,
-        message: `Expected ${expectedColumns} columns (matching the header) but this row has ${fields.length}.`,
+        message: `This row has ${fields.length} cells but there are only ${width} columns with headings, so its values may be in the wrong columns.`,
       });
       return;
     }
-    const padded =
-      fields.length === expectedColumns
-        ? fields
-        : [
-            ...fields,
-            ...Array<string>(expectedColumns - fields.length).fill(""),
-          ];
 
-    const firstName = (padded[columnIndex.first_name!] ?? "").trim();
-    const lastName = (padded[columnIndex.last_name!] ?? "").trim();
+    const cell = (index: number | undefined) =>
+      index === undefined ? "" : (fields[index] ?? "");
+
+    let firstName: string;
+    let lastName: string;
+    if (useSplit) {
+      const full = collapse(cell(fullCol));
+      if (full === "") {
+        errors.push({ rowNumber, message: "Missing a name." });
+        return;
+      }
+      const split = splitFullName(full, nameOrder);
+      if (!split) {
+        errors.push({
+          rowNumber,
+          message: `Couldn't tell the first name from the last name in "${full}". Write it as "Last, First" in the file, or skip this row.`,
+        });
+        return;
+      }
+      firstName = split.first_name;
+      lastName = split.last_name;
+    } else {
+      firstName = collapse(cell(firstCol));
+      lastName = collapse(cell(lastCol));
+    }
 
     if (firstName === "") {
       errors.push({ rowNumber, message: "Missing a first name." });
@@ -391,20 +297,18 @@ export function parseRosterCsv(
       return;
     }
 
-    const parent1Name =
-      columnIndex.parent1_name !== undefined
-        ? nullableTrim(padded[columnIndex.parent1_name])
-        : null;
-    const parent2Name =
-      columnIndex.parent2_name !== undefined
-        ? nullableTrim(padded[columnIndex.parent2_name])
-        : null;
+    const parent1Name = nullableCollapse(cell(parent1Col));
+    const parent2Name = nullableCollapse(cell(parent2Col));
+    const classGroups = splitClasses(cell(classCol));
+    const carpool = nullableCollapse(cell(carpoolCol));
 
     const tooLong = [
       ["first name", firstName],
       ["last name", lastName],
       ...(parent1Name ? [["parent 1 name", parent1Name] as const] : []),
       ...(parent2Name ? [["parent 2 name", parent2Name] as const] : []),
+      ...(carpool ? [["carpool name", carpool] as const] : []),
+      ...classGroups.map((name) => ["class name", name] as const),
     ].find(([, value]) => value.length > MAX_NAME_LENGTH);
     if (tooLong) {
       errors.push({
@@ -414,24 +318,18 @@ export function parseRosterCsv(
       return;
     }
 
-    const classGroups =
-      columnIndex.class_groups !== undefined
-        ? splitClasses(padded[columnIndex.class_groups] ?? "")
-        : [];
-    if (knownClassKeys.size > 0) {
-      const unknown = classGroups.find(
-        (name) => !knownClassKeys.has(name.toLowerCase()),
-      );
-      if (unknown !== undefined) {
-        errors.push({
-          rowNumber,
-          message: `Row ${rowNumber}: there's no class called "${unknown}". Add it under Classes first.`,
-        });
-        return;
-      }
+    const unknown = checkClasses
+      ? classGroups.filter((name) => !knownClasses.has(name.toLowerCase()))
+      : [];
+    if (unknown.length > 0 && !createClasses) {
+      errors.push({
+        rowNumber,
+        message: `There's no class called "${unknown[0]}". Add it under Classes first.`,
+      });
+      return;
     }
 
-    const key = `${firstName.toLowerCase()} ${lastName.toLowerCase()}`;
+    const key = studentNameKey(firstName, lastName);
     const firstSeenAt = seenNames.get(key);
     if (firstSeenAt !== undefined) {
       errors.push({
@@ -442,29 +340,64 @@ export function parseRosterCsv(
     }
     seenNames.set(key, rowNumber);
 
+    if (onRoster.has(key)) {
+      alreadyOnRoster.push({ rowNumber, name: `${firstName} ${lastName}` });
+      return;
+    }
+
+    // Only a row that will actually import contributes a new class.
+    for (const name of unknown) {
+      const classKey = name.toLowerCase();
+      if (!newClasses.has(classKey)) newClasses.set(classKey, name);
+    }
+
     toImport.push({
       first_name: firstName,
       last_name: lastName,
-      aliases:
-        columnIndex.aliases !== undefined
-          ? splitAliases(padded[columnIndex.aliases] ?? "")
-          : [],
+      aliases: splitAliases(cell(aliasCol)),
       class_groups: classGroups,
-      carpool:
-        columnIndex.carpool !== undefined
-          ? nullableTrim(padded[columnIndex.carpool])
-          : null,
+      carpool,
       parent1_name: parent1Name,
       parent2_name: parent2Name,
     });
+    toImportRows.push(rowNumber);
   });
 
+  const headerErrors: string[] = [];
+  if (knownClasses.size + newClasses.size > MAX_CLASSES) {
+    headerErrors.push(
+      `This file would bring you to ${knownClasses.size + newClasses.size} classes, and the limit is ${MAX_CLASSES}. Check that the right column is chosen as Class.`,
+    );
+  }
+
   return {
-    headerErrors: [],
-    toImport,
+    headerErrors,
+    toImport: headerErrors.length > 0 ? [] : toImport,
+    toImportRows: headerErrors.length > 0 ? [] : toImportRows,
     errors,
     blankRowsSkipped,
+    titleRowsSkipped,
     totalDataRows: dataRows.length,
     unrecognizedHeaders,
+    newClasses: [...newClasses.values()],
+    alreadyOnRoster,
   };
+}
+
+/**
+ * The whole pipeline on CSV (or tab/semicolon-separated) text, every guess
+ * accepted. Unknown classes are row errors here, as they always were.
+ */
+export function parseRosterCsv(
+  text: string,
+  knownClassNames: readonly string[] = [],
+  context: Omit<ImportContext, "knownClassNames"> = {},
+): CsvImportReport {
+  const { grid, unterminatedQuote } = textToGrid(text);
+  if (unterminatedQuote) return emptyReport([UNTERMINATED_QUOTE_MESSAGE]);
+  if (grid.length === 0) return emptyReport(["The file is empty."]);
+  return buildImportReport(grid, detectLayout(grid), {
+    ...context,
+    knownClassNames,
+  });
 }

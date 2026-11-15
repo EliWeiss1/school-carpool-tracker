@@ -142,12 +142,10 @@ function CarpoolEditor({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <span className={LABEL_CLASS}>
-          Members ({memberIds.size} selected)
-        </span>
+        <span className={LABEL_CLASS}>Members ({memberIds.size} selected)</span>
         <p className="text-xs text-curb-500">
-          Announcing any one of these, or the carpool name itself, will offer
-          to mark everyone here arrived in one tap.
+          Announcing any one of these, or the carpool name itself, will offer to
+          mark everyone here arrived in one tap.
         </p>
         <div className="max-h-64 overflow-y-auto rounded-xl border border-curb-300 bg-white p-2">
           {students.length === 0 ? (
@@ -184,7 +182,12 @@ function CarpoolEditor({
       {error && <ErrorBanner message={error} />}
 
       <div className="flex justify-end gap-2">
-        <Button variant="quiet" size="md" onClick={onCancel} disabled={submitting}>
+        <Button
+          variant="quiet"
+          size="md"
+          onClick={onCancel}
+          disabled={submitting}
+        >
           Cancel
         </Button>
         <Button type="submit" variant="primary" size="md" disabled={submitting}>

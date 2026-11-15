@@ -75,11 +75,11 @@ describe("parseRosterCsv — header handling", () => {
     // This is the fix for the whole bug class, not just today's "Grade"
     // case: a future renamed column now surfaces here instead of vanishing.
     const report = parseRosterCsv(
-      "First Name,Last Name,Grade Level\nMaya,Cohen,K1\n",
+      "First Name,Last Name,Shoe Size\nMaya,Cohen,K1\n",
     );
 
     expect(report.headerErrors).toEqual([]);
-    expect(report.unrecognizedHeaders).toEqual(["Grade Level"]);
+    expect(report.unrecognizedHeaders).toEqual(["Shoe Size"]);
     expect(report.toImport[0].class_groups).toEqual([]);
   });
 
@@ -95,10 +95,7 @@ describe("parseRosterCsv — header handling", () => {
     const report = parseRosterCsv("class_group\nK1\n");
 
     expect(report.headerErrors).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/first_name/i),
-        expect.stringMatching(/last_name/i),
-      ]),
+      expect.arrayContaining([expect.stringMatching(/first name/i)]),
     );
     expect(report.toImport).toEqual([]);
   });
@@ -159,7 +156,7 @@ describe("parseRosterCsv — row handling", () => {
 
     expect(report.toImport.map((s) => s.last_name)).toEqual(["Cohen", "Chen"]);
     expect(report.errors).toEqual([
-      { rowNumber: 3, message: expect.stringMatching(/3 columns.*4/i) },
+      { rowNumber: 3, message: expect.stringMatching(/4 cells.*3 columns/i) },
     ]);
   });
 
@@ -246,12 +243,12 @@ describe("parseRosterCsv — quoting, BOM, and line endings", () => {
     expect(report.toImport[1].last_name).toBe("Ng");
   });
 
-  it("handles a quoted field that itself contains a CRLF", () => {
+  it("handles a quoted field that itself contains a CRLF (folded to a space in a class name)", () => {
     const report = parseRosterCsv(
       'first_name,last_name,class_group\r\nMaya,Cohen,"Room 1\r\nAnnex"\r\n',
     );
 
-    expect(report.toImport[0].class_groups).toEqual(["Room 1\r\nAnnex"]);
+    expect(report.toImport[0].class_groups).toEqual(["Room 1 Annex"]);
   });
 });
 
@@ -345,7 +342,11 @@ describe("parseRosterCsv — several classes per student", () => {
       'first_name,last_name,classes\nMaya,Cohen,"K1 ;  Art Club; Choir"\n',
     );
 
-    expect(report.toImport[0].class_groups).toEqual(["K1", "Art Club", "Choir"]);
+    expect(report.toImport[0].class_groups).toEqual([
+      "K1",
+      "Art Club",
+      "Choir",
+    ]);
   });
 
   it("drops empty segments and case-insensitive duplicates, keeping the first spelling", () => {
@@ -379,7 +380,7 @@ describe("parseRosterCsv — several classes per student", () => {
     expect(report.errors).toEqual([
       {
         rowNumber: 2,
-        message: `Row 2: there's no class called "Chior". Add it under Classes first.`,
+        message: `There's no class called "Chior". Add it under Classes first.`,
       },
     ]);
     expect(report.toImport).toHaveLength(1);

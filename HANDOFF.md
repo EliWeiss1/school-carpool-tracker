@@ -1223,3 +1223,54 @@ substitute for the reconciliation a re-run would have pretended to do.
   operation.
 - The brief inconsistency window between steps 1 and 2 is accepted for a
   single-building roster; the mismatch check exists to catch its leftovers.
+
+## 14. Flexible roster import (branch `feature/flexible-import`, not merged, not deployed)
+
+**Why.** New schools should get their roster and carpools in from whatever
+spreadsheet the office already has. The old importer needed a CSV with the
+headings on row 1, separate first/last columns and every class created first.
+
+**What was built.** Admin's "Import your roster" is now a four-step flow:
+Choose (upload .xlsx/.csv/.tsv/.txt, paste cells, or copy an AI prompt) ->
+Check columns (one card per column with sample values and a dropdown; folded
+away when every guess is confident) -> Review (students to add, new classes,
+carpools, already on the roster, rows that can't be imported, and sibling
+carpool suggestions) -> Import (with the existing undo). The design is in
+`docs/superpowers/specs/2026-11-15-flexible-roster-import-design.md`; the
+module map is in CLAUDE.md under "Flexible roster import".
+
+**Verified.** 1085 tests green, plus lint and typecheck. The flow was walked
+through in a browser on a dev server, with every Supabase call intercepted and
+faked, using two messy fixtures:
+- a CSV with two title rows, "Student Name" holding "Cohen, Miriam",
+  "Homeroom Teacher", "Mother's Name" / "Father's Name", plus email and notes
+  columns;
+- an .xlsx with a cover sheet ahead of the roster sheet.
+
+It detected and grouped everything correctly, at desk width and at phone
+width. **Not verified against real Supabase.**
+
+**Judgment calls.**
+- `read-excel-file` is the first parsing dependency. It is pinned to 9.3.14,
+  more than two weeks old when added; newer releases were days old. SheetJS was
+  passed over because its npm build is stale and has known CVEs.
+- Legacy `.xls` and Numbers files get a "save as .xlsx or CSV, or paste"
+  message.
+- Class names have whitespace collapsed, so a newline inside a quoted class
+  cell becomes a space.
+- The review counts no longer use the red and green status colours. That
+  pairing is reserved for waiting and arrived.
+- Re-importing a file now skips students already on the roster instead of
+  failing the whole import. The server's 409 still backstops it.
+
+**Rollout, needs the owner's go-ahead.**
+1. Deploy `roster-import`. Its shared handler code changed, and
+   `classes-write` moved `MAX_CLASSES` into `class-input.ts`, so deploy that
+   function too.
+2. Merge to `master`.
+
+Until step 1, the live function ignores `createMissingClasses`, and an import
+that names a new class gets the old 422.
+
+The landing-page claim ("any spreadsheet") was added on `preview/multi-school`.
+It only becomes true in production once both branches are merged.

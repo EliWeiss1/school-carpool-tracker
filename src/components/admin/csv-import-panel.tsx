@@ -1,24 +1,44 @@
 "use client";
 
-import { type ChangeEvent, useId, useRef, useState } from "react";
+import { useMemo, useReducer, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
+import { LoadingState } from "@/components/ui/loading-state";
 import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
-import { type CsvImportReport, parseRosterCsv } from "@/lib/csv-import";
+import { cn } from "@/lib/cn";
+import {
+  type ImportStep,
+  STEP_LABELS,
+  STEP_ORDER,
+  deriveReview,
+  importFlowReducer,
+  initialImportState,
+  layoutIsConfident,
+} from "@/lib/import/import-flow";
+import { readFileToGrid, textToGrid } from "@/lib/import/read-source";
 import type { UsePinSession } from "@/lib/use-pin-session";
+
+import { ImportMapping } from "./import-mapping";
+import { ImportPreview } from "./import-preview";
+import { ImportSource } from "./import-source";
 
 export interface CsvImportPanelProps {
   session: UsePinSession;
-  /** Called after a successful import so the roster table above can refresh. */
+  /** Called after a successful import (or undo) so the roster refreshes. */
   onImported: () => void;
-  /**
-   * The live class names. When non-empty, a class in the file that matches none
-   * of them is reported as a row error before anything is imported; when
-   * omitted or empty the check is skipped and the server still decides.
-   */
+  /** The live class names, so the preview can say which classes are new. */
   classNames?: readonly string[];
+  /** The current roster, so a re-imported file skips who is already there. */
+  rosterNames?: readonly { first_name: string; last_name: string }[];
+  /** Existing carpool names, so the preview can say which carpools are new. */
+  carpoolNames?: readonly string[];
+  /**
+   * False while the class list or roster is still loading. Until then an
+   * empty class list would make every class look new, so review waits.
+   */
+  classesReady?: boolean;
 }
 
 function requireCredentials(session: UsePinSession) {
@@ -33,100 +53,161 @@ function requireCredentials(session: UsePinSession) {
   return credentials;
 }
 
+function plural(count: number, one: string, many = `${one}s`) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/** Where the admin is, and a way back to any step already done. */
+function StepTracker({
+  step,
+  reachable,
+  onGoTo,
+}: {
+  step: ImportStep;
+  reachable: (step: ImportStep) => boolean;
+  onGoTo: (step: ImportStep) => void;
+}) {
+  const current = STEP_ORDER.indexOf(step);
+  return (
+    <ol className="flex flex-wrap gap-2" aria-label="Import steps">
+      {STEP_ORDER.map((id, index) => {
+        const isCurrent = id === step;
+        const done = index < current;
+        const canGo = !isCurrent && reachable(id);
+        return (
+          <li key={id}>
+            <button
+              type="button"
+              disabled={!canGo}
+              aria-current={isCurrent ? "step" : undefined}
+              onClick={() => onGoTo(id)}
+              className={cn(
+                "focus-ring flex min-h-tap items-center gap-2 rounded-xl px-3 font-display font-semibold transition-[background-color] duration-150",
+                isCurrent
+                  ? "bg-marigold-500 text-curb-900"
+                  : done
+                    ? "text-curb-900 hover:bg-curb-100 active:bg-curb-200"
+                    : "text-curb-400",
+                !canGo && !isCurrent && "cursor-default",
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center rounded-xl text-sm",
+                  isCurrent ? "bg-curb-900 text-marigold-400" : "bg-curb-100",
+                )}
+              >
+                {index + 1}
+              </span>
+              {id === "done" && step === "done" ? "Imported" : STEP_LABELS[id]}
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 /**
- * CSV import for initial roster setup.
+ * Roster import for a school's first setup, or a new term.
  *
- * Nothing is written until a person has seen the validation report and
- * pressed Import: `parseRosterCsv` runs entirely in the browser, and the
- * report is the only thing rendered until then. Row numbers use `font-mono`
- * throughout, matching the roster table's class column and the rest of the
- * app's rule that anything meant to line up in columns gets the mono face.
+ * Choose -> Check columns -> Review -> Import. Nothing is written until the
+ * admin presses Import on the review step; every step before that runs in the
+ * browser. The state machine is `import-flow.ts`; this component only wires
+ * it to the screen and the network.
  */
 export function CsvImportPanel({
   session,
   onImported,
   classNames = [],
+  rosterNames = [],
+  carpoolNames = [],
+  classesReady = true,
 }: CsvImportPanelProps) {
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [report, setReport] = useState<CsvImportReport | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [importedCount, setImportedCount] = useState<number | null>(null);
-  const [importedIds, setImportedIds] = useState<string[] | null>(null);
+  const [state, dispatch] = useReducer(importFlowReducer, initialImportState);
   const [undoing, setUndoing] = useState(false);
   const [undoError, setUndoError] = useState<string | null>(null);
   const [undone, setUndone] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const inputId = useId();
 
-  async function handleFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const review = useMemo(
+    () =>
+      deriveReview(state, {
+        knownClassNames: classNames,
+        rosterNames,
+        carpoolNames,
+      }),
+    [state, classNames, rosterNames, carpoolNames],
+  );
 
-    setImportError(null);
-    setImportedCount(null);
-    setImportedIds(null);
-    setUndone(false);
-    setUndoError(null);
-    setFileName(file.name);
-    const text = await file.text();
-    setReport(parseRosterCsv(text, classNames));
-  }
-
-  function reset() {
-    setFileName(null);
-    setReport(null);
-    setImportError(null);
-    setImportedCount(null);
-    setImportedIds(null);
-    setUndoError(null);
-    setUndone(false);
-    if (inputRef.current) inputRef.current.value = "";
-  }
-
-  async function confirmImport() {
-    if (!report || report.toImport.length === 0) return;
-
-    setImporting(true);
-    setImportError(null);
-    try {
-      const result = await adminApi.importRoster({
-        ...requireCredentials(session),
-        students: report.toImport,
+  async function loadFile(file: File) {
+    const result = await readFileToGrid(file);
+    if (result.ok) {
+      dispatch({
+        type: "sourceLoaded",
+        label: file.name,
+        source: result.source,
       });
-      setImportedCount(result.created);
-      setImportedIds(result.students.map((student) => student.id));
-      setUndone(false);
-      setUndoError(null);
-      setReport(null);
-      onImported();
-    } catch (error: unknown) {
-      setImportError(
-        error instanceof ApiError
-          ? error.message
-          : "The import did not go through. Try again.",
-      );
-    } finally {
-      setImporting(false);
+    } else {
+      dispatch({
+        type: "sourceFailed",
+        message: `${file.name}: ${result.message}`,
+      });
     }
   }
 
-  /** Removes exactly the students the last import created -- not a bulk
-   *  "delete all," and not the roster's own multi-select, so it's safe to
-   *  offer immediately after a bad import without a separate confirmation
-   *  step (it only ever undoes what this panel just did). */
-  async function undoImport() {
-    if (!importedIds || importedIds.length === 0) return;
+  function loadPaste(text: string) {
+    dispatch({
+      type: "sourceLoaded",
+      label: "Pasted cells",
+      source: textToGrid(text),
+    });
+  }
 
+  async function confirmImport() {
+    if (!review || review.students.length === 0) return;
+    dispatch({ type: "importStarted" });
+    try {
+      const result = await adminApi.importRoster({
+        ...requireCredentials(session),
+        students: review.students,
+        createMissingClasses: review.report.newClasses.length > 0 || undefined,
+      });
+      setUndone(false);
+      setUndoError(null);
+      dispatch({
+        type: "importSucceeded",
+        result: {
+          created: result.created,
+          createdIds: result.students.map((student) => student.id),
+          createdClasses: result.createdClasses ?? [],
+          createdCarpools: review.carpools.filter((c) => c.isNew).length,
+        },
+      });
+      onImported();
+    } catch (error: unknown) {
+      dispatch({
+        type: "importFailed",
+        message:
+          error instanceof ApiError
+            ? error.message
+            : "The import did not go through. Try again.",
+      });
+    }
+  }
+
+  /** Removes exactly the students this import created, nothing else. */
+  async function undoImport() {
+    const ids = state.result?.createdIds ?? [];
+    if (ids.length === 0) return;
     setUndoing(true);
     setUndoError(null);
     try {
       await adminApi.deleteStudents({
         ...requireCredentials(session),
-        studentIds: importedIds,
+        studentIds: ids,
       });
       setUndone(true);
-      setImportedIds(null);
       onImported();
     } catch (error: unknown) {
       setUndoError(
@@ -139,200 +220,163 @@ export function CsvImportPanel({
     }
   }
 
+  function startOver() {
+    setUndone(false);
+    setUndoError(null);
+    dispatch({ type: "reset" });
+  }
+
+  const reachable = (step: ImportStep) => {
+    if (state.step === "done") return step === "choose";
+    if (step === "choose") return true;
+    if (step === "columns") return state.layout !== null;
+    if (step === "review")
+      return state.layout !== null && review?.report.headerErrors.length === 0;
+    return false;
+  };
+
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-curb-200 bg-white p-6 shadow-card">
-      <div>
-        <h2 className="font-display text-2xl font-bold text-curb-900">
-          Import a roster CSV
-        </h2>
-        <p className="mt-1 text-curb-600">
-          Columns can be in any order. Required: first name, last name.
-          Optional: aliases (comma or semicolon separated), classes (separate
-          several with a semicolon, like K1; MS Boys, each matching a class under
-          Classes), carpool, parent 1 name, parent 2 name. If the carpool column
-          names a carpool that already exists, this student is added to it; if
-          it doesn&apos;t exist yet, it&apos;s created with that exact name and
-          this student added to it. This always adds to the roster you already
-          have — it never replaces or removes anyone.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <label
-          htmlFor={inputId}
-          className="focus-ring inline-flex min-h-tap cursor-pointer items-center justify-center rounded-xl border border-curb-300 bg-white px-6 font-display font-semibold text-curb-900 shadow-card transition-[transform,background-color,border-color] duration-150 ease-spring hover:border-curb-400 hover:bg-curb-50 active:scale-[0.98]"
-        >
-          Choose file
-        </label>
-        <input
-          ref={inputRef}
-          id={inputId}
-          type="file"
-          accept=".csv,text/csv"
-          onChange={(event) => void handleFile(event)}
-          className="sr-only"
-        />
-        {fileName && <span className="text-sm text-curb-600">{fileName}</span>}
-        {(report || importedCount !== null) && (
-          <Button variant="quiet" size="sm" onClick={reset}>
-            Start over
-          </Button>
-        )}
-      </div>
-
-      {importedCount !== null && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <ErrorBanner
-            tone="warning"
-            message={
-              undone
-                ? `Undone — ${importedCount} student${importedCount === 1 ? "" : "s"} removed again.`
-                : `Imported ${importedCount} student${importedCount === 1 ? "" : "s"}.`
-            }
-          />
-          {importedIds && importedIds.length > 0 && (
-            <Button
-              variant="quiet"
-              size="sm"
-              onClick={() => void undoImport()}
-              disabled={undoing}
+    <section
+      aria-labelledby="import-heading"
+      className="flex flex-col gap-6 rounded-2xl border border-curb-200 bg-white p-6 shadow-card"
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div>
+            <h2
+              id="import-heading"
+              className="font-display text-2xl font-bold text-curb-900"
             >
-              {undoing
-                ? "Undoing…"
-                : `Undo import (${importedIds.length} student${importedIds.length === 1 ? "" : "s"})`}
-            </Button>
+              Import your roster
+            </h2>
+            <p className="mt-1 text-curb-600">
+              Bring the student list you already have. Classes and carpools come
+              in with it.
+            </p>
+          </div>
+          {state.sourceLabel && state.step !== "choose" && (
+            <p className="text-sm text-curb-600">
+              From{" "}
+              <span className="font-semibold text-curb-900">
+                {state.sourceLabel}
+              </span>
+            </p>
           )}
         </div>
+        <StepTracker
+          step={state.step}
+          reachable={reachable}
+          onGoTo={(step) =>
+            step === "choose" && state.step === "done"
+              ? startOver()
+              : dispatch({ type: "goTo", step })
+          }
+        />
+        {state.sourceNote &&
+          state.step !== "choose" &&
+          state.step !== "done" && (
+            <p className="text-sm text-curb-600">{state.sourceNote}</p>
+          )}
+      </div>
+
+      {state.step === "choose" && (
+        <ImportSource
+          classNames={classNames}
+          error={state.sourceError}
+          errorLabel={null}
+          onFile={(file) => void loadFile(file)}
+          onPaste={loadPaste}
+        />
       )}
 
-      {undoError && <ErrorBanner message={undoError} />}
+      {state.step === "columns" && state.layout && (
+        <ImportMapping
+          // Remount on a new source so the folded/unfolded state starts fresh.
+          key={state.sourceLabel ?? "source"}
+          layout={state.layout}
+          rowCount={state.grid.length}
+          confident={layoutIsConfident(state.layout)}
+          onAssign={(column, field) =>
+            dispatch({ type: "assign", column, field })
+          }
+          onNameOrder={(order) => dispatch({ type: "setNameOrder", order })}
+          onHeaderRow={(row) => dispatch({ type: "setHeaderRow", row })}
+          onBack={() => dispatch({ type: "goTo", step: "choose" })}
+          onContinue={() => dispatch({ type: "goTo", step: "review" })}
+        />
+      )}
 
-      {report && (
+      {state.step === "review" && !classesReady && (
+        <LoadingState label="Loading your classes and roster…" />
+      )}
+
+      {state.step === "review" && classesReady && review && (
+        <ImportPreview
+          review={review}
+          importing={state.importing}
+          importError={state.importError}
+          onToggleSuggestion={(id) =>
+            dispatch({
+              type: "toggleSuggestion",
+              id,
+              recommendedIds: review.suggestions
+                .filter((s) => s.recommended)
+                .map((s) => s.id),
+            })
+          }
+          onSetAllSuggestions={(ids) =>
+            dispatch({ type: "setAllSuggestions", ids })
+          }
+          onBack={() => dispatch({ type: "goTo", step: "columns" })}
+          onImport={() => void confirmImport()}
+        />
+      )}
+
+      {state.step === "done" && state.result && (
         <div className="flex flex-col gap-4">
-          {report.headerErrors.length > 0 ? (
-            <ErrorBanner message={report.headerErrors.join(" ")} />
-          ) : (
-            <>
-              {report.unrecognizedHeaders.length > 0 && (
-                <ErrorBanner
-                  tone="warning"
-                  message={`These columns weren't recognized and will be ignored: ${report.unrecognizedHeaders.join(", ")}. If this was meant to be a field like class or parent name, rename the column and re-upload.`}
-                />
-              )}
-
-              <dl className="grid grid-cols-2 gap-3 rounded-xl border border-curb-200 bg-curb-50 p-4 text-sm sm:grid-cols-4">
-                <div>
-                  <dt className="text-curb-500">Rows in file</dt>
-                  <dd className="font-mono text-lg text-curb-900">
-                    {report.totalDataRows}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-curb-500">Will import</dt>
-                  <dd className="font-mono text-lg text-arrived-deep">
-                    {report.toImport.length}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-curb-500">Skipped (errors)</dt>
-                  <dd className="font-mono text-lg text-waiting-deep">
-                    {report.errors.length}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-curb-500">Blank rows</dt>
-                  <dd className="font-mono text-lg text-curb-600">
-                    {report.blankRowsSkipped}
-                  </dd>
-                </div>
-              </dl>
-
-              {report.errors.length > 0 && (
-                <div className="overflow-hidden rounded-xl border border-waiting-border">
-                  <table className="w-full border-collapse text-left text-sm">
-                    <thead>
-                      <tr className="bg-waiting-soft text-waiting-deep">
-                        <th className="px-3 py-2 font-semibold">Row</th>
-                        <th className="px-3 py-2 font-semibold">Problem</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.errors.map((rowError) => (
-                        <tr
-                          key={rowError.rowNumber}
-                          className="border-t border-waiting-border/60"
-                        >
-                          <td className="px-3 py-2 font-mono text-curb-700">
-                            {rowError.rowNumber}
-                          </td>
-                          <td className="px-3 py-2 text-curb-700">
-                            {rowError.message}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {report.toImport.length > 0 && (
-                <div className="max-h-64 overflow-y-auto rounded-xl border border-curb-200">
-                  <table className="w-full border-collapse text-left text-sm">
-                    <thead className="sticky top-0 bg-curb-50">
-                      <tr className="text-curb-500">
-                        <th className="px-3 py-2 font-semibold">Name</th>
-                        <th className="px-3 py-2 font-semibold">Aliases</th>
-                        <th className="px-3 py-2 font-semibold">Classes</th>
-                        <th className="px-3 py-2 font-semibold">Carpool</th>
-                        <th className="px-3 py-2 font-semibold">Parents</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.toImport.map((row, index) => (
-                        <tr
-                          key={`${row.first_name}-${row.last_name}-${index}`}
-                          className="border-t border-curb-100"
-                        >
-                          <td className="px-3 py-2 text-curb-900">
-                            {row.first_name} {row.last_name}
-                          </td>
-                          <td className="px-3 py-2 font-mono text-xs text-curb-600">
-                            {row.aliases.join(", ") || "—"}
-                          </td>
-                          <td className="px-3 py-2 font-mono text-curb-700">
-                            {row.class_groups.join(", ") || "—"}
-                          </td>
-                          <td className="px-3 py-2 text-curb-700">
-                            {row.carpool ?? "—"}
-                          </td>
-                          <td className="px-3 py-2 text-xs text-curb-600">
-                            {[row.parent1_name, row.parent2_name]
-                              .filter((name): name is string => name !== null)
-                              .join(" · ") || "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {importError && <ErrorBanner message={importError} />}
-
-              <div className="flex justify-end">
-                <Button
-                  variant="primary"
-                  size="md"
-                  disabled={report.toImport.length === 0 || importing}
-                  onClick={() => void confirmImport()}
-                >
-                  {importing
-                    ? "Importing…"
-                    : `Import ${report.toImport.length} student${report.toImport.length === 1 ? "" : "s"}`}
-                </Button>
-              </div>
-            </>
-          )}
+          <div className="rounded-2xl border border-curb-200 bg-curb-50 p-6">
+            <p className="font-display text-2xl font-bold text-curb-900">
+              {undone
+                ? `Undone. ${plural(state.result.created, "student")} removed again.`
+                : `Imported ${plural(state.result.created, "student")}.`}
+            </p>
+            {!undone && (
+              <p className="mt-1 text-curb-600">
+                {[
+                  state.result.createdClasses.length > 0 &&
+                    `${plural(state.result.createdClasses.length, "new class", "new classes")} created`,
+                  state.result.createdCarpools > 0 &&
+                    `${plural(state.result.createdCarpools, "new carpool")} set up`,
+                ]
+                  .filter(Boolean)
+                  .join(", ") || "They're on the roster above."}
+              </p>
+            )}
+            {undone && (
+              <p className="mt-1 text-curb-600">
+                Any classes and carpools the import created are still there.
+                Remove them under Classes and Carpools if you don&apos;t need
+                them.
+              </p>
+            )}
+          </div>
+          {undoError && <ErrorBanner message={undoError} />}
+          <div className="flex flex-wrap gap-3">
+            <Button variant="secondary" onClick={startOver}>
+              Import another file
+            </Button>
+            {!undone && state.result.createdIds.length > 0 && (
+              <Button
+                variant="quiet"
+                onClick={() => void undoImport()}
+                disabled={undoing}
+              >
+                {undoing
+                  ? "Undoing…"
+                  : `Undo import (${plural(state.result.createdIds.length, "student")})`}
+              </Button>
+            )}
+          </div>
         </div>
       )}
     </section>

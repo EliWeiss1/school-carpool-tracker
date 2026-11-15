@@ -194,7 +194,9 @@ src/
                         install criteria and shows an offline page)
     display/            class-filter.tsx + section-heading.tsx group the board
                         by class, on top of the per-section grid + tile pieces
-    admin/              carpool-manager.tsx (create/edit/delete a carpool,
+    admin/              csv-import-panel.tsx + import-*.tsx: the roster
+                        import flow (lib/import/ holds its logic)
+                        carpool-manager.tsx (create/edit/delete a carpool,
                         assign members) alongside the roster CRUD pieces
                         class-manager.tsx: the class list with member counts
                         class-members-sheet.tsx: per-class "Students" sheet
@@ -551,11 +553,38 @@ realtime payload carries no class data, so `reconcile` preserves the held
 row's classes; membership changes arrive on `student_classes` and only
 trigger a debounced snapshot refetch (`display-subscription.ts`), never a
 flash or chime. `/announce`: a student is listed in every class drawer they
-belong to and is never shown twice in one list. CSV import (`/admin`): the
-`class_groups` header (aliases `classes`, `class_group`, `class`, `classroom`,
-`class group`, `homeroom`, `grade`), several classes in one cell separated by `;`, and an unknown
-class is a validation error on that row ("Add it under Classes first") rather
-than a silently created class.
+belong to and is never shown twice in one list. Roster import (`/admin`, see "Flexible roster import" below): a class the app
+doesn't have yet is collected into the review step's "new classes" list and
+created on confirm (`roster-import`'s `createMissingClasses: true`), several
+classes in one cell are separated by `;`.
+
+## Flexible roster import
+
+Built on `feature/flexible-import` (not yet merged). Design:
+`docs/superpowers/specs/2026-11-15-flexible-roster-import-design.md`.
+
+Pipeline, each step pure and unit-tested under `src/lib/import/`:
+`read-source.ts` (xlsx via `read-excel-file`, pinned and loaded with
+`import()` only when an Excel file is picked; text with a sniffed
+delimiter from `csv-tokenize.ts`; code fences stripped from pasted AI replies)
+-> `detect-columns.ts` (finds the heading row in the first 10 rows, maps
+headings through `fields.ts`' aliases, exact = "Matched", hint = "Check this")
+-> `buildImportReport` in `src/lib/csv-import.ts` (row rules, `split-name.ts`
+for a full-name column, `newClasses`, `alreadyOnRoster` skipped rather than a
+409) -> `suggest-carpools.ts` (siblings: same surname **and** a shared parent
+name, ticked by default; surname-only when the file has no parent columns,
+unticked; never overrides a typed carpool, never reuses an existing carpool
+name). `import-flow.ts` is the screen's reducer (Choose -> Check columns ->
+Review -> Import) and `deriveReview` computes everything shown from state.
+`ai-prompt.ts` builds the copy-paste prompt and the sample CSV. UI:
+`components/admin/csv-import-panel.tsx` + `import-{source,mapping,preview,ai-help}.tsx`.
+
+`roster-import` gains an opt-in `createMissingClasses: true`: unknown class
+names are created once each (case-insensitive) **after** the roster-collision
+check, capped at `MAX_CLASSES`; without the flag an unknown class is still a
+422. Response adds `createdClasses: string[]`. **The changed function is not
+deployed yet** -- until it is, the live function ignores the flag and an
+import naming a new class gets the old 422.
 
 ## Coding conventions
 

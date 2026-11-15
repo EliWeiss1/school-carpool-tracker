@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
@@ -34,10 +34,15 @@ function AdminContent() {
   const [classMemberCounts, setClassMemberCounts] = useState<
     Record<string, number>
   >({});
+  const carpoolNames = useMemo(
+    () => carpools.map((carpool) => carpool.name),
+    [carpools],
+  );
   const [listError, setListError] = useState<string | null>(null);
   const {
     classGroups,
     names: classGroupNames,
+    loading: classGroupsLoading,
     refresh: refreshClassGroups,
   } = useClassGroups();
 
@@ -123,12 +128,18 @@ function AdminContent() {
           session={session}
           onImported={refresh}
           classNames={classGroupNames}
+          classesReady={!classGroupsLoading && students !== null}
+          rosterNames={students ?? NO_STUDENTS}
+          carpoolNames={carpoolNames}
         />
         <ResetPanel session={session} students={students} onReset={refresh} />
       </div>
     </main>
   );
 }
+
+/** Stable empty roster, so the import preview doesn't recompute each render. */
+const NO_STUDENTS: readonly RosterStudent[] = [];
 
 export function AdminDashboard() {
   return (

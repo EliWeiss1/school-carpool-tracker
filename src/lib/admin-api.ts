@@ -120,11 +120,18 @@ export type RosterImportInput = Credentials &
      * before the import runs.
      */
     students: CsvImportStudent[];
+    /**
+     * Create any class named in the file that does not exist yet, instead of
+     * refusing the import. For setting up a brand-new school.
+     */
+    createMissingClasses?: boolean;
   };
 
 export interface RosterImportResponse {
   created: number;
   students: StudentWithClasses[];
+  /** Names of classes the import created (empty unless the flag was on). */
+  createdClasses: string[];
 }
 
 export type RosterResetInput = Credentials & RequestOptions;
@@ -391,10 +398,10 @@ export function createAdminApiClient(
       );
     },
 
-    importRoster({ pin, deviceId, students, signal }) {
+    importRoster({ pin, deviceId, students, createMissingClasses, signal }) {
       return post<RosterImportResponse>(
         "roster-import",
-        compact({ pin, deviceId, students }),
+        compact({ pin, deviceId, students, createMissingClasses }),
         signal,
       );
     },

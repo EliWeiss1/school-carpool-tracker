@@ -8,7 +8,7 @@
  * retired one, and the sentences staff see when a name is wrong.
  */
 
-import { MAX_NAME_LENGTH } from "./roster-input.ts";
+import { MAX_NAME_LENGTH, nameTooLong } from "./roster-input.ts";
 
 /**
  * Sent in place of applying a request that still carries the retired singular
@@ -59,4 +59,25 @@ export function readClassNames(row: Record<string, unknown>): ClassNamesRead {
 /** One sentence for the admin who typed (or imported) a class that is not there. */
 export function unknownClassMessage(name: string): string {
   return `There's no class called "${name}". Add it under Classes first.`;
+}
+
+/** The most classes a school may have; /classes-write and /roster-import agree. */
+export const MAX_CLASSES = 100;
+
+/**
+ * Why a class name cannot be created, as one sentence, or null if it is fine.
+ * Shared by /classes-write and /roster-import's `createMissingClasses` so a
+ * class made by import obeys exactly the rules of one made by hand.
+ */
+export function classNameProblem(name: string): string | null {
+  const trimmed = name.trim();
+  if (trimmed === "") return "A class needs a name.";
+  if (nameTooLong(trimmed)) {
+    return `The class name "${trimmed.slice(0, 20)}..." is too long (limit ${MAX_NAME_LENGTH} characters).`;
+  }
+  return null;
+}
+
+export function tooManyClassesMessage(): string {
+  return `That is too many classes (max ${MAX_CLASSES}). Remove one before adding another.`;
 }

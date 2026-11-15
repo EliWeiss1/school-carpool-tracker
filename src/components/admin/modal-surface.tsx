@@ -122,7 +122,7 @@ export function ModalSurface({
         aria-labelledby={labelledBy}
         tabIndex={-1}
         className={cn(
-          "flex max-h-[92dvh] w-full flex-col rounded-t-2xl bg-white shadow-float animate-tile-in sm:rounded-2xl",
+          "flex max-h-[92dvh] w-full animate-tile-in flex-col rounded-t-2xl bg-white shadow-float sm:rounded-2xl",
           "focus:outline-none",
           className,
         )}

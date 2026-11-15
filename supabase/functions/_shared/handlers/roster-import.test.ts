@@ -352,4 +352,93 @@ describe("roster-import — a repeated import must not duplicate the roster", ()
 
     expect(response.status).toBe(400);
   });
+
+  describe("createMissingClasses", () => {
+    const row = (first: string, classes: string[]) => ({
+      first_name: first,
+      last_name: "Newman",
+      class_groups: classes,
+    });
+
+    it("still 422s on an unknown class when the flag is absent or not literally true", async () => {
+      for (const flag of [undefined, "true", 1]) {
+        const { handle, store } = setup();
+        const response = await handle(
+          imp([row("Ann", ["Nursery"])], { createMissingClasses: flag }),
+        );
+        expect(response.status).toBe(422);
+        expect(store.rows()).toHaveLength(1);
+        expect(store.classGroupRows()).toHaveLength(3);
+      }
+    });
+
+    it("creates each missing class once across spellings and links students", async () => {
+      const { handle, store } = setup();
+      const response = await handle(
+        imp(
+          [
+            row("Ann", ["Nursery"]),
+            row("Bo", ["nursery "]),
+            row("Cy", ["NURSERY", "K1"]),
+          ],
+          {
+            createMissingClasses: true,
+          },
+        ),
+      );
+      const body = (await response.json()) as {
+        createdClasses: string[];
+        students: Array<{ class_groups: string[] }>;
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.createdClasses).toEqual(["Nursery"]);
+      expect(store.classGroupRows()).toHaveLength(4);
+      expect(body.students.every((s) => s.class_groups.length >= 1)).toBe(true);
+    });
+
+    it("reuses existing classes and reports none created", async () => {
+      const { handle, store } = setup();
+      const response = await handle(
+        imp([row("Ann", ["k1"])], { createMissingClasses: true }),
+      );
+      const body = (await response.json()) as { createdClasses: string[] };
+
+      expect(response.status).toBe(200);
+      expect(body.createdClasses).toEqual([]);
+      expect(store.classGroupRows()).toHaveLength(3);
+    });
+
+    it("creates no classes when the import is refused for a roster collision", async () => {
+      const { handle, store } = setup();
+      const response = await handle(
+        imp(
+          [
+            {
+              first_name: "Maya",
+              last_name: "Cohen",
+              class_groups: ["Nursery"],
+            },
+          ],
+          { createMissingClasses: true },
+        ),
+      );
+
+      expect(response.status).toBe(409);
+      expect(store.classGroupRows()).toHaveLength(3);
+    });
+
+    it("400s on an over-long new class name and creates nothing", async () => {
+      const { handle, store } = setup();
+      const response = await handle(
+        imp([row("Ann", ["Nursery"]), row("Bo", ["x".repeat(200)])], {
+          createMissingClasses: true,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(store.classGroupRows()).toHaveLength(3);
+      expect(store.rows()).toHaveLength(1);
+    });
+  });
 });
