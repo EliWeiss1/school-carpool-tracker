@@ -102,6 +102,19 @@ describe("school-write", () => {
     });
   });
 
+  it("reads this month's voice use for the caller's school", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ used: 12, limit: 1000, enabled: true }),
+    );
+    const usage = await client.voiceUsage({ ...AUTH, schoolId: "s1" });
+
+    expect(usage).toEqual({ used: 12, limit: 1000, enabled: true });
+    expect(requestAt(fetchImpl, 0).body).toMatchObject({
+      action: "voice-usage",
+      schoolId: "s1",
+    });
+  });
+
   it("sends a null code as null: that is how the office turns pairing off", async () => {
     const { client, fetchImpl } = clientReturning(
       jsonResponse({ announceCode: null, displayCode: "b", disconnected: 0 }),

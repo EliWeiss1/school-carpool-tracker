@@ -96,6 +96,13 @@ export interface DisconnectDeviceResponse {
   disconnected: boolean;
 }
 
+/** This month's voice use against the school's limit (null: no limit). */
+export interface VoiceUsageResponse {
+  used: number;
+  limit: number | null;
+  enabled: boolean;
+}
+
 export interface PairDeviceInput extends SessionAuth {
   schoolSlug: string;
   code: string;
@@ -116,6 +123,7 @@ export interface SchoolApiClient {
   disconnectDevice(
     input: DisconnectDeviceInput,
   ): Promise<DisconnectDeviceResponse>;
+  voiceUsage(input: SchoolScoped): Promise<VoiceUsageResponse>;
   pairDevice(input: PairDeviceInput): Promise<PairDeviceResponse>;
 }
 
@@ -207,6 +215,13 @@ export function createSchoolApiClient(
         action: "disconnect-device",
         schoolId,
         deviceRowId,
+      });
+    },
+
+    voiceUsage({ schoolId, ...auth }) {
+      return write<VoiceUsageResponse>(auth, {
+        action: "voice-usage",
+        schoolId,
       });
     },
 

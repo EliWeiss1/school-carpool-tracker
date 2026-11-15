@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { LoadingState } from "@/components/ui/loading-state";
 import { deriveChecklist, checklistComplete } from "@/lib/school-checklist";
+import { type VoiceUsage, voiceUsageSentence } from "@/lib/voice-usage";
 import {
   type CodesResponse,
   type SchoolApiClient,
@@ -34,6 +35,7 @@ import {
 import { type ChangeCodeRequest, type SingleTarget } from "./code-dialogs";
 import { DevicesCard } from "./devices-card";
 import { GettingStarted } from "./getting-started";
+import { PanelCard } from "./panel-parts";
 import { SettingsCard } from "./settings-card";
 
 /**
@@ -48,6 +50,8 @@ export interface SchoolPanelsApi {
   setCode(
     input: Omit<SetCodeInput, "code"> & { code: string | null },
   ): Promise<SetCodeResponse>;
+  /** Optional so a preview or test can leave it out; the line is then hidden. */
+  voiceUsage?: SchoolApiClient["voiceUsage"];
 }
 
 export interface SchoolPanelsProps {
@@ -63,6 +67,8 @@ export interface SchoolPanelsProps {
 interface Loaded {
   codes: CodesResponse;
   devices: SchoolDeviceInfo[];
+  /** Null when it could not be read: the panels still work without it. */
+  voice: VoiceUsage | null;
 }
 
 /**
@@ -111,10 +117,15 @@ export function SchoolPanels({
 
   const refresh = useCallback(async () => {
     const { api } = live.current;
-    const [codes, list] = await withAuth((auth) =>
-      Promise.all([api.getCodes(auth), api.listDevices(auth)]),
+    const [codes, list, voice] = await withAuth((auth) =>
+      Promise.all([
+        api.getCodes(auth),
+        api.listDevices(auth),
+        // A readout, not a control: if it fails, show everything else.
+        api.voiceUsage ? api.voiceUsage(auth).catch(() => null) : null,
+      ]),
     );
-    setLoaded({ codes, devices: list.devices });
+    setLoaded({ codes, devices: list.devices, voice });
   }, [withAuth]);
 
   useEffect(() => {
@@ -221,6 +232,13 @@ export function SchoolPanels({
         onTurnOff={turnOff}
         onDisconnect={disconnect}
       />
+      {loaded.voice !== null && (
+        <PanelCard id="voice" title="Voice">
+          <p className="text-lg text-curb-800">
+            {voiceUsageSentence(loaded.voice)}
+          </p>
+        </PanelCard>
+      )}
       <SettingsCard saved={saved} onSave={saveSettings} />
     </div>
   );
