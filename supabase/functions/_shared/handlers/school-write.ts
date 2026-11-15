@@ -34,6 +34,7 @@ import type {
   SchoolStore,
   SettingsPatch,
 } from "../school-ports.ts";
+import type { VoiceUsageStore } from "../usage-ports.ts";
 import {
   type AuthDeps,
   authenticateRequest,
@@ -42,6 +43,8 @@ import {
 
 export interface SchoolWriteHandlerDeps extends AuthDeps {
   schools: SchoolStore;
+  /** Read-only here: the office sees the count, only the token handler adds. */
+  usage: VoiceUsageStore;
 }
 
 const OFFICE_ACTIONS = [
@@ -50,6 +53,7 @@ const OFFICE_ACTIONS = [
   "set-code",
   "list-devices",
   "disconnect-device",
+  "voice-usage",
 ] as const;
 type OfficeAction = (typeof OFFICE_ACTIONS)[number];
 
@@ -100,6 +104,8 @@ export function createSchoolWriteHandler(deps: SchoolWriteHandlerDeps) {
           });
         case "disconnect-device":
           return await disconnectDevice(deps.schools, schoolId, body);
+        case "voice-usage":
+          return jsonResponse(await deps.usage.voiceUsage(schoolId));
       }
     });
   };

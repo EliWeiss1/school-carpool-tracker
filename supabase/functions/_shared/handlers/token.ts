@@ -14,6 +14,7 @@ import {
 } from "../http.ts";
 import { buildKeyterms } from "../keyterms.ts";
 import type { RosterStore } from "../ports.ts";
+import type { VoiceClaim, VoiceUsageStore } from "../usage-ports.ts";
 import { type GuardDeps, guardRequest } from "./guard.ts";
 import { rosterFilterFrom } from "./filter.ts";
 
@@ -21,9 +22,18 @@ export interface TokenHandlerDeps extends GuardDeps {
   stores: {
     forSchool(schoolId: string): Pick<RosterStore, "list" | "listCarpools">;
   };
+  /** Meters paid voice sessions per school per month. */
+  usage: VoiceUsageStore;
   /** Closes over the permanent key and mock flag; see deepgram.ts. */
   mintToken: () => Promise<DeepgramToken>;
 }
+
+/** What staff are told when a claim is refused; both end by pointing at typing. */
+const REFUSED_MESSAGE: Record<"disabled" | "limit", string> = {
+  limit:
+    "Voice is used up for this month. Type the name instead; the office can raise the limit.",
+  disabled: "Voice is turned off for this school. Type the name instead.",
+};
 
 export function createTokenHandler(deps: TokenHandlerDeps) {
   return async function handle(request: Request): Promise<Response> {
@@ -40,6 +50,25 @@ export function createTokenHandler(deps: TokenHandlerDeps) {
         store.listCarpools(),
       ]);
       const keyterms = buildKeyterms(roster, carpools);
+
+      // Every minted token is a paid session, so it is counted first. Mock
+      // speech is counted too, which keeps the cap testable end to end. The
+      // claim sits after the roster reads so a failed read does not spend one.
+      let claim: VoiceClaim;
+      try {
+        claim = await deps.usage.claimVoiceSession(guard.schoolId);
+      } catch (error: unknown) {
+        // Fail closed: a counter that cannot be reached must not become
+        // unlimited paid sessions. Detail goes to the log, not to staff.
+        console.error("could not claim a voice session", error);
+        return errorResponse(
+          503,
+          "Voice could not be checked right now. Type the name instead.",
+        );
+      }
+      if (!claim.allowed) {
+        return errorResponse(403, REFUSED_MESSAGE[claim.reason]);
+      }
 
       let token: DeepgramToken;
       try {

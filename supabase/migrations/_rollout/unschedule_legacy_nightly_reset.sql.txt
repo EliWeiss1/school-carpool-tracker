@@ -1,0 +1,20 @@
+-- ROLLOUT STEP -- NOT A MIGRATION. NOT APPLIED. Kept as .sql.txt in a
+-- subfolder so neither the Supabase CLI (which only reads migrations/*.sql)
+-- nor the PGlite test harness (which only reads top-level *.sql) picks it up.
+--
+-- Run once, by hand, at cutover: after 20261114120000_per_school_behaviour.sql
+-- is applied, 'per-school-board-reset' has been seen to run, and the Phase 6
+-- functions are deployed. It retires the legacy 8 PM Pacific job, which the
+-- per-school job now covers (school #1 is configured 8 PM America/Los_Angeles,
+-- Sunday to Thursday, replayed hour by hour against the legacy job in
+-- per-school-behaviour.test.ts).
+--
+-- Until this runs, both jobs fire; that is harmless (the legacy one only
+-- resets, the new one is guarded by schools.last_reset_on).
+--
+-- Not removing nightly_reset_board() / reset_board_to_waiting(): only the
+-- schedule goes, so rolling back is one cron.schedule call:
+--   select cron.schedule('nightly-board-reset', '0 3,4 * * *',
+--                        'select public.nightly_reset_board()');
+
+select cron.unschedule('nightly-board-reset');

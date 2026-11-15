@@ -12,12 +12,14 @@ import { readEnv } from "../_shared/env.deno.ts";
 import { createSchoolWriteHandler } from "../_shared/handlers/school-write.ts";
 import { createRateLimiter } from "../_shared/rate-limit.ts";
 import { createSchoolStore } from "../_shared/school-store.deno.ts";
+import { createVoiceUsageStore } from "../_shared/usage-store.deno.ts";
 
 const env = readEnv();
 
 const handle = createSchoolWriteHandler({
   access: createAccessStore(env),
   schools: createSchoolStore(env),
+  usage: createVoiceUsageStore(env),
   // Form submits from the office, same pace as the other write endpoints.
   rateLimiter: createRateLimiter({ limit: 30, windowMs: 60_000 }),
 });

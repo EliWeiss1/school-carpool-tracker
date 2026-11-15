@@ -15,6 +15,7 @@ import { createRateLimiter } from "../rate-limit.ts";
 import { createCarpoolWriteHandler } from "./carpool-write.ts";
 import { createClassesWriteHandler } from "./classes-write.ts";
 import { createFakeAccess } from "./fake-access.ts";
+import { createFakeUsage } from "./fake-usage.ts";
 import {
   createFakeStores,
   makeCarpool,
@@ -124,6 +125,7 @@ function world() {
   const handlers = {
     "deepgram-token": createTokenHandler({
       ...common,
+      usage: createFakeUsage(),
       mintToken: () => Promise.resolve({ token: "dg_temp", expiresIn: 300 }),
     }),
     "resolve-name": createResolveHandler(common),

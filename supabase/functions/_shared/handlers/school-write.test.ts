@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
 import { createFakeAccess } from "./fake-access.ts";
+import { createFakeUsage } from "./fake-usage.ts";
 import { createFakeSchoolStore } from "./fake-school-store.ts";
 import { createSchoolWriteHandler } from "./school-write.ts";
 
@@ -54,12 +55,17 @@ function setup() {
     label: "B tv",
   });
 
+  const usage = createFakeUsage();
+  usage.configure(A, { used: 7, limit: 100, enabled: true });
+  usage.configure(B, { used: 900, limit: 1000, enabled: false });
+
   const handle = createSchoolWriteHandler({
     access,
     schools,
+    usage,
     rateLimiter: createRateLimiter({ limit: 100, windowMs: 60_000 }),
   });
-  return { access, schools, handle };
+  return { access, schools, usage, handle };
 }
 
 const post = (body: unknown, token: string | null = "owner-a") =>
@@ -363,6 +369,7 @@ describe("school-write — isolation and access", () => {
     ["set-code", { which: "both", code: "HIJACK99", disconnectDevices: true }],
     ["list-devices", {}],
     ["disconnect-device", { deviceRowId: "row-a1" }],
+    ["voice-usage", {}],
   ];
 
   it.each(actions)(
