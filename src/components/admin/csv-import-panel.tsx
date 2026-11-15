@@ -7,10 +7,11 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
 import { type CsvImportReport, parseRosterCsv } from "@/lib/csv-import";
-import type { UsePinSession } from "@/lib/use-pin-session";
+import { requireCredentials } from "@/lib/require-credentials";
+import { useSchoolScope, type StaffSession } from "@/lib/screen-access";
 
 export interface CsvImportPanelProps {
-  session: UsePinSession;
+  session: StaffSession;
   /** Called after a successful import so the roster table above can refresh. */
   onImported: () => void;
   /**
@@ -19,18 +20,6 @@ export interface CsvImportPanelProps {
    * omitted or empty the check is skipped and the server still decides.
    */
   classNames?: readonly string[];
-}
-
-function requireCredentials(session: UsePinSession) {
-  const credentials = session.credentials();
-  if (credentials === null) {
-    throw new ApiError(
-      "pin",
-      401,
-      "The staff session timed out. Enter the PIN again.",
-    );
-  }
-  return credentials;
 }
 
 /**
@@ -47,6 +36,7 @@ export function CsvImportPanel({
   onImported,
   classNames = [],
 }: CsvImportPanelProps) {
+  const { school } = useSchoolScope();
   const [fileName, setFileName] = useState<string | null>(null);
   const [report, setReport] = useState<CsvImportReport | null>(null);
   const [importing, setImporting] = useState(false);
@@ -91,7 +81,7 @@ export function CsvImportPanel({
     setImportError(null);
     try {
       const result = await adminApi.importRoster({
-        ...requireCredentials(session),
+        ...requireCredentials(session, school),
         students: report.toImport,
       });
       setImportedCount(result.created);
@@ -122,7 +112,7 @@ export function CsvImportPanel({
     setUndoError(null);
     try {
       await adminApi.deleteStudents({
-        ...requireCredentials(session),
+        ...requireCredentials(session, school),
         studentIds: importedIds,
       });
       setUndone(true);
@@ -148,12 +138,12 @@ export function CsvImportPanel({
         <p className="mt-1 text-curb-600">
           Columns can be in any order. Required: first name, last name.
           Optional: aliases (comma or semicolon separated), classes (separate
-          several with a semicolon, like K1; MS Boys, each matching a class under
-          Classes), carpool, parent 1 name, parent 2 name. If the carpool column
-          names a carpool that already exists, this student is added to it; if
-          it doesn&apos;t exist yet, it&apos;s created with that exact name and
-          this student added to it. This always adds to the roster you already
-          have — it never replaces or removes anyone.
+          several with a semicolon, like K1; MS Boys, each matching a class
+          under Classes), carpool, parent 1 name, parent 2 name. If the carpool
+          column names a carpool that already exists, this student is added to
+          it; if it doesn&apos;t exist yet, it&apos;s created with that exact
+          name and this student added to it. This always adds to the roster you
+          already have — it never replaces or removes anyone.
         </p>
       </div>
 

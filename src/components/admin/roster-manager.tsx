@@ -20,30 +20,19 @@ import {
 import type { ClassGroup } from "@/lib/class-groups";
 import { countLeftWithNoClass } from "@/lib/class-members";
 import { jumpToPanel } from "@/lib/jump-to-panel";
-import type { UsePinSession } from "@/lib/use-pin-session";
+import { requireCredentials } from "@/lib/require-credentials";
+import { useSchoolScope, type StaffSession } from "@/lib/screen-access";
 import type { Carpool } from "@/types/db";
 
 import { BulkClassActions } from "./bulk-class-actions";
 import { RosterTable } from "./roster-table";
 import { StudentForm } from "./student-form";
 
-function requireCredentials(session: UsePinSession) {
-  const credentials = session.credentials();
-  if (credentials === null) {
-    throw new ApiError(
-      "pin",
-      401,
-      "The staff session timed out. Enter the PIN again.",
-    );
-  }
-  return credentials;
-}
-
 /** What editor is open, if any: a fresh form, or an edit of one row. */
 type Editor = { mode: "add" } | { mode: "edit"; student: RosterStudent } | null;
 
 export interface RosterManagerProps {
-  session: UsePinSession;
+  session: StaffSession;
   /** null while the first load is in flight. */
   students: RosterStudent[] | null;
   /** For the carpool column and the student form's carpool picker. */
@@ -73,6 +62,7 @@ export function RosterManager({
   listError,
   refresh,
 }: RosterManagerProps) {
+  const { school } = useSchoolScope();
   const [editor, setEditor] = useState<Editor>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -89,13 +79,13 @@ export function RosterManager({
     try {
       if (editor?.mode === "edit") {
         await adminApi.updateStudent({
-          ...requireCredentials(session),
+          ...requireCredentials(session, school),
           studentId: editor.student.id,
           ...fields,
         });
       } else {
         await adminApi.createStudent({
-          ...requireCredentials(session),
+          ...requireCredentials(session, school),
           ...fields,
         });
       }
@@ -117,7 +107,7 @@ export function RosterManager({
     setDeleteError(null);
     try {
       await adminApi.deleteStudent({
-        ...requireCredentials(session),
+        ...requireCredentials(session, school),
         studentId: student.id,
       });
       setSelectedIds((prev) => {
@@ -143,7 +133,7 @@ export function RosterManager({
     setDeleteError(null);
     try {
       const result = await adminApi.deleteStudents({
-        ...requireCredentials(session),
+        ...requireCredentials(session, school),
         studentIds: [...selectedIds],
       });
       setBulkInfo(
@@ -167,7 +157,7 @@ export function RosterManager({
 
   async function handleBulkClass(mode: BulkClassMode, classGroup: ClassGroup) {
     const result = await adminApi.changeClassMembers({
-      ...requireCredentials(session),
+      ...requireCredentials(session, school),
       ...bulkMembershipInput(mode, classGroup.id, selectedIds),
     });
     const ignored = result.ignoredIds.length;

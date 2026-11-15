@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type ClassGroup, fetchClassGroups } from "@/lib/class-groups";
-import { getBrowserClient } from "@/lib/supabase/browser";
+import { useSchoolScope } from "@/lib/screen-access";
 
 export interface UseClassGroups {
   classGroups: ClassGroup[];
@@ -21,13 +21,22 @@ export interface UseClassGroups {
  * class field elsewhere, not a broken page.
  */
 export function useClassGroups(): UseClassGroups {
+  const scope = useSchoolScope();
+  const schoolId = scope.school?.id ?? null;
+  // Held in a ref so a provider that rebuilds its scope object each render
+  // cannot retrigger the fetch; only a change of school does.
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const [classGroups, setClassGroups] = useState<ClassGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const groups = await fetchClassGroups(getBrowserClient());
+      const groups = await fetchClassGroups(
+        scopeRef.current.supabase(),
+        schoolId,
+      );
       setClassGroups(groups);
       setError(null);
     } catch (caught: unknown) {
@@ -39,7 +48,7 @@ export function useClassGroups(): UseClassGroups {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [schoolId]);
 
   useEffect(() => {
     void refresh();

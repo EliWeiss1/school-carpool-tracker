@@ -8,20 +8,9 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import type { UsePinSession } from "@/lib/use-pin-session";
+import { requireCredentials } from "@/lib/require-credentials";
+import { useSchoolScope, type StaffSession } from "@/lib/screen-access";
 import type { Carpool, Student } from "@/types/db";
-
-function requireCredentials(session: UsePinSession) {
-  const credentials = session.credentials();
-  if (credentials === null) {
-    throw new ApiError(
-      "pin",
-      401,
-      "The staff session timed out. Enter the PIN again.",
-    );
-  }
-  return credentials;
-}
 
 /** Splits on comma or semicolon, same rule the student form's aliases field uses. */
 function parseAliasesInput(value: string): string[] {
@@ -142,12 +131,10 @@ function CarpoolEditor({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <span className={LABEL_CLASS}>
-          Members ({memberIds.size} selected)
-        </span>
+        <span className={LABEL_CLASS}>Members ({memberIds.size} selected)</span>
         <p className="text-xs text-curb-500">
-          Announcing any one of these, or the carpool name itself, will offer
-          to mark everyone here arrived in one tap.
+          Announcing any one of these, or the carpool name itself, will offer to
+          mark everyone here arrived in one tap.
         </p>
         <div className="max-h-64 overflow-y-auto rounded-xl border border-curb-300 bg-white p-2">
           {students.length === 0 ? (
@@ -184,7 +171,12 @@ function CarpoolEditor({
       {error && <ErrorBanner message={error} />}
 
       <div className="flex justify-end gap-2">
-        <Button variant="quiet" size="md" onClick={onCancel} disabled={submitting}>
+        <Button
+          variant="quiet"
+          size="md"
+          onClick={onCancel}
+          disabled={submitting}
+        >
           Cancel
         </Button>
         <Button type="submit" variant="primary" size="md" disabled={submitting}>
@@ -196,7 +188,7 @@ function CarpoolEditor({
 }
 
 export interface CarpoolManagerProps {
-  session: UsePinSession;
+  session: StaffSession;
   carpools: Carpool[];
   /** For the member picker and each carpool's member count. */
   students: Student[];
@@ -216,6 +208,7 @@ export function CarpoolManager({
   students,
   refresh,
 }: CarpoolManagerProps) {
+  const { school } = useSchoolScope();
   const [editor, setEditor] = useState<Editor>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -243,13 +236,13 @@ export function CarpoolManager({
     try {
       if (editor?.mode === "edit") {
         await adminApi.updateCarpool({
-          ...requireCredentials(session),
+          ...requireCredentials(session, school),
           carpoolId: editor.carpool.id,
           ...fields,
         });
       } else {
         await adminApi.createCarpool({
-          ...requireCredentials(session),
+          ...requireCredentials(session, school),
           ...fields,
         });
       }
@@ -271,7 +264,7 @@ export function CarpoolManager({
     setDeleteError(null);
     try {
       await adminApi.deleteCarpool({
-        ...requireCredentials(session),
+        ...requireCredentials(session, school),
         carpoolId: carpool.id,
       });
       setConfirmingDeleteId(null);

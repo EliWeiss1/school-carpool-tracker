@@ -1,5 +1,6 @@
 "use client";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BoardGrid } from "@/components/display/board-grid";
@@ -42,31 +43,29 @@ import {
   type DisplayRoster,
   type StudentChangePayload,
 } from "@/lib/realtime-reconcile";
-import {
-  STUDENT_WITH_CLASSES_SELECT,
-  withClassNames,
-  type StudentClassesEmbed,
-} from "@/lib/student-classes";
-import { getBrowserClient } from "@/lib/supabase/browser";
+import { useSchoolScope } from "@/lib/screen-access";
+import { fetchStudentsWithClasses } from "@/lib/student-classes";
+import type { Database } from "@/types/db";
 import { useClassGroups } from "@/lib/use-class-groups";
-import type { Student } from "@/types/db";
 
 /** Remembers the last class a viewer picked, per browser tab's origin -- a
  *  per-device convenience, not shared or synced state (see CLAUDE.md's
  *  storage rule, which is specifically about the staff PIN, not this). */
-const FILTER_STORAGE_KEY = "display-section-filter";
+const FILTER_STORAGE_NAME = "display-section-filter";
 
-function readStoredFilter(): string | null {
+// The `key` arguments below come from `scope.storageKey(...)`: the bare name
+// on the legacy route, per-school on a school route.
+function readStoredFilter(key: string): string | null {
   try {
-    return window.localStorage.getItem(FILTER_STORAGE_KEY);
+    return window.localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-function writeStoredFilter(sectionKey: string): void {
+function writeStoredFilter(key: string, sectionKey: string): void {
   try {
-    window.localStorage.setItem(FILTER_STORAGE_KEY, sectionKey);
+    window.localStorage.setItem(key, sectionKey);
   } catch {
     // Private browsing or a full quota -- the filter just won't be
     // remembered next visit, which is not worth surfacing to the viewer.
@@ -75,19 +74,19 @@ function writeStoredFilter(sectionKey: string): void {
 
 /** Whether this screen reads names aloud. Per browser, like the filter: one
  *  classroom may want it while the hallway TV next door does not. */
-const VOICE_STORAGE_KEY = "display-voice";
+const VOICE_STORAGE_NAME = "display-voice";
 
-function readStoredVoice(): boolean {
+function readStoredVoice(key: string): boolean {
   try {
-    return window.localStorage.getItem(VOICE_STORAGE_KEY) === "on";
+    return window.localStorage.getItem(key) === "on";
   } catch {
     return false;
   }
 }
 
-function writeStoredVoice(on: boolean): void {
+function writeStoredVoice(key: string, on: boolean): void {
   try {
-    window.localStorage.setItem(VOICE_STORAGE_KEY, on ? "on" : "off");
+    window.localStorage.setItem(key, on ? "on" : "off");
   } catch {
     // Same as the filter: not remembered next visit, nothing else breaks.
   }
@@ -173,6 +172,14 @@ export function DisplayBoard({
   // until it loads, rather than an empty list sorting nothing.
   // The mock preview has no backend, so it brings its own list (including a
   // class with nobody in it, to preview the empty-class view).
+  const scope = useSchoolScope();
+  const schoolId = scope.school?.id ?? null;
+  // Held in a ref so a provider that rebuilds its scope object each render
+  // cannot tear down and reopen the realtime channel; only a school change does.
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const filterStorageKey = scope.storageKey(FILTER_STORAGE_NAME);
+  const voiceStorageKey = scope.storageKey(VOICE_STORAGE_NAME);
   const { names: liveClassOrder, loading: classesLoading } = useClassGroups();
   const classOrder = mockMode ? mockClassOrder() : liveClassOrder;
   const classesReady = mockMode || !classesLoading;
@@ -211,11 +218,11 @@ export function DisplayBoard({
     setSectionKey(
       resolveInitialSectionKey({
         urlParam: initialClassParam,
-        stored: readStoredFilter(),
+        stored: readStoredFilter(filterStorageKey),
         options: grouped.options,
       }),
     );
-  }, [boardReady, grouped.options, initialClassParam]);
+  }, [boardReady, grouped.options, initialClassParam, filterStorageKey]);
 
   // A class an admin deletes while this board is open: drop back to every
   // class rather than sitting on a filter that no longer exists.
@@ -228,7 +235,7 @@ export function DisplayBoard({
 
   function handleFilterChange(nextKey: string) {
     setSectionKey(nextKey);
-    writeStoredFilter(nextKey);
+    writeStoredFilter(filterStorageKey, nextKey);
   }
 
   useEffect(() => {
@@ -242,7 +249,7 @@ export function DisplayBoard({
     announcerRef.current = announcer;
     setVoiceSupported(announcer.supported);
 
-    if (announcer.supported && readStoredVoice()) {
+    if (announcer.supported && readStoredVoice(voiceStorageKey)) {
       setVoiceOn(true);
       // Left on and reloaded: the browser will refuse until someone taps the
       // page, so say so now rather than silently missing the first arrival.
@@ -250,7 +257,7 @@ export function DisplayBoard({
     }
 
     return () => announcer.stop();
-  }, []);
+  }, [voiceStorageKey]);
 
   /**
    * Flashes the given tiles, fires at most one chime for the whole batch,
@@ -262,42 +269,47 @@ export function DisplayBoard({
    * matters. `ids` are already scoped to the viewer's class filter, so the
    * voice follows the filter exactly as the chime does.
    */
-  const handleArrivals = useCallback((ids: string[], current: DisplayRoster) => {
-    if (ids.length === 0) return;
+  const handleArrivals = useCallback(
+    (ids: string[], current: DisplayRoster) => {
+      if (ids.length === 0) return;
 
-    if (voiceOnRef.current) {
-      announcerRef.current?.announce(
-        ids.flatMap((id) => (current[id] ? [current[id]] : [])),
-      );
-    }
+      if (voiceOnRef.current) {
+        announcerRef.current?.announce(
+          ids.flatMap((id) => (current[id] ? [current[id]] : [])),
+        );
+      }
 
-    setFlashingIds((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) next.add(id);
-      return next;
-    });
+      setFlashingIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.add(id);
+        return next;
+      });
 
-    for (const id of ids) {
-      const existing = flashTimeoutsRef.current.get(id);
-      if (existing) clearTimeout(existing);
+      for (const id of ids) {
+        const existing = flashTimeoutsRef.current.get(id);
+        if (existing) clearTimeout(existing);
 
-      const timeout = setTimeout(() => {
-        setFlashingIds((prev) => {
-          if (!prev.has(id)) return prev;
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        flashTimeoutsRef.current.delete(id);
-      }, FLASH_DURATION_MS);
+        const timeout = setTimeout(() => {
+          setFlashingIds((prev) => {
+            if (!prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          flashTimeoutsRef.current.delete(id);
+        }, FLASH_DURATION_MS);
 
-      flashTimeoutsRef.current.set(id, timeout);
-    }
+        flashTimeoutsRef.current.set(id, timeout);
+      }
 
-    if (coalescerRef.current.notify()) {
-      void playerRef.current.play().then((played) => setSoundBlocked(!played));
-    }
-  }, []);
+      if (coalescerRef.current.notify()) {
+        void playerRef.current
+          .play()
+          .then((played) => setSoundBlocked(!played));
+      }
+    },
+    [],
+  );
 
   // --- Dev-only preview: no Supabase project is reachable from this
   // environment, so this is the path actually used to build and screenshot
@@ -358,11 +370,11 @@ export function DisplayBoard({
   useEffect(() => {
     if (mockMode) return;
 
-    let client: ReturnType<typeof getBrowserClient>;
+    let client: SupabaseClient<Database>;
     try {
-      client = getBrowserClient();
+      client = scopeRef.current.supabase();
     } catch (error: unknown) {
-      // getBrowserClient() throws env.ts's message, written for a developer
+      // supabase() throws env.ts's message, written for a developer
       // reading the repo ("Copy .env.example to .env.local..."). Nobody
       // looking at a hallway TV can act on that -- log it there for whoever
       // eventually opens dev tools, and show the board a sentence a staff
@@ -386,43 +398,44 @@ export function DisplayBoard({
 
     async function fetchSnapshot() {
       const mine = sequencer.begin();
-      const { data, error } = await client
-        .from("students")
-        .select(STUDENT_WITH_CLASSES_SELECT)
-        .returns<(Student & StudentClassesEmbed)[]>();
+      const { data, error } = await fetchStudentsWithClasses(client, schoolId);
       if (cancelled) return;
       if (error) {
         setConnection("error");
         return;
       }
       if (!sequencer.shouldApply(mine)) return;
-      setRoster((prev) => applySnapshot(prev, (data ?? []).map(withClassNames)));
+      setRoster((prev) => applySnapshot(prev, data));
       setConnection("live");
     }
 
     // supabase-js's channel API is heavily overloaded; BoardClient is the narrow
     // slice connectBoard uses, so the cast is a view, not a conversion.
-    const disconnect = connectBoard(client as unknown as BoardClient, {
-      onStudentChange: (changePayload) =>
-        setRoster((prev) => {
-          const result = reconcile(prev, changePayload);
-          handleArrivals(
-            result.arrivals.filter((id) => visibleIdsRef.current.has(id)),
-            result.roster,
-          );
-          return result.roster;
-        }),
-      // A refetch can only change rows and membership, never produce an
-      // arrival: applySnapshot has no `arrivals` to hand to handleArrivals.
-      onSnapshotNeeded: () => void fetchSnapshot(),
-      onConnectionError: () => setConnection("error"),
-    });
+    const disconnect = connectBoard(
+      client as unknown as BoardClient,
+      {
+        onStudentChange: (changePayload) =>
+          setRoster((prev) => {
+            const result = reconcile(prev, changePayload);
+            handleArrivals(
+              result.arrivals.filter((id) => visibleIdsRef.current.has(id)),
+              result.roster,
+            );
+            return result.roster;
+          }),
+        // A refetch can only change rows and membership, never produce an
+        // arrival: applySnapshot has no `arrivals` to hand to handleArrivals.
+        onSnapshotNeeded: () => void fetchSnapshot(),
+        onConnectionError: () => setConnection("error"),
+      },
+      schoolId,
+    );
 
     return () => {
       cancelled = true;
       disconnect();
     };
-  }, [mockMode, handleArrivals]);
+  }, [mockMode, handleArrivals, schoolId]);
 
   useEffect(() => {
     const timeouts = flashTimeoutsRef.current;
@@ -442,7 +455,7 @@ export function DisplayBoard({
     if (voiceOn && !voiceBlocked) {
       announcer.stop();
       setVoiceOn(false);
-      writeStoredVoice(false);
+      writeStoredVoice(voiceStorageKey, false);
       return;
     }
 
@@ -450,7 +463,7 @@ export function DisplayBoard({
     // speak now, inside it. It unlocks a blocked chime too: one tap, both
     // sounds working.
     setVoiceOn(true);
-    writeStoredVoice(true);
+    writeStoredVoice(voiceStorageKey, true);
     void announcer.unlock();
     if (soundBlocked) enableSound();
   }
@@ -557,9 +570,10 @@ export function DisplayBoard({
         </div>
       )}
 
-      {!configError && connection === "live" && !rosterIsEmpty && emptyClass !== null && (
-        <EmptyClassState classLabel={emptyClass} />
-      )}
+      {!configError &&
+        connection === "live" &&
+        !rosterIsEmpty &&
+        emptyClass !== null && <EmptyClassState classLabel={emptyClass} />}
 
       {!configError && connection === "live" && filterHidesEveryone && (
         <div className="p-4 sm:p-6">

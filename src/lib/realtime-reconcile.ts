@@ -34,7 +34,10 @@ export type DisplayRoster = Record<string, StudentWithClasses>;
 export type StudentChangePayload =
   | { eventType: "INSERT"; new: Student; old: Student | null }
   | { eventType: "UPDATE"; new: Student; old: Student | null }
-  | { eventType: "DELETE"; new: null; old: Student };
+  // A DELETE payload carries only the primary key (Postgres Changes sends the
+  // key columns for deletes regardless of replica identity), so that is all
+  // the type promises.
+  | { eventType: "DELETE"; new: null; old: Pick<Student, "id"> };
 
 export interface ReconcileResult {
   roster: DisplayRoster;
@@ -106,7 +109,10 @@ export function reconcile(
     // a student we have never seen); a snapshot supplies the real value.
     roster: {
       ...roster,
-      [incoming.id]: { ...incoming, class_groups: existing?.class_groups ?? [] },
+      [incoming.id]: {
+        ...incoming,
+        class_groups: existing?.class_groups ?? [],
+      },
     },
     arrivals,
   };
@@ -141,7 +147,10 @@ export function applySnapshot(
   const next = { ...roster };
   for (const row of rows) {
     const existing = next[row.id];
-    if (!existing || parsedTime(row.updated_at) >= parsedTime(existing.updated_at)) {
+    if (
+      !existing ||
+      parsedTime(row.updated_at) >= parsedTime(existing.updated_at)
+    ) {
       next[row.id] = row;
     } else if (!sameClasses(existing.class_groups, row.class_groups)) {
       // Membership edits do not touch `students.updated_at`, so the freshness

@@ -57,7 +57,7 @@ import {
   createMockSpeechSource,
 } from "@/lib/speech-mock";
 import { useKeyboardBox } from "@/lib/use-keyboard-box";
-import { usePinSession } from "@/lib/use-pin-session";
+import { useStaffSession } from "@/lib/screen-access";
 
 /** Everything `deepgram-token` handed back, kept until it goes stale. */
 interface TokenCache {
@@ -83,7 +83,7 @@ interface MicSession {
 }
 
 export function AnnounceScreen() {
-  const session = usePinSession();
+  const session = useStaffSession();
   const { names: classGroups } = useClassGroups();
   const classRoster = useClassRoster();
   const keyboard = useKeyboardBox();
@@ -616,14 +616,16 @@ export function AnnounceScreen() {
               }
               onClear={() => dispatch({ type: "filter/clear" })}
             />
-            <Button
-              variant="quiet-ink"
-              size="md"
-              className="!px-3"
-              onClick={() => session.lock()}
-            >
-              Lock
-            </Button>
+            {session.exitLabel !== null && (
+              <Button
+                variant="quiet-ink"
+                size="md"
+                className="!px-3"
+                onClick={() => session.lock()}
+              >
+                {session.exitLabel}
+              </Button>
+            )}
           </div>
         }
       />
@@ -718,7 +720,11 @@ export function AnnounceScreen() {
             classes={railList}
             openClass={openClass}
             pickedCount={(classGroup) =>
-              pickedCountInClass(classRoster.roster, state.pad.selection, classGroup)
+              pickedCountInClass(
+                classRoster.roster,
+                state.pad.selection,
+                classGroup,
+              )
             }
             onSelect={(classGroup) =>
               dispatch(

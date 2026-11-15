@@ -8,6 +8,11 @@ export type StatusEventSource = "voice" | "manual" | "admin";
 
 export type Student = {
   id: string;
+  /**
+   * The owning school. Optional only because the board's mock rosters and the
+   * landing demo build Student rows with no school; every real row has one.
+   */
+  school_id?: string;
   first_name: string;
   last_name: string;
   aliases: string[];
@@ -21,6 +26,7 @@ export type Student = {
 
 export type Carpool = {
   id: string;
+  school_id: string;
   name: string;
   aliases: string[];
   created_at: string;
@@ -39,6 +45,7 @@ export type StudentWithClasses = Student & { class_groups: string[] };
  *  see the class_groups migration. Membership lives in `student_classes`. */
 export type ClassGroup = {
   id: string;
+  school_id: string;
   name: string;
   sort_order: number;
   created_at: string;
@@ -47,12 +54,14 @@ export type ClassGroup = {
 /** One student-in-one-class link. Deleting either side cascades the link. */
 export type StudentClass = {
   student_id: string;
+  school_id: string;
   class_group_id: string;
   created_at: string;
 };
 
 export type StatusEvent = {
   id: string;
+  school_id: string;
   /** Nulled rather than deleted when a student leaves the roster. */
   student_id: string | null;
   changed_to: StudentStatus;

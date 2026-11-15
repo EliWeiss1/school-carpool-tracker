@@ -25,7 +25,12 @@ export const MEMBERSHIP_REFETCH_DEBOUNCE_MS = 300;
 interface ChannelLike {
   on(
     type: "postgres_changes",
-    filter: { event: "*"; schema: "public"; table: string },
+    filter: {
+      event: "*";
+      schema: "public";
+      table: string;
+      filter?: string;
+    },
     listener: (payload: never) => void,
   ): ChannelLike;
   subscribe(callback: (status: string) => void): ChannelLike;
@@ -65,12 +70,15 @@ export function toChangePayload(
   payload: RealtimePostgresChangesPayload<Student>,
 ): StudentChangePayload | null {
   if (payload.eventType === "DELETE") {
-    const old = fullRowOrNull(payload.old);
-    // Cannot happen given REPLICA IDENTITY FULL on students, but a payload
-    // with no identifiable row is not something this board can reconcile --
-    // silently dropping one malformed delete beats crashing the board.
-    if (!old) return null;
-    return { eventType: "DELETE", new: null, old };
+    // Postgres Changes sends only the primary key for a delete, so demanding a
+    // full row here used to drop every live delete. The id is all `reconcile`
+    // needs: it removes a tile it holds and ignores an id it does not (which
+    // is how another school's delete, unfilterable on the wire, is shrugged
+    // off). A payload with no id at all cannot be reconciled; dropping that
+    // beats crashing the board.
+    const id = (payload.old as { id?: unknown }).id;
+    if (typeof id !== "string") return null;
+    return { eventType: "DELETE", new: null, old: { id } };
   }
 
   return {
@@ -91,6 +99,7 @@ export function toChangePayload(
 export function connectBoard(
   client: BoardClient,
   handlers: BoardHandlers,
+  schoolId: string | null = null,
 ): () => void {
   let closed = false;
   let refetchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -103,11 +112,19 @@ export function connectBoard(
     }, MEMBERSHIP_REFETCH_DEBOUNCE_MS);
   }
 
+  // With a school, both subscriptions carry a server-side row filter and the
+  // channel name is per school so two boards never share one channel. Deletes
+  // cannot be filtered by Postgres Changes; `reconcile` ignores ids the board
+  // does not hold. Without a school this is exactly the legacy wiring.
+  const scope = schoolId === null ? {} : { filter: `school_id=eq.${schoolId}` };
+  const channelName =
+    schoolId === null ? "display-students" : `display-students:${schoolId}`;
+
   const channel = client
-    .channel("display-students")
+    .channel(channelName)
     .on(
       "postgres_changes",
-      { event: "*", schema: "public", table: "students" },
+      { event: "*", schema: "public", table: "students", ...scope },
       (payload: RealtimePostgresChangesPayload<Student>) => {
         if (closed) return;
         const change = toChangePayload(payload);
@@ -116,7 +133,7 @@ export function connectBoard(
     )
     .on(
       "postgres_changes",
-      { event: "*", schema: "public", table: "student_classes" },
+      { event: "*", schema: "public", table: "student_classes", ...scope },
       () => {
         if (!closed) scheduleMembershipRefetch();
       },

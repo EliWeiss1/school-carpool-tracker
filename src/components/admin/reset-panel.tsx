@@ -6,26 +6,15 @@ import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { adminApi } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
-import type { UsePinSession } from "@/lib/use-pin-session";
+import { requireCredentials } from "@/lib/require-credentials";
+import { useSchoolScope, type StaffSession } from "@/lib/screen-access";
 import type { Student } from "@/types/db";
 
 export interface ResetPanelProps {
-  session: UsePinSession;
+  session: StaffSession;
   students: Student[] | null;
   /** Re-fetches the roster so the table above reflects the reset immediately. */
   onReset: () => Promise<void>;
-}
-
-function requireCredentials(session: UsePinSession) {
-  const credentials = session.credentials();
-  if (credentials === null) {
-    throw new ApiError(
-      "pin",
-      401,
-      "The staff session timed out. Enter the PIN again.",
-    );
-  }
-  return credentials;
 }
 
 /**
@@ -39,6 +28,7 @@ function requireCredentials(session: UsePinSession) {
  * (fabricated) history.
  */
 export function ResetPanel({ session, students, onReset }: ResetPanelProps) {
+  const { school } = useSchoolScope();
   const [confirming, setConfirming] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +42,7 @@ export function ResetPanel({ session, students, onReset }: ResetPanelProps) {
     setError(null);
     try {
       const outcome = await adminApi.resetAllToWaiting(
-        requireCredentials(session),
+        requireCredentials(session, school),
       );
       setResult(
         outcome.reset === 0
@@ -84,9 +74,7 @@ export function ResetPanel({ session, students, onReset }: ResetPanelProps) {
         </p>
       </div>
 
-      {result && (
-        <ErrorBanner tone="warning" message={result} />
-      )}
+      {result && <ErrorBanner tone="warning" message={result} />}
       {error && <ErrorBanner message={error} />}
 
       {!confirming ? (

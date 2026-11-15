@@ -11,7 +11,9 @@
  * Pure and dependency-free so it is unit-tested without a database.
  */
 
-import type { Student, StudentWithClasses } from "@/types/db";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import type { Database, Student, StudentWithClasses } from "@/types/db";
 
 /** The select string that fetches a student with the embed `withClassNames` reads. */
 export const STUDENT_WITH_CLASSES_SELECT =
@@ -45,4 +47,21 @@ export function withClassNames(
   );
 
   return { ...student, class_groups: classes.map((group) => group.name) };
+}
+
+/**
+ * Reads every student with their classes, through whatever client the screen
+ * was given. `schoolId` null is the legacy route and the query is exactly the
+ * unfiltered one it always was; a school id adds an explicit filter so a user
+ * who belongs to two schools (RLS shows them both) sees only this one.
+ */
+export async function fetchStudentsWithClasses(
+  client: SupabaseClient<Database>,
+  schoolId: string | null,
+): Promise<{ data: StudentWithClasses[]; error: { message: string } | null }> {
+  const base = client.from("students").select(STUDENT_WITH_CLASSES_SELECT);
+  const { data, error } = await (
+    schoolId === null ? base : base.eq("school_id", schoolId)
+  ).returns<(Student & StudentClassesEmbed)[]>();
+  return { data: (data ?? []).map(withClassNames), error };
 }

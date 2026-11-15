@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { applySnapshot, reconcile, type DisplayRoster } from "./realtime-reconcile";
+import {
+  applySnapshot,
+  reconcile,
+  type DisplayRoster,
+} from "./realtime-reconcile";
 import type { Student, StudentWithClasses } from "@/types/db";
 
 /** Minimal, valid `Student` row — only the fields a given test cares about differ. */
-function student(overrides: Partial<StudentWithClasses> & Pick<StudentWithClasses, "id">): StudentWithClasses {
+function student(
+  overrides: Partial<StudentWithClasses> & Pick<StudentWithClasses, "id">,
+): StudentWithClasses {
   return {
     first_name: "Jonah",
     last_name: "Smith",
@@ -39,7 +45,11 @@ describe("reconcile", () => {
 
   it("flashes a genuine waiting -> arrived transition", () => {
     const before: DisplayRoster = {
-      s1: student({ id: "s1", status: "waiting", updated_at: "2026-09-02T12:00:00.000Z" }),
+      s1: student({
+        id: "s1",
+        status: "waiting",
+        updated_at: "2026-09-02T12:00:00.000Z",
+      }),
     };
     const after = student({
       id: "s1",
@@ -81,7 +91,11 @@ describe("reconcile", () => {
 
   it("stays silent on an undo (arrived -> waiting)", () => {
     const before: DisplayRoster = {
-      s1: student({ id: "s1", status: "arrived", updated_at: "2026-09-02T12:05:00.000Z" }),
+      s1: student({
+        id: "s1",
+        status: "arrived",
+        updated_at: "2026-09-02T12:05:00.000Z",
+      }),
     };
     const after = student({
       id: "s1",
@@ -239,6 +253,33 @@ describe("reconcile", () => {
     expect(result.arrivals).toEqual([]);
   });
 
+  it("removes a held student on a primary-key-only DELETE without flashing", () => {
+    const before: DisplayRoster = {
+      s1: student({ id: "s1", status: "arrived" }),
+      s2: student({ id: "s2" }),
+    };
+    const result = reconcile(before, {
+      eventType: "DELETE",
+      new: null,
+      old: { id: "s1" },
+    });
+
+    expect(Object.keys(result.roster)).toEqual(["s2"]);
+    expect(result.arrivals).toEqual([]);
+  });
+
+  it("ignores a primary-key-only DELETE for an id it does not hold (another school)", () => {
+    const before: DisplayRoster = { s1: student({ id: "s1" }) };
+    const result = reconcile(before, {
+      eventType: "DELETE",
+      new: null,
+      old: { id: "elsewhere" },
+    });
+
+    expect(result.roster).toBe(before);
+    expect(result.arrivals).toEqual([]);
+  });
+
   it("no-ops a DELETE for a student it never held", () => {
     const before: DisplayRoster = {};
     const result = reconcile(before, {
@@ -260,7 +301,10 @@ describe("reconcile", () => {
 
 describe("applySnapshot", () => {
   it("seeds an empty roster from a fetch", () => {
-    const rows = [student({ id: "s1" }), student({ id: "s2", status: "arrived" })];
+    const rows = [
+      student({ id: "s1" }),
+      student({ id: "s2", status: "arrived" }),
+    ];
     const roster = applySnapshot({}, rows);
 
     expect(Object.keys(roster).sort()).toEqual(["s1", "s2"]);

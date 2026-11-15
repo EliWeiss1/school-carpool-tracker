@@ -3,13 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PadStudent } from "@/lib/class-roster";
-import {
-  STUDENT_WITH_CLASSES_SELECT,
-  type StudentClassesEmbed,
-  withClassNames,
-} from "@/lib/student-classes";
-import { getBrowserClient } from "@/lib/supabase/browser";
-import type { Student } from "@/types/db";
+import { useSchoolScope } from "@/lib/screen-access";
+import { fetchStudentsWithClasses } from "@/lib/student-classes";
 
 export interface UseClassRoster {
   roster: PadStudent[];
@@ -31,6 +26,12 @@ export interface UseClassRoster {
  * list someone is in the middle of tapping.
  */
 export function useClassRoster(): UseClassRoster {
+  const scope = useSchoolScope();
+  const schoolId = scope.school?.id ?? null;
+  // Held in a ref so a provider that rebuilds its scope object each render
+  // cannot retrigger the fetch; only a change of school does.
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   const [roster, setRoster] = useState<PadStudent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,13 +39,13 @@ export function useClassRoster(): UseClassRoster {
 
   const refresh = useCallback(async () => {
     try {
-      const { data, error: queryError } = await getBrowserClient()
-        .from("students")
-        .select(STUDENT_WITH_CLASSES_SELECT)
-        .returns<(Student & StudentClassesEmbed)[]>();
+      const { data, error: queryError } = await fetchStudentsWithClasses(
+        scopeRef.current.supabase(),
+        schoolId,
+      );
       if (!mounted.current) return;
       if (queryError) throw new Error(queryError.message);
-      setRoster((data ?? []).map(withClassNames));
+      setRoster(data);
       setError(null);
     } catch (caught: unknown) {
       if (!mounted.current) return;
@@ -56,7 +57,7 @@ export function useClassRoster(): UseClassRoster {
     } finally {
       if (mounted.current) setLoading(false);
     }
-  }, []);
+  }, [schoolId]);
 
   useEffect(() => {
     mounted.current = true;

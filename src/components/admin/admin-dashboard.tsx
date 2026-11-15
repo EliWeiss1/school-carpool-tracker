@@ -7,7 +7,8 @@ import { PageHeader } from "@/components/ui/page-header";
 import { PinGate } from "@/components/ui/pin-gate";
 import { adminApi, type RosterStudent } from "@/lib/admin-api";
 import { ApiError } from "@/lib/api";
-import { usePinSession } from "@/lib/use-pin-session";
+import { signedOutMessage } from "@/lib/require-credentials";
+import { useSchoolScope, useStaffSession } from "@/lib/screen-access";
 import { useClassGroups } from "@/lib/use-class-groups";
 import { verifyStaffPin } from "@/lib/verify-pin";
 import type { Carpool } from "@/types/db";
@@ -19,7 +20,8 @@ import { ResetPanel } from "./reset-panel";
 import { RosterManager } from "./roster-manager";
 
 /**
- * /admin's content, once the staff PIN has unlocked the tab.
+ * /admin's content, once the visitor is let in -- by the PIN gate on the
+ * legacy route, or by a school route's own gate, which mounts this directly.
  *
  * Owns the one piece of state every section below needs to agree on: the
  * current roster. The reset panel's confirmation names an exact student
@@ -27,8 +29,9 @@ import { RosterManager } from "./roster-manager";
  * fetch lives here once rather than three times in three components that
  * could drift out of sync with each other between renders.
  */
-function AdminContent() {
-  const session = usePinSession();
+export function AdminContent() {
+  const session = useStaffSession();
+  const { school } = useSchoolScope();
   const [students, setStudents] = useState<RosterStudent[] | null>(null);
   const [carpools, setCarpools] = useState<Carpool[]>([]);
   const [classMemberCounts, setClassMemberCounts] = useState<
@@ -44,7 +47,7 @@ function AdminContent() {
   const refresh = useCallback(async () => {
     const credentials = session.credentials();
     if (credentials === null) {
-      setListError("The staff session timed out. Enter the PIN again.");
+      setListError(signedOutMessage(school));
       return;
     }
 
@@ -73,7 +76,8 @@ function AdminContent() {
           : "Could not load the roster. Try again in a moment.",
       );
     }
-    // usePinSession().credentials is stable across renders (see use-pin-session.ts);
+    // credentials is stable across renders (see use-pin-session.ts; a provider's
+    // session must keep it stable too);
     // session itself is a fresh object each render, so it is deliberately not
     // a dependency, or this would refetch on every keystroke elsewhere on the page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,9 +93,11 @@ function AdminContent() {
         eyebrow="In the office"
         title="Admin"
         action={
-          <Button variant="quiet-ink" size="sm" onClick={session.lock}>
-            Lock
-          </Button>
+          session.exitLabel === null ? undefined : (
+            <Button variant="quiet-ink" size="sm" onClick={session.lock}>
+              {session.exitLabel}
+            </Button>
+          )
         }
       />
 

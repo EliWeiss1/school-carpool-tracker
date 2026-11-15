@@ -64,7 +64,13 @@ function connect() {
     onSnapshotNeeded,
     onConnectionError,
   });
-  return { fake, onStudentChange, onSnapshotNeeded, onConnectionError, disconnect };
+  return {
+    fake,
+    onStudentChange,
+    onSnapshotNeeded,
+    onConnectionError,
+    disconnect,
+  };
 }
 
 describe("connectBoard", () => {
@@ -132,6 +138,68 @@ describe("connectBoard", () => {
     disconnect();
     fake.status("SUBSCRIBED");
     expect(onSnapshotNeeded).not.toHaveBeenCalled();
+  });
+});
+
+describe("connectBoard school scoping and deletes", () => {
+  function scopedFake() {
+    const filters: Record<string, unknown>[] = [];
+    let name = "";
+    const channel = {
+      on(_t: string, filter: Record<string, unknown>) {
+        filters.push(filter);
+        return channel;
+      },
+      subscribe() {
+        return channel;
+      },
+    };
+    const client: BoardClient = {
+      channel: (n: string) => {
+        name = n;
+        return channel;
+      },
+      removeChannel: () => Promise.resolve("ok"),
+    };
+    return { client, filters, name: () => name };
+  }
+  const handlers = () => ({
+    onStudentChange: vi.fn(),
+    onSnapshotNeeded: vi.fn(),
+    onConnectionError: vi.fn(),
+  });
+
+  it("scopes the channel name and both subscriptions to a school", () => {
+    const f = scopedFake();
+    connectBoard(f.client, handlers(), "sch-1");
+    expect(f.name()).toBe("display-students:sch-1");
+    expect(f.filters.map((x) => x.filter)).toEqual([
+      "school_id=eq.sch-1",
+      "school_id=eq.sch-1",
+    ]);
+  });
+
+  it("keeps today's channel and unfiltered subscriptions without a school", () => {
+    const f = scopedFake();
+    connectBoard(f.client, handlers());
+    expect(f.name()).toBe("display-students");
+    expect(f.filters.every((x) => !("filter" in x))).toBe(true);
+  });
+
+  it("passes a live student delete (primary key only) through", () => {
+    const { fake, onStudentChange } = connect();
+    fake.fire("students", { eventType: "DELETE", new: {}, old: { id: "s1" } });
+    expect(onStudentChange).toHaveBeenCalledWith({
+      eventType: "DELETE",
+      new: null,
+      old: { id: "s1" },
+    });
+  });
+
+  it("drops a delete with no identifiable id", () => {
+    const { fake, onStudentChange } = connect();
+    fake.fire("students", { eventType: "DELETE", new: {}, old: {} });
+    expect(onStudentChange).not.toHaveBeenCalled();
   });
 });
 

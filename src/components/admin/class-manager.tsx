@@ -30,22 +30,11 @@ import {
   memberCountLabel,
   membersPayload,
 } from "@/lib/class-members";
-import type { UsePinSession } from "@/lib/use-pin-session";
+import { requireCredentials } from "@/lib/require-credentials";
+import { useSchoolScope, type StaffSession } from "@/lib/screen-access";
 
 import { ClassDeleteDialog } from "./class-delete-dialog";
 import { ClassMembersSheet } from "./class-members-sheet";
-
-function requireCredentials(session: UsePinSession) {
-  const credentials = session.credentials();
-  if (credentials === null) {
-    throw new ApiError(
-      "pin",
-      401,
-      "The staff session timed out. Enter the PIN again.",
-    );
-  }
-  return credentials;
-}
 
 // A tap-sized square: the arrows are used on a phone, where a 24px target
 // next to its twin is a coin toss. Hover/active tint keeps it a button.
@@ -56,7 +45,7 @@ const INPUT_CLASS =
   "focus-ring min-h-tap w-full rounded-xl border border-curb-300 bg-curb-50 px-3.5 text-curb-900 transition-colors duration-150 placeholder:text-curb-400 hover:border-curb-400";
 
 export interface ClassManagerProps {
-  session: UsePinSession;
+  session: StaffSession;
   classGroups: ClassGroup[];
   /** The whole roster, for the membership sheet; null until it has loaded. */
   students: RosterStudent[] | null;
@@ -92,6 +81,7 @@ export function ClassManager({
   refresh,
   refreshRoster,
 }: ClassManagerProps) {
+  const { school } = useSchoolScope();
   const [name, setName] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -114,7 +104,7 @@ export function ClassManager({
     setStatus(null);
     try {
       await adminApi.createClass({
-        ...requireCredentials(session),
+        ...requireCredentials(session, school),
         name: trimmed,
       });
       setName("");
@@ -143,7 +133,7 @@ export function ClassManager({
     setStatus(null);
     try {
       await adminApi.deleteClass({
-        ...requireCredentials(session),
+        ...requireCredentials(session, school),
         classId: classGroup.id,
         ...(choice ? deleteResolution(choice) : {}),
       });
@@ -204,7 +194,7 @@ export function ClassManager({
   ) {
     setStatus(null);
     await adminApi.changeClassMembers({
-      ...requireCredentials(session),
+      ...requireCredentials(session, school),
       ...membersPayload(classGroup.id, diff),
     });
     setMembersFor(null);
@@ -232,7 +222,7 @@ export function ClassManager({
     setStatus(null);
     try {
       await adminApi.reorderClasses({
-        ...requireCredentials(session),
+        ...requireCredentials(session, school),
         orderedIds: reordered.map((group) => group.id),
       });
       await refresh();
