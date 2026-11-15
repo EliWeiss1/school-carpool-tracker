@@ -84,7 +84,9 @@ export function ResetPanel({ session, students, onReset }: ResetPanelProps) {
         </p>
       </div>
 
-      {result && <ErrorBanner tone="warning" message={result} />}
+      {result && (
+        <ErrorBanner tone="warning" message={result} />
+      )}
       {error && <ErrorBanner message={error} />}
 
       {!confirming ? (
