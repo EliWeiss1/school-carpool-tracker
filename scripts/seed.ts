@@ -1,11 +1,14 @@
 /**
  * Loads the sample dev roster into Supabase.
  *
- *   npm run seed                  # local stack only
- *   npm run seed -- --allow-remote  # explicit opt-in for a hosted project
+ *   npm run seed                        # local stack, the original school
+ *   npm run seed -- --school oak-hill   # local stack, another school
+ *   npm run seed -- --allow-remote      # explicit opt-in for a hosted project
  *
- * This wipes `students` (and, by cascade, their class links) and
- * `status_events` before inserting, so it refuses to
+ * This wipes ONE school's `students` (and, by cascade, their class links) and
+ * `status_events` before inserting. Every delete and insert below names that
+ * school, so another school's roster is never touched, whatever the arguments.
+ * It also refuses to
  * touch anything that isn't localhost unless you say so on the command line.
  * Deleting a real school's roster because a shell had the wrong .env loaded is
  * exactly the kind of accident worth one extra flag.
@@ -15,6 +18,7 @@ import { config as loadEnv } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../src/types/db";
 import { SAMPLE_ROSTER } from "../supabase/seed/roster";
+import { parseSeedTarget } from "../supabase/seed/seed-target";
 import {
   attachInsertedIds,
   buildStudentClassLinks,
@@ -44,7 +48,9 @@ function fail(message: string): never {
 }
 
 async function main() {
-  const allowRemote = process.argv.includes("--allow-remote");
+  const target = parseSeedTarget(process.argv.slice(2));
+  if (!target.ok) fail(target.error);
+  const { allowRemote } = target;
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -59,7 +65,7 @@ async function main() {
   if (!isLocal(url) && !allowRemote) {
     fail(
       `Refusing to seed ${url} — it is not a local Supabase instance.\n` +
-        "    Seeding DELETES every student and status event first.\n" +
+        "    Seeding DELETES a school's students and status events first.\n" +
         "    If you really mean it: npm run seed -- --allow-remote",
     );
   }
@@ -68,12 +74,36 @@ async function main() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  console.log(`\n  Seeding ${url}${isLocal(url) ? " (local)" : " (REMOTE)"}`);
+  // Resolve the school before touching anything. Not found is a stop, never a
+  // fallback: the fallback would be the original school's real roster.
+  const schoolQuery = supabase.from("schools").select("id, name, slug");
+  const schoolRow = await (
+    target.school.by === "id"
+      ? schoolQuery.eq("id", target.school.id)
+      : schoolQuery.eq("slug", target.school.slug)
+  ).maybeSingle();
+  if (schoolRow.error)
+    fail(`Reading schools failed: ${schoolRow.error.message}`);
+  if (schoolRow.data === null) {
+    fail(
+      target.school.by === "slug"
+        ? `No school has the web address "${target.school.slug}".`
+        : "The original school does not exist here. Apply the migrations first.",
+    );
+  }
+  const school = schoolRow.data;
+
+  console.log(
+    `\n  Seeding ${school.name} (/s/${school.slug}) on ${url}${isLocal(url) ? " (local)" : " (REMOTE)"}`,
+  );
 
   // Classes already exist (the class_groups migration seeds them, /admin
   // edits them); seeding only links students to them. Look them up first so a
   // roster naming a missing class fails before anything is wiped or inserted.
-  const classRows = await supabase.from("class_groups").select("id, name");
+  const classRows = await supabase
+    .from("class_groups")
+    .select("id, name")
+    .eq("school_id", school.id);
   if (classRows.error)
     fail(`Reading class_groups failed: ${classRows.error.message}`);
   const classIdByName = new Map(
@@ -97,7 +127,7 @@ async function main() {
   const wipeEvents = await supabase
     .from("status_events")
     .delete()
-    .not("id", "is", null);
+    .eq("school_id", school.id);
   if (wipeEvents.error)
     fail(`Clearing status_events failed: ${wipeEvents.error.message}`);
 
@@ -105,7 +135,7 @@ async function main() {
   const wipeStudents = await supabase
     .from("students")
     .delete()
-    .not("id", "is", null);
+    .eq("school_id", school.id);
   if (wipeStudents.error)
     fail(`Clearing students failed: ${wipeStudents.error.message}`);
 
@@ -114,6 +144,8 @@ async function main() {
     .insert(
       SAMPLE_ROSTER.map(({ class_groups: _classes, ...student }) => ({
         ...student,
+        // Named on every row: the column's default is the original school.
+        school_id: school.id,
         status: "waiting" as const,
       })),
     )
@@ -125,7 +157,9 @@ async function main() {
     attachInsertedIds(SAMPLE_ROSTER, data ?? []),
     classIdByName,
   );
-  const linked = await supabase.from("student_classes").insert(links);
+  const linked = await supabase
+    .from("student_classes")
+    .insert(links.map((link) => ({ ...link, school_id: school.id })));
   if (linked.error)
     fail(`Linking students to classes failed: ${linked.error.message}`);
 
