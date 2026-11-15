@@ -1,0 +1,138 @@
+-- ROLLOUT STEP -- NOT A MIGRATION. NOT APPLIED. Kept as .sql.txt in a
+-- subfolder so neither the Supabase CLI (which only reads migrations/*.sql)
+-- nor the PGlite test harness (which only reads top-level *.sql) picks it up.
+-- Its behaviour is proven by supabase/migrations/contract-rollout.test.ts,
+-- which is the only thing that ever executes it.
+--
+-- The multi-school CONTRACT step: removes everything the expand migration
+-- (20261112120000_multi_school_expand.sql) and its successors allowed so that
+-- the old, single-school code could keep running during rollout.
+--
+-- WHEN TO RUN: once, by hand, only AFTER cutover -- when no deployed Edge
+-- Function and no page still uses the staff PIN, the public (anon) key for
+-- roster reads, the old function signatures, or the legacy nightly reset, and
+-- the 'per-school-board-reset' cron job has been seen to run.
+--
+-- IRREVERSIBLE IN EFFECT FOR OLD CLIENTS: after this, an old client that omits
+-- school_id fails instead of landing in school #1, the public key reads
+-- nothing at all, and the old RPC signatures and nightly_reset_board() are
+-- gone. Rolling back means re-creating them from the expand migration, so take
+-- a backup first. Rows are not changed.
+--
+-- PRE-CHECKS (run these first; each should give the answer in the comment):
+--
+--   -- no row without a school (the column is NOT NULL, so expect 0 for all six)
+--   select count(*) from public.students        where school_id is null;  -- 0
+--   select count(*) from public.class_groups    where school_id is null;  -- 0
+--   select count(*) from public.carpools        where school_id is null;  -- 0
+--   select count(*) from public.status_events   where school_id is null;  -- 0
+--   select count(*) from public.student_parents where school_id is null;  -- 0
+--   select count(*) from public.student_classes where school_id is null;  -- 0
+--
+--   -- every school has its secrets row (expect 0 rows)
+--   select s.id from public.schools s
+--    where not exists (select 1 from public.school_secrets k where k.school_id = s.id);
+--
+--   -- the anon policies this will drop (expect 3 rows: "legacy anon reads
+--   -- school 1 students", "... class groups", "... student classes")
+--   select tablename, policyname from pg_policies
+--    where schemaname = 'public' and 'anon' = any(roles);
+--
+--   -- the functions it expects (expect 2 old + 2 new variants of each class
+--   -- function, and both legacy reset functions)
+--   select p.proname, pg_get_function_identity_arguments(p.oid)
+--     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--    where n.nspname = 'public'
+--      and p.proname in ('set_student_classes', 'change_class_members',
+--                        'remove_class_group', 'nightly_reset_board',
+--                        'reset_board_to_waiting')
+--    order by 1, 2;
+--
+--   -- the legacy cron job (expect one row, or none if pg_cron is absent)
+--   select jobid, jobname from cron.job where jobname = 'nightly-board-reset';
+--
+-- Everything below is idempotent: running it twice changes nothing and errors
+-- on nothing. It runs as one transaction, so it applies completely or not at
+-- all. Not touched on purpose: the school_id columns, composite keys, the
+-- authenticated policies, private.current_school_ids(), the p_school_id
+-- functions, reset_school_board(), run_due_board_resets() and its cron jobs.
+
+begin;
+
+-- Same courtesy as the expand migration: if a table is busy, give up and roll
+-- back rather than queue every read behind this. Apply outside pickup hours.
+set local lock_timeout = '5s';
+
+-- ---------------------------------------------------------------------------
+-- 1. school_id has no default: an insert that omits it now fails (23502)
+-- ---------------------------------------------------------------------------
+
+alter table public.students        alter column school_id drop default;
+alter table public.class_groups    alter column school_id drop default;
+alter table public.carpools        alter column school_id drop default;
+alter table public.status_events   alter column school_id drop default;
+alter table public.student_parents alter column school_id drop default;
+alter table public.student_classes alter column school_id drop default;
+
+-- ---------------------------------------------------------------------------
+-- 2. The public key reads nothing
+-- ---------------------------------------------------------------------------
+
+-- Every policy on the three tables that applies to anon, by lookup rather than
+-- by name, so a renamed or extra legacy policy cannot survive. The
+-- authenticated policies ("members and devices read ...") are left alone.
+do $contract$
+declare
+  p record;
+begin
+  for p in
+    select schemaname, tablename, policyname
+      from pg_policies
+     where schemaname = 'public'
+       and tablename in ('students', 'class_groups', 'student_classes')
+       and 'anon' = any (roles)
+  loop
+    execute format('drop policy if exists %I on %I.%I',
+                   p.policyname, p.schemaname, p.tablename);
+  end loop;
+end
+$contract$;
+
+revoke all on public.students        from anon;
+revoke all on public.class_groups    from anon;
+revoke all on public.student_classes from anon;
+
+-- ---------------------------------------------------------------------------
+-- 3. The old, schoolless function signatures are gone
+-- ---------------------------------------------------------------------------
+
+drop function if exists public.set_student_classes(uuid, uuid[]);
+drop function if exists public.change_class_members(uuid, uuid[], uuid[]);
+drop function if exists public.remove_class_group(uuid, uuid, boolean);
+
+-- ---------------------------------------------------------------------------
+-- 4. The legacy nightly reset
+-- ---------------------------------------------------------------------------
+
+-- Unschedule first, so nothing is left calling a function that no longer
+-- exists. Guarded like the migrations that created the job: pg_cron may be
+-- absent (local PGlite) or installed without the job.
+do $unschedule$
+begin
+  -- Nested, not "and": Postgres plans a whole condition at once, so naming
+  -- cron.job beside the extension test would fail where pg_cron is absent.
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    if exists (select 1 from cron.job where jobname = 'nightly-board-reset') then
+      perform cron.unschedule('nightly-board-reset');
+    end if;
+  end if;
+end
+$unschedule$;
+
+-- nightly_reset_board() is the only caller of reset_board_to_waiting(), which
+-- resets EVERY school's board with no school filter, so it goes too. The
+-- per-school equivalents (reset_school_board, run_due_board_resets) remain.
+drop function if exists public.nightly_reset_board(timestamptz);
+drop function if exists public.reset_board_to_waiting();
+
+commit;
