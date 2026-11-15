@@ -136,7 +136,7 @@ describe("createTokenHandler", () => {
 
       const response = await handler({ usage, mintToken })(post(body));
 
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(409);
       await expect(response.json()).resolves.toEqual({
         error:
           "Voice is used up for this month. Type the name instead; the office can raise the limit.",
@@ -153,7 +153,7 @@ describe("createTokenHandler", () => {
 
       const response = await handler({ usage, mintToken })(post(body));
 
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(409);
       await expect(response.json()).resolves.toEqual({
         error: "Voice is turned off for this school. Type the name instead.",
       });
@@ -167,7 +167,7 @@ describe("createTokenHandler", () => {
 
       expect((await h(post(body))).status).toBe(200);
       expect((await h(post(body))).status).toBe(200);
-      expect((await h(post(body))).status).toBe(403);
+      expect((await h(post(body))).status).toBe(409);
     });
 
     it("fails closed when the counter cannot be reached", async () => {
@@ -199,7 +199,7 @@ describe("createTokenHandler", () => {
       const response = await handler({ usage })(post(body));
 
       expect(usage.claims).toHaveLength(1);
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(409);
     });
   });
 });

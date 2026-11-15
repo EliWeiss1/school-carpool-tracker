@@ -3,12 +3,13 @@
 --
 -- Expand-style: nothing here changes or removes anything the running code or
 -- today's cron job uses. The legacy job ('nightly-board-reset', which calls
--- nightly_reset_board()) keeps running untouched; the new hourly job is guarded
--- by schools.last_reset_on, so both firing in the same hour only resets once
--- (the legacy one resets, the new one then finds nothing arrived, and a second
--- reset of an empty board is a no-op). The switch-over -- unscheduling the
--- legacy job -- is a rollout step, kept out of this file on purpose:
--- _rollout/unschedule_legacy_nightly_reset.sql.txt.
+-- nightly_reset_board()) keeps running, confined to the original school (see
+-- the last section of this file: left as it was, it would fail the first
+-- evening a second school had a child marked arrived). The new hourly job is
+-- guarded by schools.last_reset_on, so both firing in the same hour resets the
+-- original school once: whichever runs second finds nothing arrived. The
+-- switch-over -- unscheduling the legacy job -- is a rollout step, kept out of
+-- this file on purpose: _rollout/unschedule_legacy_nightly_reset.sql.txt.
 --
 -- Every function below is security definer with an empty search_path and fully
 -- qualified names, revoked from public/anon/authenticated and granted to
@@ -79,13 +80,18 @@ declare
   students_done integer := 0;
   moved integer;
 begin
-  -- skip locked: a second run that overlaps this one passes over any school
-  -- the first is still handling instead of waiting behind it and repeating it.
+  -- `for no key update`, and no `skip locked`. The weaker lock is all this
+  -- needs (it changes last_reset_on, never the key) and, unlike `for update`,
+  -- it does not conflict with the key-share lock every insert that references
+  -- a school takes: an announcement being logged at minute 0. With
+  -- `skip locked` on the stronger lock, such an insert made the reset pass
+  -- over that school for the whole day. An overlapping second run now waits
+  -- its turn instead, and the last_reset_on claim below makes it a no-op.
   for s in
     select id, timezone, reset_hour, reset_days
       from public.schools
      order by id
-       for update skip locked
+       for no key update
   loop
     -- One school's bad data (an unknown time zone) must not stop the others.
     -- The block is a subtransaction: a failure undoes that school's partial work.
@@ -304,3 +310,50 @@ begin
   end if;
 end
 $schedule$;
+
+-- ---------------------------------------------------------------------------
+-- The legacy reset, confined to the original school
+-- ---------------------------------------------------------------------------
+--
+-- reset_board_to_waiting() was written when there was one school: it reset
+-- EVERY arrived student and logged each under status_events' default school.
+-- The legacy cron job still calls it (through nightly_reset_board()) until the
+-- cutover, and left as it was it would do two wrong things the first evening a
+-- second school had a child marked arrived: reach into that school's board at
+-- 8 PM Pacific, and then fail on the composite foreign key (a student of school
+-- B cannot have an audit row filed under school A), rolling back the original
+-- school's reset with it.
+--
+-- So it is redefined here to mean what it always meant in practice: the
+-- original school. Same name, signature, return value and audit rows, so the
+-- job, the year-long replay and every existing caller behave exactly as
+-- before. It is dropped with the rest of the scaffolding at cutover.
+
+create or replace function public.reset_board_to_waiting()
+returns integer
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  legacy_school constant uuid := '00000000-0000-4000-8000-000000000001';
+  moved integer;
+begin
+  with reset as (
+    update public.students
+       set status = 'waiting'
+     where status = 'arrived'
+       and school_id = legacy_school
+    returning id
+  ), logged as (
+    insert into public.status_events (school_id, student_id, changed_to, source)
+    select legacy_school, id, 'waiting', 'admin' from reset
+  )
+  select count(*) into moved from reset;
+
+  return moved;
+end;
+$$;
+
+comment on function public.reset_board_to_waiting() is
+  'Legacy, rollout only: sets the ORIGINAL school''s arrived students back to waiting and writes one admin audit row each. Other schools reset through run_due_board_resets(). Dropped at cutover.';

@@ -343,6 +343,29 @@ describe("year-long replay against the legacy nightly job", () => {
   }, 180_000);
 });
 
+describe("the legacy nightly job once a second school exists", () => {
+  // Between applying this migration and the cutover, the old job is still
+  // scheduled. It was written when there was one school: it reset every
+  // arrived student and logged each under the default school, which fails
+  // outright the first evening another school has a child marked arrived.
+  it("still resets the original school and leaves the other school alone", async () => {
+    const other = await newSchool({ resetHour: 7, resetDays: [3] });
+    const mine = await addStudent(SCHOOL_1, "arrived");
+    const theirs = await addStudent(other, "arrived");
+    const auditBefore = await auditCount(SCHOOL_1);
+
+    // 8 PM Pacific on Monday 16 November 2026 is 04:00 UTC on the 17th.
+    await db.query("select public.nightly_reset_board($1)", [
+      "2026-11-17T04:00:00Z",
+    ]);
+
+    expect(await statusOf(mine)).toBe("waiting");
+    expect(await auditCount(SCHOOL_1)).toBe(auditBefore + 1);
+    expect(await statusOf(theirs)).toBe("arrived");
+    expect(await auditCount(other)).toBe(0);
+  });
+});
+
 describe("claim_voice_session", () => {
   const NOW = "2026-11-14T12:00:00Z";
   const claim = (id: string, now = NOW) =>

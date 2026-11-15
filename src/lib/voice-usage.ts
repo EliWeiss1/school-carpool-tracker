@@ -16,8 +16,13 @@ export interface VoiceUsage {
 
 const count = new Intl.NumberFormat("en-US");
 
-function announcements(n: number): string {
-  return `${count.format(n)} voice ${n === 1 ? "announcement" : "announcements"}`;
+/**
+ * "Sessions", not "announcements": one session is opened when the microphone
+ * is first used and covers several names, so the count is lower than the
+ * number of children called by voice. The month is the calendar month in UTC.
+ */
+function sessions(n: number): string {
+  return `${count.format(n)} voice ${n === 1 ? "session" : "sessions"}`;
 }
 
 export function voiceUsageSentence(usage: VoiceUsage): string {
@@ -25,10 +30,10 @@ export function voiceUsageSentence(usage: VoiceUsage): string {
     return "Voice is turned off for this school. Typing a name still works.";
   }
   if (usage.limit === null) {
-    return `${announcements(usage.used)} this month. No monthly limit.`;
+    return `${sessions(usage.used)} this month. No monthly limit.`;
   }
   if (usage.used >= usage.limit) {
-    return `All ${announcements(usage.limit)} for this month are used. Typing a name still works.`;
+    return `All ${sessions(usage.limit)} for this month are used. Typing a name still works.`;
   }
-  return `${count.format(usage.used)} of ${announcements(usage.limit)} used this month.`;
+  return `${count.format(usage.used)} of ${sessions(usage.limit)} used this month.`;
 }

@@ -3,7 +3,8 @@
  *
  *   npm run seed                        # local stack, the original school
  *   npm run seed -- --school oak-hill   # local stack, another school
- *   npm run seed -- --allow-remote      # explicit opt-in for a hosted project
+ *   npm run seed -- --allow-remote --school oak-hill   # a hosted project:
+ *                                       # the school must be named
  *
  * This wipes ONE school's `students` (and, by cascade, their class links) and
  * `status_events` before inserting. Every delete and insert below names that
@@ -66,7 +67,7 @@ async function main() {
     fail(
       `Refusing to seed ${url} — it is not a local Supabase instance.\n` +
         "    Seeding DELETES a school's students and status events first.\n" +
-        "    If you really mean it: npm run seed -- --allow-remote",
+        "    If you really mean it: npm run seed -- --allow-remote --school <web address>",
     );
   }
 

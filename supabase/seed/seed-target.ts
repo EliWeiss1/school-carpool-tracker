@@ -29,6 +29,13 @@ export function parseSeedTarget(argv: readonly string[]): SeedTarget {
     else if (arg.startsWith("--school=")) named.push(arg.slice(9));
   });
 
+  if (named.length === 0 && allowRemote) {
+    return {
+      ok: false,
+      error:
+        "On a hosted project, name the school to wipe and refill: --school <web address>.",
+    };
+  }
   if (named.length === 0) {
     return {
       ok: true,

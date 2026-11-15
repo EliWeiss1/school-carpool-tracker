@@ -67,7 +67,11 @@ export function createTokenHandler(deps: TokenHandlerDeps) {
         );
       }
       if (!claim.allowed) {
-        return errorResponse(403, REFUSED_MESSAGE[claim.reason]);
+        // 409, never 401 or 403. Those two mean "your sign-in is no good", and
+        // the screens act on that: the office is signed out, a phone goes back
+        // to the code prompt. Nothing is wrong with the caller here; voice is
+        // simply not available, and typing a name still works.
+        return errorResponse(409, REFUSED_MESSAGE[claim.reason]);
       }
 
       let token: DeepgramToken;

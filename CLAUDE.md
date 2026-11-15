@@ -237,12 +237,15 @@ describes production truthfully until the cutover in phase 7.
   cutover (`migrations/_rollout/unschedule_legacy_nightly_reset.sql.txt`).
   `claim_voice_session()` counts voice sessions per school per calendar month
   (UTC) in one statement and refuses at the school's limit; `deepgram-token`
-  claims before minting, answers 403 with a sentence when refused (the curb
+  claims before minting, answers 409 with a sentence when refused (never 401
+  or 403, which the screens read as "your sign-in is no good"; the curb
   screen falls back to typing), and fails closed if the counter is
   unreachable. `delete_stale_anonymous_users()` removes device sessions that
   never paired, daily.
 - **`npm run seed` is per school**: the original school by default, or
-  `--school <web address>`; every delete and insert names the school.
+  `--school <web address>`; every delete and insert names the school. On a
+  hosted project (`--allow-remote`) the school must be named: the unnamed
+  default is the original school, with real children in it.
 - **`supabase/migrations/_rollout/`** holds SQL that is deliberately NOT
   applied by the migration runner or the tests' loader (`.sql.txt`): the
   statements to run by hand at cutover.

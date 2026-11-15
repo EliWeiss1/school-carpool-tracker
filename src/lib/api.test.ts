@@ -225,6 +225,22 @@ describe("errors staff have to read", () => {
     );
   }
 
+  it("does not treat a voice refusal as a sign-in failure", async () => {
+    // deepgram-token answers 409 when a school's voice is off or used up for
+    // the month. If this ever read as `needsPin`, the curb screen would give
+    // up its session: sign the office out, or drop a phone to the code prompt.
+    const sentence = "Voice is used up for this month. Type the name instead.";
+    const { client } = clientReturning(jsonResponse({ error: sentence }, 409));
+
+    const error = await client
+      .requestToken({ ...CREDENTIALS })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).needsPin).toBe(false);
+    expect((error as ApiError).message).toBe(sentence);
+  });
+
   it("honours retry-after on a 429", async () => {
     const { client } = clientReturning(
       jsonResponse({ error: "Too many." }, 429, { "retry-after": "45" }),
