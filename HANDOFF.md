@@ -1223,3 +1223,160 @@ substitute for the reconciliation a re-run would have pretended to do.
   operation.
 - The brief inconsistency window between steps 1 and 2 is accepted for a
   single-building roster; the mismatch check exists to catch its leftovers.
+
+## 14. Multi-school conversion (built on `preview/multi-school`, NOT deployed)
+
+Everything in sections 1 to 13 describes the live, single-school product and
+is still true in production. This section describes a branch.
+
+### What it is
+
+The owner wants to offer the app to other schools. The branch
+`preview/multi-school` (cut from `master` at `bf4baff`) turns it into a
+multi-tenant service: a public landing page, one office account per school,
+devices that connect with a code, and every school's data kept apart. The
+approved design is `docs/superpowers/specs/2026-11-12-multi-school-design.md`;
+the durable summary is the "Multi-school conversion" section of `CLAUDE.md`.
+Phases 0 to 6 of that design are built. **Phase 7, the rollout, has not
+started, and nothing here has touched the live database, the deployed
+functions or `master`.** Vercel builds the branch as a preview deployment
+only.
+
+### Decisions the owner made
+
+- One email and password per school for the office; sharing it across office
+  computers is fine. Separate invited accounts later.
+- Curb phones and wall boards have no accounts. The office sets a short code
+  (one for announcing, one for the board, or the same for both); a device
+  enters it once and stays connected until the office disconnects it or
+  changes the code and chooses to disconnect.
+- Instant self-serve sign-up, so each school has a monthly voice limit (all
+  schools share one Deepgram key).
+- Landing page says "Free during early access"; no pricing.
+
+### How it holds together
+
+- **Database.** `schools`, `school_secrets` (codes; no client access),
+  `school_members`, `school_devices`, `school_usage`, `school_pair_attempts`.
+  `school_id` on the six data tables with composite `(school_id, id)` foreign
+  keys, so a cross-school link cannot exist. Existing rows are school #1
+  (`00000000-0000-4000-8000-000000000001`).
+- **Reads** go through row-level security: a signed-in caller sees the schools
+  they are a member or a paired device of.
+- **Writes** go through the Edge Functions. `guard.ts` turns a Supabase access
+  token plus `schoolId` into a checked school and capability; the roster store
+  is built per school and reaches the database only through
+  `scoped-client.ts`, which filters and stamps the school on every query.
+- **Screens.** The three screens are one implementation behind
+  `lib/screen-access.tsx`; legacy routes (`/announce`, `/display`, `/admin`)
+  fall back to the staff PIN, school routes (`/s/<school>/...`) get a provider
+  from the gate.
+
+### What is proven and what is not
+
+Proven by tests that run in `npm test` (PGlite for the database, Vitest for
+handlers and browser logic): the schema, RLS for members, devices and the
+public key, the school functions, pairing limits, the per-school reset
+(including a replay of a full year against the old job), the voice cap, the
+guard, tenant isolation through every endpoint against two identically named
+schools, and the gate's decisions. The security-critical rules were
+mutation-checked: each was broken on purpose to confirm a test fails.
+
+**Not proven, because this machine has no Deno, no Docker and no test
+project:**
+
+- Every `*.deno.ts` file and every `index.ts` entrypoint has never executed.
+- PostgREST behaviour the code relies on: resolving the `p_school_id`
+  function overloads by parameter name, the `student_parents` embed staying
+  one-to-one, `onConflict: "school_id,student_id"`.
+- Sign-up, email confirmation, login, password reset, anonymous sign-in and
+  device pairing against a real Auth server.
+- The school-filtered live board against real Realtime, including what
+  happens to a board left open for days when its token refreshes.
+- `pg_cron` schedules, and real concurrency (PGlite is one connection).
+- Which `X-Forwarded-For` hop is the client's address on Supabase; the
+  per-network guessing budgets depend on it.
+- PGlite is Postgres 18; the hosted project is 17.
+
+The first step of the rollout is therefore a test project, not production.
+
+### Found along the way
+
+- **A weakness that is live today.** The wrong-PIN budget was read, then the
+  PIN was verified (which awaits), then the budget was charged. Wrong PINs
+  sent in parallel all read an untouched budget: 50 at once were all judged
+  against a limit of 10. Fixed on the branch (charge first, hand back on
+  success). **The functions deployed in production still have it** until they
+  are redeployed from this branch or the fix is backported to `master`.
+- **A live-board bug, also live today.** A student deleted in the office is
+  never removed from an open board, because the delete event carries only the
+  id and the handler discarded it. Fixed on the branch.
+- A Vercel preview build failed once inside `next/font`: Google Fonts returned
+  one font address with no file extension, which the loader cannot parse. The
+  same commit built locally and the next push built on Vercel. Not a code
+  problem; if it recurs, redeploy. Self-hosting the fonts with
+  `next/font/local` would remove the dependency.
+
+### Rollout runbook (each step needs the owner's go-ahead)
+
+0. **Test project first.** Create a free Supabase project (or a branch if the
+   plan allows). Apply every migration, deploy all twelve functions, set
+   `MOCK_SPEECH=true`, enable anonymous sign-ins, point a Vercel preview at
+   it. Sign up, create two schools, import a roster, set codes, pair a phone
+   and a screen, announce, watch the board, disconnect a device, hit the voice
+   cap, and try to cross from one school to the other with the app, the
+   public key and a device session. Log `X-Forwarded-For` once. Fix what this
+   finds before touching production.
+1. **Back up production** (the roster and `status_events`), outside the repo.
+2. **Apply the expand migrations** to production
+   (`20261112120000`, `20261113120000`, `20261114120000`). They are written to
+   be safe while today's code keeps running: `school_id` defaults to school
+   #1, the public key still reads school #1, the old function signatures
+   remain. Check the live board still updates and `/admin` still loads.
+3. **Deploy the functions** from this branch (the ten existing ones plus
+   `pair-device` and `school-write`). They accept both the staff PIN (school
+   #1) and sessions. Re-run the existing live checks from sections 2 and 13.
+4. **Dashboard settings**: anonymous sign-ins on (and raise their hourly
+   limit); email confirmation on; an email provider (the built-in mailer sends
+   only a few messages an hour); session time-box and inactivity timeout OFF
+   (either would sign out every wall board); Turnstile keys if used.
+5. **Merge the frontend.** New routes appear alongside the old ones; nothing
+   the existing school uses changes.
+6. **Move the existing school.** The owner signs up; attach that account to
+   school #1 as owner (one `school_members` insert), rename the school and
+   its web address (it is "My School" / `my-school` until then), set codes,
+   and re-pair each phone and screen on `/s/<school>/...`.
+7. **Cutover**, when nothing uses the old routes: redirect `/announce`,
+   `/display`, `/admin` to the school routes; unset `STAFF_PIN` and
+   `DISPLAY_PASSWORD`; run
+   `supabase/migrations/_rollout/unschedule_legacy_nightly_reset.sql.txt` and
+   then the contract step in the same folder; delete `pin.ts`,
+   `pin-session.ts`, `verify-pin.ts`, `pin-gate.tsx`, `pin-budget.test.ts`,
+   the display-auth pieces and the legacy fallbacks in `screen-access.tsx` and
+   `guard.ts`; update `CLAUDE.md`.
+8. **Only then** open sign-ups to other schools.
+
+Rollback before step 7 is reverting the frontend and redeploying the old
+functions; the expand migrations are harmless to leave in place.
+
+### Still needed from the owner
+
+- A name and web address for the existing school.
+- A domain, and an email-sending provider.
+- Cloudflare Turnstile keys (optional but recommended before public sign-up).
+- A decision on Supabase Pro (a free project can pause after a quiet week,
+  such as a school holiday, and has no downloadable backups).
+- The default monthly voice limit (1,000 sessions per school is the
+  placeholder; the existing school has none).
+- A privacy policy and terms: this is children's data.
+- Real testimonials for the landing page; the three there are stand-ins
+  attributed to "Name to come".
+
+### Housekeeping
+
+- The work lives in a separate worktree,
+  `C:/Users/eliis/AI_Projects/School_Carpool_Tracker-multischool`, with a
+  git-ignored ledger of every judgment call at
+  `.superpowers/sdd/right-now-the-site-shimmying-prism/progress.md`.
+- That worktree has a copy of `.env.local` (git-ignored) so its dev server can
+  run; delete it when the preview work ends.

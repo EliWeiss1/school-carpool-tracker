@@ -111,7 +111,7 @@ defensive fix on its own merits. See `HANDOFF.md` for the full account.
 
 The app is being converted from one school to a service many schools sign up
 for. The approved design and phase list is
-`docs/superpowers/specs/2026-11-12-multi-school-design.md`. **Phases 0 to 4 are
+`docs/superpowers/specs/2026-11-12-multi-school-design.md`. **Phases 0 to 6 are
 built on this branch. None of it is applied to the live database, deployed as
 a function, or merged to `master`.** Everything below this section still
 describes production truthfully until the cutover in phase 7.
@@ -189,19 +189,80 @@ describes production truthfully until the cutover in phase 7.
 - `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (optional): shows a Cloudflare Turnstile
   widget on sign-up, login and forgot-password when set.
 
+- **One contract for the three screens** (`lib/screen-access.tsx`). A screen
+  calls `useStaffSession()` for the credentials an Edge Function call needs and
+  `useSchoolScope()` for the school, the Supabase client to read through, and
+  per-school storage keys. On the legacy routes no provider is mounted and
+  both fall back to exactly the old behaviour (staff PIN, public key, one
+  school, unprefixed keys). On a school route the gate mounts
+  `ScreenAccessProvider`. **A screen never asks which kind of route it is on**,
+  which is what lets the legacy fallback be deleted at cutover without
+  touching the screens. `session.exitLabel` is the header control's words
+  ("Lock", "Sign out") or null for a paired device, which gets no such
+  control.
+- **School routes**: `/s/[school]` (hub), `/s/[school]/announce`,
+  `/s/[school]/display`, `/s/[school]/admin`. The server page looks for an
+  office membership; otherwise `components/school/school-gate.tsx` resolves the
+  device's session and either mounts the screen or shows the code prompt
+  (`code-gate.tsx`). The decision is pure (`lib/school-access.ts`): the office
+  screen never accepts a device, and a device connected for the board that
+  opens announce is asked for the announce code. **The code prompt never
+  names the school**: a slug that does not exist and one this device is not
+  connected to look identical. `/app` sends an office user to their school
+  and a device to the last school it used (`carpoolcaller-last-school`).
+- **Tokens** (`lib/session-token.ts`, `lib/use-school-session.ts`): the access
+  token is kept in a small store fed by Supabase's auth events and handed out
+  synchronously by `credentials()`, never put in React state. `lock()` signs
+  an office user out; for a device it only re-checks access, so a disconnected
+  device lands on the code prompt and a passing 401 does not wipe the screen.
+- **Reads and the live board are filtered by school** when a school is set
+  (`.eq("school_id", …)`; the Postgres Changes subscriptions carry
+  `filter: "school_id=eq.<id>"` on channel `display-students:<id>`). Postgres
+  Changes cannot filter DELETE events and they carry only the id, so a delete
+  for an id the board holds removes the tile (no flash, no chime) and a delete
+  for an unknown id, which may be another school's, is ignored. This also
+  fixed an old bug: a student removed in the office used to stay on an open
+  board until reload. Database Broadcast on private per-school topics is the
+  planned replacement and needs a spike on a real project first.
+- **Office panels** (`components/admin/school/`, shown on a school route
+  only): a getting-started list, Devices (the school's link, the two codes
+  with "Change code" vs "Change code and disconnect its devices", "Turn off",
+  the connected devices with Disconnect), this month's voice use, and School
+  settings (name, time zone, nightly reset hour and evenings).
+- **Per-school behaviour** (`20261114120000_per_school_behaviour.sql`):
+  `run_due_board_resets()` runs hourly and resets each school at its own local
+  hour on its own evenings, guarded by `last_reset_on`; a test replays every
+  hour of a year across both clock changes and shows school #1 fires on
+  exactly the hours the old job does. The old job is left scheduled until
+  cutover (`migrations/_rollout/unschedule_legacy_nightly_reset.sql.txt`).
+  `claim_voice_session()` counts voice sessions per school per calendar month
+  (UTC) in one statement and refuses at the school's limit; `deepgram-token`
+  claims before minting, answers 403 with a sentence when refused (the curb
+  screen falls back to typing), and fails closed if the counter is
+  unreachable. `delete_stale_anonymous_users()` removes device sessions that
+  never paired, daily.
+- **`npm run seed` is per school**: the original school by default, or
+  `--school <web address>`; every delete and insert names the school.
+- **`supabase/migrations/_rollout/`** holds SQL that is deliberately NOT
+  applied by the migration runner or the tests' loader (`.sql.txt`): the
+  statements to run by hand at cutover.
+
 **What does not exist yet**
 
-- Phase 5: `/s/[school]/announce`, `/display`, `/admin`, the device code gate,
-  the Devices and School settings panels, and the live board on per-school
-  Broadcast topics. The hub's three links lead nowhere until then.
-- Phase 6: per-school nightly reset and voice caps.
-- Phase 7: rollout, cutover, and removing the PIN and `DISPLAY_PASSWORD`.
+- Phase 7: applying any of this to the live project, moving the existing
+  school onto its school routes, cutover, the contract step, and removing the
+  PIN and `DISPLAY_PASSWORD` code. Each step needs the owner's go-ahead. See
+  `HANDOFF.md` section 14 for the runbook.
+- Separate invited office accounts, billing, a platform-owner dashboard.
 
 **Not yet proven.** No Deno and no Docker on this machine, so
 `supabase-store.deno.ts`, `access-store.deno.ts`, `school-store.deno.ts` and
 the entrypoints have never run; their scoping rests on reading, the static
-tests and PGlite. Nothing in the auth pages has run against a real Auth
-server. Both need a Supabase test branch or the rollout to confirm.
+tests and PGlite. Nothing in the auth pages, the school gate or the device
+pairing flow has run against a real Auth server, and the school-filtered live
+board has only run against a fake client. `pg_cron` schedules and true
+database concurrency cannot run in PGlite. All of it needs a Supabase test
+project or the rollout to confirm.
 
 **Rule that changes at cutover.** "The staff PIN is held in memory only"
 becomes "no code or password is ever stored on a device; a device holds only a
