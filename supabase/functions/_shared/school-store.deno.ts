@@ -16,8 +16,8 @@ import type {
   CodeTarget,
   CreateSchoolOutcome,
   DeviceSummary,
-  PairDeviceInput,
-  PairingTarget,
+  AttemptPairingInput,
+  AttemptPairingOutcome,
   SchoolCodes,
   SchoolSettings,
   SchoolStore,
@@ -170,62 +170,38 @@ export function createSchoolStore(env: FunctionEnv): SchoolStore {
       return removed[0]?.user_id ?? null;
     },
 
-    async findSchoolForPairing(slug: string): Promise<PairingTarget | null> {
-      const school = await client
-        .from("schools")
-        .select("id, name, slug")
-        .eq("slug", slug)
-        .maybeSingle();
-      if (school.error) throw school.error;
-      if (!school.data) return null;
-      const { id, name } = school.data as { id: string; name: string };
-
-      const secrets = await client
-        .from("school_secrets")
-        .select("announce_code, display_code, locked_until")
-        .eq("school_id", id)
-        .maybeSingle();
-      if (secrets.error) throw secrets.error;
-      const row = secrets.data as {
-        announce_code: string | null;
-        display_code: string | null;
-        locked_until: string | null;
-      } | null;
-
-      return {
-        id,
-        name,
-        slug,
-        announceCode: row?.announce_code ?? null,
-        displayCode: row?.display_code ?? null,
-        lockedUntil: row?.locked_until ?? null,
-      };
-    },
-
-    async notePairFailure(schoolId: string) {
-      const { data, error } = await client.rpc("note_pair_failure", {
-        p_school_id: schoolId,
-      });
-      if (error) throw error;
-      const result = data as {
-        failed_attempts: number;
-        locked_until: string | null;
-      };
-      return {
-        failedAttempts: result.failed_attempts,
-        lockedUntil: result.locked_until,
-      };
-    },
-
-    async pairDevice(input: PairDeviceInput): Promise<void> {
-      const { error } = await client.rpc("pair_device", {
-        p_school_id: input.schoolId,
+    async attemptPairing(
+      input: AttemptPairingInput,
+    ): Promise<AttemptPairingOutcome> {
+      const { data, error } = await client.rpc("attempt_pairing", {
+        p_slug: input.schoolSlug,
+        p_code: input.code,
         p_user_id: input.userId,
-        p_can_announce: input.canAnnounce,
-        p_can_display: input.canDisplay,
         p_label: input.label,
+        p_client_ip: input.clientIp,
       });
       if (error) throw error;
+      const result = data as
+        | {
+            status: "paired";
+            school: { id: string; name: string; slug: string };
+            can_announce: boolean;
+            can_display: boolean;
+          }
+        | { status: "refused" }
+        | { status: "locked"; locked_until: string };
+      if (result.status === "paired") {
+        return {
+          status: "paired",
+          school: result.school,
+          canAnnounce: result.can_announce,
+          canDisplay: result.can_display,
+        };
+      }
+      if (result.status === "locked") {
+        return { status: "locked", lockedUntil: result.locked_until };
+      }
+      return { status: "refused" };
     },
 
     async deleteDeviceUsers(userIds: string[]): Promise<number> {

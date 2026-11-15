@@ -5,21 +5,24 @@
  * the one place that session gains access to anything. The office set two short
  * codes (announce, display; they may be equal) and a device proves it holds one.
  *
- * The code is a short secret typed by hand, so everything here is built so that
- * guessing it is slow and learns nothing:
+ * The code is a short secret typed by hand, so guessing it must be slow, and
+ * must learn nothing:
  *
+ * - The per-IP budget is *charged up front* and handed back (`forgive`) only
+ *   when the code turns out to be right. Checking first and charging after the
+ *   slow part would let a burst of parallel guesses all slip in under the limit.
+ * - Everything else -- finding the school, the school's and the address's
+ *   lockouts, comparing the code, counting a failure, recording the device --
+ *   is one atomic database step (`attemptPairing`). It runs under a row lock on
+ *   the school, so parallel guesses are counted one at a time, and a device
+ *   cannot be paired with a code the office has just replaced.
  * - Every way of failing (unknown school, malformed slug or code, wrong code)
- *   is the same 403 with the same words, and every one spends the caller's
- *   per-IP budget. An unknown school still runs a comparison, so the response
- *   time does not separate "no such school" from "wrong code".
- * - Wrong codes are also counted per school in the database, and ten in ten
- *   minutes lock that school's *new pairings* for fifteen. A lockout never
- *   touches a device that is already connected.
+ *   is the same 403 with the same words, and the budget stays spent.
  *
  * The staff PIN has no way in here: this uses `authenticateRequest` only.
  */
 
-import { deviceCodeMatches, isValidDeviceCode } from "../device-code.ts";
+import { isValidDeviceCode, normalizeDeviceCode } from "../device-code.ts";
 import {
   errorResponse,
   jsonResponse,
@@ -33,16 +36,14 @@ import type { SchoolStore } from "../school-ports.ts";
 import { type AuthDeps, authenticateRequest, clientIpOf } from "./guard.ts";
 
 export interface PairDeviceHandlerDeps extends AuthDeps {
-  schools: Pick<
-    SchoolStore,
-    "findSchoolForPairing" | "notePairFailure" | "pairDevice"
-  >;
+  schools: Pick<SchoolStore, "attemptPairing">;
   /**
-   * Wrong-code budget, keyed on client IP and spent only on a wrong code.
-   * Required: an endpoint that forgot it would allow unlimited guessing.
+   * Wrong-code budget, keyed on client IP. Charged on every attempt and handed
+   * back on success. Required: an endpoint that forgot it would allow
+   * unlimited guessing.
    */
   codeAttemptLimiter: RateLimiter;
-  /** Injectable clock (ms) for the lockout comparison. */
+  /** Injectable clock (ms), for the retry-after of a locked answer. */
   now?: () => number;
 }
 
@@ -71,7 +72,7 @@ export function createPairDeviceHandler(deps: PairDeviceHandlerDeps) {
     if (!label.ok) return errorResponse(400, label.error);
 
     const clientIp = clientIpOf(request);
-    const budget = deps.codeAttemptLimiter.peek(clientIp);
+    const budget = deps.codeAttemptLimiter.check(clientIp);
     if (!budget.allowed) {
       return errorResponse(
         429,
@@ -80,63 +81,40 @@ export function createPairDeviceHandler(deps: PairDeviceHandlerDeps) {
       );
     }
 
-    const refuse = () => {
-      deps.codeAttemptLimiter.check(clientIp);
-      return errorResponse(403, NOT_RECOGNISED);
-    };
-
     const slug = readSlug(auth.body.schoolSlug);
     const rawCode = readString(auth.body, "code");
-    const codeIsUsable = rawCode !== null && isValidDeviceCode(rawCode);
-    const code = codeIsUsable ? rawCode : "";
+    if (!slug.ok || rawCode === null || !isValidDeviceCode(rawCode)) {
+      return errorResponse(403, NOT_RECOGNISED);
+    }
 
     return await withStoreErrors(async () => {
-      const school = slug.ok
-        ? await deps.schools.findSchoolForPairing(slug.value)
-        : null;
+      const outcome = await deps.schools.attemptPairing({
+        schoolSlug: slug.value,
+        code: normalizeDeviceCode(rawCode),
+        userId: auth.user.userId,
+        label: label.value,
+        clientIp,
+      });
 
-      if (!school || !codeIsUsable) {
-        // Same work as a real comparison, so timing does not tell the cases apart.
-        await deviceCodeMatches(code, null);
-        return refuse();
+      if (outcome.status === "refused") {
+        return errorResponse(403, NOT_RECOGNISED);
       }
 
-      const lockedUntil =
-        school.lockedUntil === null ? NaN : Date.parse(school.lockedUntil);
-      if (lockedUntil > now()) {
+      if (outcome.status === "locked") {
+        const waitMs = Date.parse(outcome.lockedUntil) - now();
         return errorResponse(
           429,
           "Too many wrong codes for this school. Wait a few minutes, or ask the office to check the code.",
-          {
-            "retry-after": String(Math.ceil((lockedUntil - now()) / 1000)),
-          },
+          { "retry-after": String(Math.max(1, Math.ceil(waitMs / 1000))) },
         );
       }
 
-      // Both comparisons always run, so a code that matches the first does not
-      // return faster than one that matches neither.
-      const [isAnnounce, isDisplay] = await Promise.all([
-        deviceCodeMatches(code, school.announceCode),
-        deviceCodeMatches(code, school.displayCode),
-      ]);
-
-      if (!isAnnounce && !isDisplay) {
-        await deps.schools.notePairFailure(school.id);
-        return refuse();
-      }
-
-      await deps.schools.pairDevice({
-        schoolId: school.id,
-        userId: auth.user.userId,
-        canAnnounce: isAnnounce,
-        canDisplay: isDisplay,
-        label: label.value,
-      });
-
+      // Right code: this attempt was not a guess, so it costs nothing.
+      deps.codeAttemptLimiter.forgive(clientIp);
       return jsonResponse({
-        school: { id: school.id, name: school.name, slug: school.slug },
-        canAnnounce: isAnnounce,
-        canDisplay: isDisplay,
+        school: outcome.school,
+        canAnnounce: outcome.canAnnounce,
+        canDisplay: outcome.canDisplay,
       });
     });
   };

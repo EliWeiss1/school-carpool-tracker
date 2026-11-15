@@ -39,9 +39,14 @@ export function readSlug(input: unknown): Read<string> {
 export function readTimeZone(input: unknown): Read<string> {
   const message = "That time zone was not recognised. Pick one from the list.";
   if (typeof input !== "string" || input.trim() === "") return fail(message);
+  const zone = input.trim();
+  // Postgres reads "+05:00" as a POSIX zone with the sign inverted (five hours
+  // *west*), so a bare UTC offset would silently reset the board at the wrong
+  // time. Only named zones are accepted.
+  if (/^[-+\d]/.test(zone)) return fail(message);
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: input.trim() });
-    return ok(input.trim());
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return ok(zone);
   } catch {
     return fail(message);
   }

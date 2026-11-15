@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  deviceCodeMatches,
-  isValidDeviceCode,
-  normalizeDeviceCode,
-} from "./device-code.ts";
+import { isValidDeviceCode, normalizeDeviceCode } from "./device-code.ts";
 
 describe("normalizeDeviceCode", () => {
   it("trims, uppercases and drops spaces and dashes", () => {
@@ -26,22 +22,5 @@ describe("isValidDeviceCode", () => {
   });
   it("refuses non-strings", () => {
     expect(isValidDeviceCode(123456)).toBe(false);
-  });
-});
-
-describe("deviceCodeMatches", () => {
-  it("matches the same code however it was typed", async () => {
-    expect(await deviceCodeMatches("abc-123", "ABC123")).toBe(true);
-  });
-  it("rejects a different code", async () => {
-    expect(await deviceCodeMatches("ABC124", "ABC123")).toBe(false);
-  });
-  it("is false when nothing is stored", async () => {
-    expect(await deviceCodeMatches("ABC123", null)).toBe(false);
-    expect(await deviceCodeMatches("ABC123", "")).toBe(false);
-  });
-  it("is false for an empty candidate", async () => {
-    expect(await deviceCodeMatches("", "ABC123")).toBe(false);
-    expect(await deviceCodeMatches("", "")).toBe(false);
   });
 });

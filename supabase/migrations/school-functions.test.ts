@@ -8,8 +8,8 @@ import { BOOTSTRAP, asRoleOn, insertAuthUser } from "./test-bootstrap";
 
 /**
  * The school functions the pair-device and school-write Edge Functions call,
- * tested by running them: school creation, the atomic wrong-code counter,
- * code changes with optional disconnect, and device pairing.
+ * tested by running them: school creation, code changes with optional
+ * disconnect, and the single-transaction pairing decision.
  */
 
 const DIR = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +56,80 @@ async function newSchool(): Promise<string> {
     slug(),
   ]);
   return (res.school as Json).id as string;
+}
+
+/** A device row with exactly these capabilities, bypassing the code check. */
+async function seedDevice(
+  schoolId: string,
+  userId: string,
+  announce: boolean,
+  display: boolean,
+  label: string | null,
+): Promise<void> {
+  await db.query(
+    "insert into public.school_devices (school_id, user_id, can_announce, can_display, label) values ($1, $2, $3, $4, $5)",
+    [schoolId, userId, announce, display, label],
+  );
+}
+
+const T0 = Date.parse("2026-11-13T12:00:00Z");
+const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
+
+async function slugOf(schoolId: string): Promise<string> {
+  const res = await rows<{ slug: string }>(
+    "select slug from public.schools where id = $1",
+    [schoolId],
+  );
+  return res[0].slug;
+}
+
+interface AttemptOptions {
+  ip?: string;
+  label?: string | null;
+  now?: string;
+}
+
+async function attempt(
+  schoolId: string,
+  code: string | null,
+  userId: string,
+  options: AttemptOptions = {},
+): Promise<Json> {
+  return await call("public.attempt_pairing($1, $2, $3, $4, $5, $6)", [
+    await slugOf(schoolId),
+    code,
+    userId,
+    options.label ?? null,
+    options.ip ?? "1.1.1.1",
+    options.now ?? at(0),
+  ]);
+}
+
+async function schoolWithCodes(): Promise<string> {
+  const id = await newSchool();
+  await call("public.set_school_code($1, 'announce', 'ANN111', false)", [id]);
+  await call("public.set_school_code($1, 'display', 'DISP22', false)", [id]);
+  return id;
+}
+
+async function wrongCodes(
+  schoolId: string,
+  n: number,
+  ip: string,
+  minutes = 0,
+): Promise<void> {
+  for (let i = 0; i < n; i++) {
+    const user = await insertAuthUser(db, { anonymous: true });
+    await attempt(schoolId, "WRONG0", user, { ip, now: at(minutes) });
+  }
+}
+
+async function ipRow(schoolId: string, ip: string) {
+  const res = await rows<{ attempts: number; locked_until: string | null }>(
+    "select attempts, locked_until from public.school_pair_attempts where school_id = $1 and client_ip = $2",
+    [schoolId, ip],
+  );
+  return res[0];
 }
 
 describe("create_school", () => {
@@ -136,55 +210,10 @@ describe("create_school", () => {
       call("public.create_school($1, 'A', $2, 'UTC')", [a, s]),
       call("public.create_school($1, 'B', $2, 'UTC')", [b, s]),
     ]);
-    const statuses = results.map((r) => r.status).sort();
-    expect(statuses).toEqual(["created", "slug-taken"]);
-  });
-});
-
-describe("note_pair_failure", () => {
-  const T0 = "2026-11-13T12:00:00Z";
-  const at = (minutes: number) =>
-    new Date(Date.parse(T0) + minutes * 60_000).toISOString();
-
-  it("counts within a window and locks on the tenth wrong code", async () => {
-    const id = await newSchool();
-    for (let i = 1; i <= 9; i++) {
-      const res = await call("public.note_pair_failure($1, $2)", [
-        id,
-        at(i * 0.1),
-      ]);
-      expect(res.failed_attempts).toBe(i);
-      expect(res.locked_until).toBeNull();
-    }
-    const tenth = await call("public.note_pair_failure($1, $2)", [id, at(1)]);
-    expect(tenth.failed_attempts).toBe(10);
-    expect(Date.parse(tenth.locked_until as string)).toBe(
-      Date.parse(at(1)) + 15 * 60_000,
-    );
-  });
-
-  it("starts a new window once ten minutes have passed", async () => {
-    const id = await newSchool();
-    await call("public.note_pair_failure($1, $2)", [id, at(0)]);
-    await call("public.note_pair_failure($1, $2)", [id, at(5)]);
-    const roll = await call("public.note_pair_failure($1, $2)", [id, at(11)]);
-    expect(roll.failed_attempts).toBe(1);
-    const next = await call("public.note_pair_failure($1, $2)", [id, at(12)]);
-    expect(next.failed_attempts).toBe(2);
-  });
-
-  it("never touches existing devices, even when it locks", async () => {
-    const id = await newSchool();
-    const device = await insertAuthUser(db, { anonymous: true });
-    await call("public.pair_device($1, $2, true, false, null)", [id, device]);
-    for (let i = 0; i < 10; i++) {
-      await call("public.note_pair_failure($1, $2)", [id, at(i * 0.1)]);
-    }
-    expect(
-      await rows("select 1 from public.school_devices where school_id = $1", [
-        id,
-      ]),
-    ).toHaveLength(1);
+    expect(results.map((r) => r.status).sort()).toEqual([
+      "created",
+      "slug-taken",
+    ]);
   });
 });
 
@@ -194,17 +223,18 @@ describe("set_school_code", () => {
     const ann = await insertAuthUser(db, { anonymous: true });
     const disp = await insertAuthUser(db, { anonymous: true });
     const both = await insertAuthUser(db, { anonymous: true });
-    await call("public.pair_device($1, $2, true, false, 'phone')", [id, ann]);
-    await call("public.pair_device($1, $2, false, true, 'tv')", [id, disp]);
-    await call("public.pair_device($1, $2, true, true, 'both')", [id, both]);
+    await seedDevice(id, ann, true, false, "phone");
+    await seedDevice(id, disp, false, true, "tv");
+    await seedDevice(id, both, true, true, "both");
     return { id, ann, disp, both };
   }
 
-  it("sets the announce code, bumps its version and clears the lockout", async () => {
+  it("sets the announce code, bumps its version and clears every lockout and attempt row", async () => {
     const id = await newSchool();
-    for (let i = 0; i < 10; i++) {
-      await call("public.note_pair_failure($1)", [id]);
-    }
+    await call("public.set_school_code($1, 'announce', 'REAL123', false)", [
+      id,
+    ]);
+    await wrongCodes(id, 10, "9.9.9.9");
     const res = await call(
       "public.set_school_code($1, 'announce', 'ABC123', false)",
       [id],
@@ -218,7 +248,13 @@ describe("set_school_code", () => {
       "select announce_code_version a, display_code_version d, failed_attempts f, failed_window_started_at w, locked_until l from public.school_secrets where school_id = $1",
       [id],
     );
-    expect(s).toEqual({ a: 2, d: 1, f: 0, w: null, l: null });
+    expect(s).toEqual({ a: 3, d: 1, f: 0, w: null, l: null });
+    expect(
+      await rows(
+        "select 1 from public.school_pair_attempts where school_id = $1",
+        [id],
+      ),
+    ).toHaveLength(0);
   });
 
   it("sets both codes, and null clears one", async () => {
@@ -281,7 +317,7 @@ describe("set_school_code", () => {
     const { id } = await schoolWithDevices();
     const other = await newSchool();
     const keeper = await insertAuthUser(db, { anonymous: true });
-    await call("public.pair_device($1, $2, true, true, null)", [other, keeper]);
+    await seedDevice(other, keeper, true, true, null);
 
     const res = await call(
       "public.set_school_code($1, 'both', 'NEWCODE3', true)",
@@ -308,72 +344,269 @@ describe("set_school_code", () => {
   });
 });
 
-describe("pair_device", () => {
-  it("records the code versions it paired with and when it was seen", async () => {
-    const id = await newSchool();
-    await call("public.set_school_code($1, 'announce', 'ABC123', false)", [id]);
+describe("attempt_pairing", () => {
+  it("refuses an unknown slug", async () => {
     const user = await insertAuthUser(db, { anonymous: true });
-    const row = await call(
-      "public.pair_device($1, $2, true, false, 'Front door')",
-      [id, user],
+    const res = await call(
+      "public.attempt_pairing('nope-nope', 'X', $1, null, '1.1.1.1', $2)",
+      [user, at(0)],
     );
-    expect(row).toMatchObject({
-      school_id: id,
-      user_id: user,
+    expect(res).toEqual({ status: "refused" });
+  });
+
+  it("pairs with the announce code and records versions, label and time", async () => {
+    const id = await schoolWithCodes();
+    const user = await insertAuthUser(db, { anonymous: true });
+    const res = await attempt(id, "ANN111", user, { label: "Front door" });
+    expect(res).toMatchObject({
+      status: "paired",
       can_announce: true,
       can_display: false,
-      announce_code_version: 2,
-      display_code_version: null,
+    });
+    const [row] = await rows<Json>(
+      "select can_announce, can_display, announce_code_version a, display_code_version d, label, last_seen_at from public.school_devices where user_id = $1",
+      [user],
+    );
+    expect(row).toMatchObject({
+      can_announce: true,
+      can_display: false,
+      a: 2,
+      d: null,
       label: "Front door",
     });
     expect(row.last_seen_at).not.toBeNull();
   });
 
-  it("merges capabilities when the same device pairs twice in one school", async () => {
+  it("grants both when the two codes are equal", async () => {
+    const id = await newSchool();
+    await call("public.set_school_code($1, 'both', 'SAME99', false)", [id]);
+    const user = await insertAuthUser(db, { anonymous: true });
+    expect(await attempt(id, "SAME99", user)).toMatchObject({
+      can_announce: true,
+      can_display: true,
+    });
+  });
+
+  it("compares codes exactly (no case folding in the database)", async () => {
+    const id = await schoolWithCodes();
+    const user = await insertAuthUser(db, { anonymous: true });
+    expect((await attempt(id, "ann111", user)).status).toBe("refused");
+  });
+
+  it("never matches a null stored code, even an empty guess", async () => {
     const id = await newSchool();
     const user = await insertAuthUser(db, { anonymous: true });
-    await call("public.pair_device($1, $2, true, false, null)", [id, user]);
-    const row = await call("public.pair_device($1, $2, false, true, null)", [
-      id,
-      user,
-    ]);
-    expect(row).toMatchObject({ can_announce: true, can_display: true });
+    expect((await attempt(id, "", user)).status).toBe("refused");
+    expect((await attempt(id, null, user)).status).toBe("refused");
     expect(
-      await rows("select 1 from public.school_devices where user_id = $1", [
-        user,
+      await rows("select 1 from public.school_devices where school_id = $1", [
+        id,
+      ]),
+    ).toHaveLength(0);
+  });
+
+  it("merges capabilities when one device pairs twice in a school, keeping the label", async () => {
+    const id = await schoolWithCodes();
+    const user = await insertAuthUser(db, { anonymous: true });
+    await attempt(id, "ANN111", user, { label: "Hall" });
+    const res = await attempt(id, "DISP22", user);
+    expect(res).toMatchObject({ can_announce: false, can_display: true });
+    const [row] = await rows<Json>(
+      "select can_announce, can_display, label from public.school_devices where user_id = $1",
+      [user],
+    );
+    expect(row).toEqual({
+      can_announce: true,
+      can_display: true,
+      label: "Hall",
+    });
+  });
+
+  it("moves a device to another school and replaces everything", async () => {
+    const a = await schoolWithCodes();
+    const b = await schoolWithCodes();
+    const user = await insertAuthUser(db, { anonymous: true });
+    await attempt(a, "ANN111", user, { label: "Old" });
+    await attempt(a, "DISP22", user);
+    await attempt(b, "DISP22", user);
+    const devices = await rows<Json>(
+      "select school_id, can_announce, can_display, announce_code_version a, label from public.school_devices where user_id = $1",
+      [user],
+    );
+    expect(devices).toEqual([
+      {
+        school_id: b,
+        can_announce: false,
+        can_display: true,
+        a: null,
+        label: null,
+      },
+    ]);
+  });
+
+  it("does not count a success against either limit", async () => {
+    const id = await schoolWithCodes();
+    for (let i = 0; i < 30; i++) {
+      const user = await insertAuthUser(db, { anonymous: true });
+      expect((await attempt(id, "ANN111", user)).status).toBe("paired");
+    }
+    expect((await ipRow(id, "1.1.1.1")).attempts).toBe(0);
+    const [s] = await rows<Json>(
+      "select failed_attempts f from public.school_secrets where school_id = $1",
+      [id],
+    );
+    expect(s.f).toBe(0);
+  });
+
+  it("locks an address at its tenth wrong code, with a 15 minute lock", async () => {
+    const id = await schoolWithCodes();
+    await wrongCodes(id, 9, "5.5.5.5");
+    expect((await ipRow(id, "5.5.5.5")).locked_until).toBeNull();
+    await wrongCodes(id, 1, "5.5.5.5");
+    const user = await insertAuthUser(db, { anonymous: true });
+    const res = await attempt(id, "ANN111", user, {
+      ip: "5.5.5.5",
+      now: at(1),
+    });
+    expect(res.status).toBe("locked");
+    expect(Date.parse(res.locked_until as string)).toBe(
+      Date.parse(at(0)) + 15 * 60_000,
+    );
+  });
+
+  it("does not compare, or count, while an address is locked", async () => {
+    const id = await schoolWithCodes();
+    await wrongCodes(id, 10, "5.5.5.5");
+    await wrongCodes(id, 3, "5.5.5.5", 1);
+    expect((await ipRow(id, "5.5.5.5")).attempts).toBe(10);
+  });
+
+  it("a locked address does not stop another address pairing", async () => {
+    const id = await schoolWithCodes();
+    await wrongCodes(id, 10, "5.5.5.5");
+    const user = await insertAuthUser(db, { anonymous: true });
+    expect(
+      (await attempt(id, "ANN111", user, { ip: "6.6.6.6", now: at(1) })).status,
+    ).toBe("paired");
+  });
+
+  it("pairs again once the address lock has expired", async () => {
+    const id = await schoolWithCodes();
+    await wrongCodes(id, 10, "5.5.5.5");
+    const user = await insertAuthUser(db, { anonymous: true });
+    const res = await attempt(id, "ANN111", user, {
+      ip: "5.5.5.5",
+      now: at(15.1),
+    });
+    expect(res.status).toBe("paired");
+  });
+
+  it("starts a new counting window after ten minutes", async () => {
+    const id = await schoolWithCodes();
+    await wrongCodes(id, 9, "5.5.5.5", 0);
+    await wrongCodes(id, 1, "5.5.5.5", 11);
+    expect((await ipRow(id, "5.5.5.5")).attempts).toBe(1);
+    expect((await ipRow(id, "5.5.5.5")).locked_until).toBeNull();
+  });
+
+  it("keeps an unexpired lock even when the counting window has rolled over", async () => {
+    const id = await schoolWithCodes();
+    await wrongCodes(id, 10, "5.5.5.5", 9);
+    const user = await insertAuthUser(db, { anonymous: true });
+    // The lock runs to minute 24; the 10 minute window rolled at minute 19.
+    const res = await attempt(id, "ANN111", user, {
+      ip: "5.5.5.5",
+      now: at(21),
+    });
+    expect(res.status).toBe("locked");
+  });
+
+  it("locks the whole school at 100 wrong codes in an hour, across addresses", async () => {
+    const id = await schoolWithCodes();
+    for (let i = 0; i < 99; i++) {
+      await wrongCodes(id, 1, `10.0.0.${i}`, i / 10);
+    }
+    const ok = await insertAuthUser(db, { anonymous: true });
+    expect(
+      (await attempt(id, "ANN111", ok, { ip: "10.1.0.1", now: at(11) })).status,
+    ).toBe("paired");
+    await wrongCodes(id, 1, "10.0.9.9", 12);
+    const user = await insertAuthUser(db, { anonymous: true });
+    const res = await attempt(id, "ANN111", user, {
+      ip: "10.2.0.2",
+      now: at(13),
+    });
+    expect(res.status).toBe("locked");
+    expect(Date.parse(res.locked_until as string)).toBe(
+      Date.parse(at(12)) + 15 * 60_000,
+    );
+    // ...and it lifts after 15 minutes.
+    expect(
+      (await attempt(id, "ANN111", user, { ip: "10.2.0.2", now: at(28) }))
+        .status,
+    ).toBe("paired");
+  });
+
+  it("restarts the school's hour window after an hour", async () => {
+    const id = await schoolWithCodes();
+    for (let i = 0; i < 99; i++) await wrongCodes(id, 1, `10.0.0.${i}`, 0);
+    await wrongCodes(id, 1, "10.0.9.9", 61);
+    const user = await insertAuthUser(db, { anonymous: true });
+    expect(
+      (await attempt(id, "ANN111", user, { ip: "10.2.0.2", now: at(62) }))
+        .status,
+    ).toBe("paired");
+  });
+
+  it("a school's lock does not affect another school", async () => {
+    const a = await schoolWithCodes();
+    const b = await schoolWithCodes();
+    await wrongCodes(a, 10, "5.5.5.5");
+    const user = await insertAuthUser(db, { anonymous: true });
+    expect(
+      (await attempt(b, "ANN111", user, { ip: "5.5.5.5", now: at(1) })).status,
+    ).toBe("paired");
+  });
+
+  it("a lockout leaves connected devices alone", async () => {
+    const id = await schoolWithCodes();
+    const device = await insertAuthUser(db, { anonymous: true });
+    await attempt(id, "ANN111", device);
+    await wrongCodes(id, 10, "5.5.5.5");
+    expect(
+      await rows("select 1 from public.school_devices where school_id = $1", [
+        id,
       ]),
     ).toHaveLength(1);
   });
 
-  it("moves a device to another school and replaces its capabilities", async () => {
-    const a = await newSchool();
-    const b = await newSchool();
+  it("deletes this school's attempt rows older than a day", async () => {
+    const id = await schoolWithCodes();
+    await wrongCodes(id, 1, "7.7.7.7", 0);
     const user = await insertAuthUser(db, { anonymous: true });
-    await call("public.pair_device($1, $2, true, true, null)", [a, user]);
-    const row = await call("public.pair_device($1, $2, false, true, null)", [
-      b,
-      user,
+    await attempt(id, "ANN111", user, { ip: "8.8.8.8", now: at(60 * 25) });
+    expect(await ipRow(id, "7.7.7.7")).toBeUndefined();
+  });
+
+  it("changing the code clears every lock", async () => {
+    const id = await schoolWithCodes();
+    await wrongCodes(id, 10, "5.5.5.5");
+    await call("public.set_school_code($1, 'announce', 'FRESH11', false)", [
+      id,
     ]);
-    expect(row).toMatchObject({
-      school_id: b,
-      can_announce: false,
-      can_display: true,
-      announce_code_version: null,
-    });
+    const user = await insertAuthUser(db, { anonymous: true });
     expect(
-      await rows("select 1 from public.school_devices where school_id = $1", [
-        a,
-      ]),
-    ).toHaveLength(0);
+      (await attempt(id, "FRESH11", user, { ip: "5.5.5.5", now: at(1) }))
+        .status,
+    ).toBe("paired");
   });
 });
 
 describe("access", () => {
   const calls = [
     "public.create_school(gen_random_uuid(), 'X', 'x-slug-1', 'UTC')",
-    "public.note_pair_failure(gen_random_uuid())",
     "public.set_school_code(gen_random_uuid(), 'both', 'ABC123', false)",
-    "public.pair_device(gen_random_uuid(), gen_random_uuid(), true, true, null)",
+    "public.attempt_pairing('x', 'ABC123', gen_random_uuid(), null, '1.1.1.1')",
   ];
 
   it.each(["anon", "authenticated"])("is not callable as %s", async (role) => {
@@ -384,11 +617,24 @@ describe("access", () => {
     }
   });
 
+  it.each(["anon", "authenticated"])(
+    "leaves the attempts table unreadable as %s",
+    async (role) => {
+      await asRoleOn(db, role, async () => {
+        await expect(
+          rows("select * from public.school_pair_attempts"),
+        ).rejects.toThrow(/permission denied/i);
+      });
+    },
+  );
+
   it("is callable as service_role", async () => {
     await asRoleOn(db, "service_role", async () => {
-      const res = await call("public.note_pair_failure(gen_random_uuid())");
-      // Unknown school: the update matches nothing, so nothing is counted.
-      expect(res).toBeDefined();
+      expect(
+        await call(
+          "public.attempt_pairing('unknown-slug', 'X', gen_random_uuid(), null, '1.1.1.1')",
+        ),
+      ).toEqual({ status: "refused" });
     });
   });
 });

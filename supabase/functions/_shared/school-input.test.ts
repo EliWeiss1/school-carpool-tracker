@@ -52,6 +52,11 @@ describe("readTimeZone", () => {
     expect(readTimeZone("").ok).toBe(false);
     expect(readTimeZone(7).ok).toBe(false);
   });
+  it("refuses bare UTC offsets, which Postgres reads with the sign inverted", () => {
+    for (const bad of ["+05:00", "-08:00", "+0530", "5", "-8"]) {
+      expect(readTimeZone(bad).ok, bad).toBe(false);
+    }
+  });
 });
 
 describe("readResetHour", () => {

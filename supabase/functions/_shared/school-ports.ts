@@ -33,17 +33,6 @@ export interface DeviceSummary {
   lastSeenAt: string | null;
 }
 
-/** What pairing needs to know about a school: its codes and lockout. */
-export interface PairingTarget {
-  id: string;
-  name: string;
-  slug: string;
-  announceCode: string | null;
-  displayCode: string | null;
-  /** ISO timestamp, or null when the school is not locked. */
-  lockedUntil: string | null;
-}
-
 export type CreateSchoolOutcome =
   | { status: "created" | "exists"; school: SchoolSummary }
   | { status: "slug-taken" };
@@ -57,13 +46,29 @@ export interface SettingsPatch {
 
 export type CodeTarget = "announce" | "display" | "both";
 
-export interface PairDeviceInput {
-  schoolId: string;
+export interface AttemptPairingInput {
+  schoolSlug: string;
+  /** Already normalised (see normalizeDeviceCode). */
+  code: string;
+  /** The device's anonymous auth user. */
   userId: string;
-  canAnnounce: boolean;
-  canDisplay: boolean;
   label: string | null;
+  clientIp: string;
 }
+
+/**
+ * The whole pairing decision. `refused` covers an unknown school and a wrong
+ * code alike, on purpose: the caller must not be able to tell them apart.
+ */
+export type AttemptPairingOutcome =
+  | {
+      status: "paired";
+      school: { id: string; name: string; slug: string };
+      canAnnounce: boolean;
+      canDisplay: boolean;
+    }
+  | { status: "refused" }
+  | { status: "locked"; lockedUntil: string };
 
 export interface SchoolStore {
   createSchool(input: {
@@ -101,15 +106,13 @@ export interface SchoolStore {
    */
   removeDevice(schoolId: string, deviceRowId: string): Promise<string | null>;
 
-  /** Null when no school has this slug. */
-  findSchoolForPairing(slug: string): Promise<PairingTarget | null>;
-
-  /** Counts a wrong code against the school and returns its lock state. */
-  notePairFailure(
-    schoolId: string,
-  ): Promise<{ failedAttempts: number; lockedUntil: string | null }>;
-
-  pairDevice(input: PairDeviceInput): Promise<void>;
+  /**
+   * Looks the school up, checks its locks, compares the code, and either counts
+   * the failure or records the device -- as one atomic step, so parallel
+   * guesses are counted one at a time and a pairing cannot slip in after the
+   * office changes the code.
+   */
+  attemptPairing(input: AttemptPairingInput): Promise<AttemptPairingOutcome>;
 
   /**
    * Deletes device sessions. The implementation must delete only anonymous

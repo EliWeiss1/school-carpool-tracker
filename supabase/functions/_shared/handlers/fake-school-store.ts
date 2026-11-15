@@ -9,8 +9,8 @@ import type {
   CodeTarget,
   CreateSchoolOutcome,
   DeviceSummary,
-  PairDeviceInput,
-  PairingTarget,
+  AttemptPairingInput,
+  AttemptPairingOutcome,
   SchoolCodes,
   SchoolSettings,
   SchoolStore,
@@ -20,9 +20,15 @@ import type {
 interface FakeSchool extends SchoolSettings {
   announceCode: string | null;
   displayCode: string | null;
+  /** School-wide ceiling: wrong codes from every address, one-hour window. */
   failedAttempts: number;
   windowStartedAt: number | null;
   lockedUntil: number | null;
+  /** Per client address, as school_pair_attempts holds them. */
+  ipRows: Map<
+    string,
+    { attempts: number; windowStartedAt: number; lockedUntil: number | null }
+  >;
 }
 
 interface FakeDevice extends DeviceSummary {
@@ -57,7 +63,7 @@ export interface FakeSchoolStore extends SchoolStore {
   devices(schoolId?: string): FakeDevice[];
   schoolOf(id: string): FakeSchool | undefined;
   readonly deletedUserIds: string[];
-  readonly calls: { notePairFailure: number; pairDevice: number };
+  readonly calls: { attemptPairing: number };
 }
 
 export function createFakeSchoolStore(startMs = 0): FakeSchoolStore {
@@ -67,7 +73,7 @@ export function createFakeSchoolStore(startMs = 0): FakeSchoolStore {
   const deviceRows = new Map<string, FakeDevice>();
   const anonymous = new Set<string>();
   const deletedUserIds: string[] = [];
-  const calls = { notePairFailure: 0, pairDevice: 0 };
+  const calls = { attemptPairing: 0 };
   let failDelete = false;
   let nextId = 1;
 
@@ -77,8 +83,6 @@ export function createFakeSchoolStore(startMs = 0): FakeSchoolStore {
     slug: s.slug,
     timezone: s.timezone,
   });
-  const iso = (ms: number | null) =>
-    ms === null ? null : new Date(ms).toISOString();
 
   return {
     now: () => clock,
@@ -106,6 +110,7 @@ export function createFakeSchoolStore(startMs = 0): FakeSchoolStore {
         failedAttempts: 0,
         windowStartedAt: null,
         lockedUntil: null,
+        ipRows: new Map(),
       });
       if (ownerUserId) owners.set(ownerUserId, school.id);
     },
@@ -157,6 +162,7 @@ export function createFakeSchoolStore(startMs = 0): FakeSchoolStore {
         failedAttempts: 0,
         windowStartedAt: null,
         lockedUntil: null,
+        ipRows: new Map(),
       };
       schools.set(id, school);
       owners.set(userId, id);
@@ -190,6 +196,7 @@ export function createFakeSchoolStore(startMs = 0): FakeSchoolStore {
       s.failedAttempts = 0;
       s.windowStartedAt = null;
       s.lockedUntil = null;
+      s.ipRows.clear();
 
       const disconnectedUserIds: string[] = [];
       if (disconnect) {
@@ -232,45 +239,74 @@ export function createFakeSchoolStore(startMs = 0): FakeSchoolStore {
       return Promise.resolve(d.userId);
     },
 
-    findSchoolForPairing(slug): Promise<PairingTarget | null> {
-      const s = [...schools.values()].find((row) => row.slug === slug);
-      if (!s) return Promise.resolve(null);
-      return Promise.resolve({
-        id: s.id,
-        name: s.name,
-        slug: s.slug,
-        announceCode: s.announceCode,
-        displayCode: s.displayCode,
-        lockedUntil: iso(s.lockedUntil),
-      });
-    },
+    attemptPairing(input: AttemptPairingInput) {
+      // Synchronous from the first line to the return: like the database's row
+      // lock, this makes a burst of parallel attempts count one at a time.
+      calls.attemptPairing++;
+      const refused: AttemptPairingOutcome = { status: "refused" };
+      const school = [...schools.values()].find(
+        (row) => row.slug === input.schoolSlug,
+      );
+      if (!school) return Promise.resolve(refused);
 
-    notePairFailure(schoolId) {
-      calls.notePairFailure++;
-      const s = schools.get(schoolId);
-      if (!s) return Promise.resolve({ failedAttempts: 0, lockedUntil: null });
-      const WINDOW = 10 * 60_000;
-      if (s.windowStartedAt === null || clock - s.windowStartedAt > WINDOW) {
-        s.failedAttempts = 1;
-        s.windowStartedAt = clock;
-      } else {
-        s.failedAttempts += 1;
+      const MIN = 60_000;
+      if (school.lockedUntil !== null && school.lockedUntil > clock) {
+        return Promise.resolve<AttemptPairingOutcome>({
+          status: "locked",
+          lockedUntil: new Date(school.lockedUntil).toISOString(),
+        });
       }
-      if (s.failedAttempts >= 10) s.lockedUntil = clock + 15 * 60_000;
-      return Promise.resolve({
-        failedAttempts: s.failedAttempts,
-        lockedUntil: iso(s.lockedUntil),
-      });
-    },
 
-    pairDevice(input: PairDeviceInput) {
-      calls.pairDevice++;
+      for (const [ip, row] of school.ipRows) {
+        if (row.windowStartedAt < clock - 24 * 60 * MIN)
+          school.ipRows.delete(ip);
+      }
+      let ip = school.ipRows.get(input.clientIp);
+      if (!ip) {
+        ip = { attempts: 0, windowStartedAt: clock, lockedUntil: null };
+        school.ipRows.set(input.clientIp, ip);
+      }
+      if (clock - ip.windowStartedAt > 10 * MIN) {
+        ip.attempts = 0;
+        ip.windowStartedAt = clock;
+        if (ip.lockedUntil !== null && ip.lockedUntil <= clock) {
+          ip.lockedUntil = null;
+        }
+      }
+      if (ip.lockedUntil !== null && ip.lockedUntil > clock) {
+        return Promise.resolve<AttemptPairingOutcome>({
+          status: "locked",
+          lockedUntil: new Date(ip.lockedUntil).toISOString(),
+        });
+      }
+
+      const matches = (stored: string | null) =>
+        stored !== null && stored !== "" && stored === input.code;
+      const canAnnounce = matches(school.announceCode);
+      const canDisplay = matches(school.displayCode);
+
+      if (!canAnnounce && !canDisplay) {
+        ip.attempts += 1;
+        if (ip.attempts >= 10) ip.lockedUntil = clock + 15 * MIN;
+        if (
+          school.windowStartedAt === null ||
+          clock - school.windowStartedAt > 60 * MIN
+        ) {
+          school.failedAttempts = 1;
+          school.windowStartedAt = clock;
+        } else {
+          school.failedAttempts += 1;
+        }
+        if (school.failedAttempts >= 100) school.lockedUntil = clock + 15 * MIN;
+        return Promise.resolve(refused);
+      }
+
       const existing = [...deviceRows.values()].find(
         (d) => d.userId === input.userId,
       );
-      if (existing && existing.schoolId === input.schoolId) {
-        existing.canAnnounce ||= input.canAnnounce;
-        existing.canDisplay ||= input.canDisplay;
+      if (existing && existing.schoolId === school.id) {
+        existing.canAnnounce ||= canAnnounce;
+        existing.canDisplay ||= canDisplay;
         existing.label = input.label ?? existing.label;
         existing.lastSeenAt = new Date(clock).toISOString();
       } else {
@@ -278,16 +314,21 @@ export function createFakeSchoolStore(startMs = 0): FakeSchoolStore {
         const id = `device-row-${nextId++}`;
         deviceRows.set(id, {
           id,
-          schoolId: input.schoolId,
+          schoolId: school.id,
           userId: input.userId,
-          canAnnounce: input.canAnnounce,
-          canDisplay: input.canDisplay,
+          canAnnounce,
+          canDisplay,
           label: input.label,
           createdAt: new Date(clock).toISOString(),
           lastSeenAt: new Date(clock).toISOString(),
         });
       }
-      return Promise.resolve();
+      return Promise.resolve<AttemptPairingOutcome>({
+        status: "paired",
+        school: { id: school.id, name: school.name, slug: school.slug },
+        canAnnounce,
+        canDisplay,
+      });
     },
 
     deleteDeviceUsers(userIds) {

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { createRateLimiter } from "../rate-limit.ts";
 import { createFakeAccess } from "./fake-access.ts";
-import { createFakeSchoolStore } from "./fake-school-store.ts";
+import {
+  createFakeSchoolStore,
+  type FakeSchoolStore,
+} from "./fake-school-store.ts";
 import { createPairDeviceHandler } from "./pair-device.ts";
 
 const SCHOOL = "11111111-1111-4111-8111-111111111111";
@@ -13,10 +16,7 @@ const START = Date.parse("2026-11-13T12:00:00Z");
 
 const NOT_RECOGNISED = "That code was not recognised. Check with the office.";
 
-function setup(opts: { ipBudget?: number } = {}) {
-  const access = createFakeAccess();
-  access.addUser("device-token", { userId: DEVICE_USER, isAnonymous: true });
-  access.addUser("office-token", { userId: OFFICE_USER, isAnonymous: false });
+function seededStore(): FakeSchoolStore {
   const schools = createFakeSchoolStore(START);
   schools.seedSchool(
     { id: SCHOOL, slug: "maple", name: "Maple School" },
@@ -26,10 +26,28 @@ function setup(opts: { ipBudget?: number } = {}) {
     { id: OTHER, slug: "oak", name: "Oak School" },
     { announceCode: "SAME999", displayCode: "SAME999" },
   );
-  const handle = createPairDeviceHandler({
-    access,
+  return schools;
+}
+
+function makeAccess() {
+  const access = createFakeAccess();
+  access.addUser("device-token", { userId: DEVICE_USER, isAnonymous: true });
+  access.addUser("office-token", { userId: OFFICE_USER, isAnonymous: false });
+  return access;
+}
+
+/**
+ * A handler over `schools`. Passing the same store to several handlers gives
+ * each a fresh in-function limiter, which isolates the database's own rules.
+ */
+function makeHandler(
+  schools: FakeSchoolStore,
+  opts: { ipBudget?: number; access?: ReturnType<typeof makeAccess> } = {},
+) {
+  return createPairDeviceHandler({
+    access: opts.access ?? makeAccess(),
     schools,
-    rateLimiter: createRateLimiter({ limit: 100, windowMs: 60_000 }),
+    rateLimiter: createRateLimiter({ limit: 1000, windowMs: 60_000 }),
     codeAttemptLimiter: createRateLimiter({
       limit: opts.ipBudget ?? 5,
       windowMs: 600_000,
@@ -37,6 +55,12 @@ function setup(opts: { ipBudget?: number } = {}) {
     }),
     now: schools.now,
   });
+}
+
+function setup(opts: { ipBudget?: number } = {}) {
+  const access = makeAccess();
+  const schools = seededStore();
+  const handle = makeHandler(schools, { ...opts, access });
   return { access, schools, handle };
 }
 
@@ -85,7 +109,7 @@ describe("pair-device — success", () => {
     ]);
   });
 
-  it("pairs for the board with the display code", async () => {
+  it("pairs for the board with the display code, however it was typed", async () => {
     const { handle } = setup();
     const res = await handle(post(pair({ code: "board-456" })));
     expect(await res.json()).toMatchObject({
@@ -133,9 +157,10 @@ describe("pair-device — who may pair", () => {
   });
 
   it("gives the staff PIN nothing", async () => {
-    const { handle } = setup();
+    const { handle, schools } = setup();
     const res = await handle(post({ ...pair(), pin: "4821" }, null));
     expect(res.status).toBe(401);
+    expect(schools.calls.attemptPairing).toBe(0);
   });
 
   it("rejects a non-POST method and answers preflight", async () => {
@@ -154,7 +179,7 @@ describe("pair-device — who may pair", () => {
     const { handle, schools } = setup();
     const res = await handle(post(pair({ label: "x".repeat(61) })));
     expect(res.status).toBe(400);
-    expect(schools.devices()).toHaveLength(0);
+    expect(schools.calls.attemptPairing).toBe(0);
   });
 });
 
@@ -179,6 +204,14 @@ describe("pair-device — uniform refusal", () => {
     expect([...seen]).toEqual([JSON.stringify({ error: NOT_RECOGNISED })]);
   });
 
+  it("does not call the store for a malformed slug or code, but spends the budget", async () => {
+    const { handle, schools } = setup({ ipBudget: 2 });
+    await handle(post(pair({ schoolSlug: "NOT A SLUG" })));
+    await handle(post(pair({ code: "x" })));
+    expect(schools.calls.attemptPairing).toBe(0);
+    expect((await handle(post(pair()))).status).toBe(429);
+  });
+
   it("does not use the code of a school that is not the one named", async () => {
     const { handle } = setup();
     // SAME999 belongs to oak, not maple.
@@ -198,13 +231,17 @@ describe("pair-device — uniform refusal", () => {
   });
 });
 
-describe("pair-device — per-IP wrong-code budget", () => {
-  it("spends only on wrong codes and refuses once exhausted", async () => {
-    const { handle } = setup({ ipBudget: 2 });
-    // Right codes are free.
-    for (let i = 0; i < 4; i++) {
+describe("pair-device — per-IP budget", () => {
+  it("never charges a right code, however many in a row", async () => {
+    const { handle, schools } = setup();
+    for (let i = 0; i < 30; i++) {
       expect((await handle(post(pair()))).status).toBe(200);
     }
+    expect(schools.devices(SCHOOL)).toHaveLength(1);
+  });
+
+  it("refuses once the wrong codes have used the budget up", async () => {
+    const { handle } = setup({ ipBudget: 2 });
     expect((await handle(post(pair({ code: "WRONG1" })))).status).toBe(403);
     expect((await handle(post(pair({ code: "WRONG2" })))).status).toBe(403);
 
@@ -227,69 +264,110 @@ describe("pair-device — per-IP wrong-code budget", () => {
     await handle(post(pair({ schoolSlug: "nowhere" })));
     expect((await handle(post(pair()))).status).toBe(429);
   });
+
+  it("lets at most the budget of 50 parallel wrong codes from one address reach the store", async () => {
+    const { handle, schools } = setup({ ipBudget: 5 });
+    const responses = await Promise.all(
+      Array.from({ length: 50 }, (_, i) =>
+        handle(post(pair({ code: `WRONG${i}` }))),
+      ),
+    );
+    const statuses = responses.map((r) => r.status);
+    expect(statuses.filter((s) => s === 403)).toHaveLength(5);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(45);
+    expect(schools.calls.attemptPairing).toBe(5);
+  });
 });
 
-describe("pair-device — per-school lockout", () => {
-  async function wrongTimes(
-    handle: (r: Request) => Promise<Response>,
-    n: number,
-  ) {
+describe("pair-device — locks in the database", () => {
+  /** Wrong codes, each through a handler with a fresh in-function limiter. */
+  async function wrong(schools: FakeSchoolStore, n: number, ip: string) {
     for (let i = 0; i < n; i++) {
-      // A different address each time: the per-IP budget is not under test.
-      await handle(
-        post(pair({ code: "WRONG123" }), "device-token", `10.0.0.${i}`),
+      await makeHandler(schools)(
+        post(pair({ code: "WRONG123" }), "device-token", ip),
       );
     }
   }
 
-  it("counts wrong codes and locks the school after ten", async () => {
-    const { handle, schools } = setup();
-    await wrongTimes(handle, 10);
-    expect(schools.schoolOf(SCHOOL)?.lockedUntil).not.toBeNull();
-
-    // Even the right code is refused while locked, with a wait time.
-    const res = await handle(post(pair(), "device-token", "10.9.9.9"));
+  it("locks one address on its eleventh wrong code, and says how long to wait", async () => {
+    const schools = seededStore();
+    await wrong(schools, 10, "10.0.0.1");
+    const res = await makeHandler(schools)(
+      post(pair({ code: "WRONG123" }), "device-token", "10.0.0.1"),
+    );
     expect(res.status).toBe(429);
     expect((await res.json()).error).toBe(
       "Too many wrong codes for this school. Wait a few minutes, or ask the office to check the code.",
     );
-    expect(Number(res.headers.get("retry-after"))).toBe(15 * 60);
+    // Even the right code waits while the address is locked.
+    const right = await makeHandler(schools)(
+      post(pair(), "device-token", "10.0.0.1"),
+    );
+    expect(right.status).toBe(429);
+    expect(Number(right.headers.get("retry-after"))).toBe(15 * 60);
   });
 
-  it("does not compare the code, or count anything, while locked", async () => {
-    const { handle, schools } = setup();
-    await wrongTimes(handle, 10);
-    const before = schools.calls.notePairFailure;
-    await handle(post(pair({ code: "WRONG123" }), "device-token", "10.9.9.9"));
-    expect(schools.calls.notePairFailure).toBe(before);
-    expect(schools.calls.pairDevice).toBe(0);
+  it("a lock on one address does not stop another pairing with the right code", async () => {
+    const schools = seededStore();
+    await wrong(schools, 10, "10.0.0.1");
+    const res = await makeHandler(schools)(
+      post(pair(), "device-token", "10.0.0.2"),
+    );
+    expect(res.status).toBe(200);
   });
 
   it("pairs again once the lock has passed", async () => {
-    const { handle, schools } = setup();
-    await wrongTimes(handle, 10);
+    const schools = seededStore();
+    await wrong(schools, 10, "10.0.0.1");
     schools.setNow(START + 15 * 60_000 + 1);
-    expect(
-      (await handle(post(pair(), "device-token", "10.9.9.9"))).status,
-    ).toBe(200);
+    const res = await makeHandler(schools)(
+      post(pair(), "device-token", "10.0.0.1"),
+    );
+    expect(res.status).toBe(200);
   });
 
-  it("leaves already-connected devices alone while locked", async () => {
-    const { handle, schools } = setup();
-    await handle(post(pair()));
-    await wrongTimes(handle, 10);
+  it("leaves connected devices alone while locked", async () => {
+    const schools = seededStore();
+    await makeHandler(schools)(post(pair()));
+    await wrong(schools, 11, "10.0.0.1");
     expect(schools.devices(SCHOOL)).toHaveLength(1);
   });
 
-  it("only locks the school that was guessed at", async () => {
-    const { handle } = setup();
-    await wrongTimes(handle, 10);
-    const res = await handle(
-      post(
-        pair({ schoolSlug: "oak", code: "SAME999" }),
-        "device-token",
-        "10.9.9.9",
-      ),
+  it("50 wrong codes from 50 addresses are all refused, and the school locks only past 100", async () => {
+    const schools = seededStore();
+    const statuses: number[] = [];
+    for (let i = 0; i < 50; i++) {
+      const res = await makeHandler(schools)(
+        post(pair({ code: "WRONG123" }), "device-token", `10.1.0.${i}`),
+      );
+      statuses.push(res.status);
+    }
+    expect(statuses.every((s) => s === 403)).toBe(true);
+
+    // Reach 100 wrong codes in the hour: the 101st attempt from a new address
+    // is locked, even with the right code.
+    for (let i = 50; i < 100; i++) {
+      await makeHandler(schools)(
+        post(pair({ code: "WRONG123" }), "device-token", `10.1.0.${i}`),
+      );
+    }
+    const locked = await makeHandler(schools)(
+      post(pair(), "device-token", "10.2.0.1"),
+    );
+    expect(locked.status).toBe(429);
+    // Another school is unaffected.
+    const other = await makeHandler(schools)(
+      post(pair({ schoolSlug: "oak", code: "SAME999" })),
+    );
+    expect(other.status).toBe(200);
+  });
+
+  it("changing the code clears the locks", async () => {
+    const schools = seededStore();
+    await wrong(schools, 10, "10.0.0.1");
+    await schools.setCode(SCHOOL, "announce", "FRESH123", false);
+    const res = await makeHandler(schools)(
+      post(pair({ code: "FRESH123" }), "device-token", "10.0.0.1"),
     );
     expect(res.status).toBe(200);
   });

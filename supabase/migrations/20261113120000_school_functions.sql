@@ -73,50 +73,24 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- note_pair_failure
+-- school_pair_attempts: wrong-code counters per school and client address
 -- ---------------------------------------------------------------------------
 
-create or replace function public.note_pair_failure(
-  p_school_id uuid,
-  p_now timestamptz default now()
-) returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_attempts integer;
-  v_locked timestamptz;
-begin
-  -- One UPDATE, so two wrong codes arriving together are both counted. Every
-  -- right-hand side reads the row as it was before this statement.
-  update public.school_secrets s
-  set failed_attempts = case
-        when s.failed_window_started_at is null
-          or p_now - s.failed_window_started_at > interval '10 minutes'
-        then 1 else s.failed_attempts + 1 end,
-      failed_window_started_at = case
-        when s.failed_window_started_at is null
-          or p_now - s.failed_window_started_at > interval '10 minutes'
-        then p_now else s.failed_window_started_at end,
-      locked_until = case
-        when (case
-                when s.failed_window_started_at is null
-                  or p_now - s.failed_window_started_at > interval '10 minutes'
-                then 1 else s.failed_attempts + 1 end) >= 10
-        then p_now + interval '15 minutes'
-        else s.locked_until end,
-      updated_at = p_now
-  where s.school_id = p_school_id
-  returning s.failed_attempts, s.locked_until into v_attempts, v_locked;
+create table public.school_pair_attempts (
+  school_id uuid not null references public.schools (id) on delete cascade,
+  client_ip text not null,
+  attempts integer not null default 0,
+  window_started_at timestamptz not null,
+  locked_until timestamptz,
+  primary key (school_id, client_ip)
+);
 
-  -- A lockout only ever stops new pairings. Nothing here touches school_devices.
-  return pg_catalog.jsonb_build_object(
-    'failed_attempts', coalesce(v_attempts, 0),
-    'locked_until', v_locked
-  );
-end;
-$$;
+comment on table public.school_pair_attempts is
+  'Wrong device codes per school and client address. Service role only.';
+
+alter table public.school_pair_attempts enable row level security;
+revoke all on public.school_pair_attempts from anon, authenticated;
+grant select, insert, update, delete on public.school_pair_attempts to service_role;
 
 -- ---------------------------------------------------------------------------
 -- set_school_code
@@ -161,6 +135,9 @@ begin
     raise exception 'school not found';
   end if;
 
+  -- A new code makes every earlier guess moot.
+  delete from public.school_pair_attempts a where a.school_id = p_school_id;
+
   if p_disconnect then
     with gone as (
       delete from public.school_devices d
@@ -180,38 +157,136 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- pair_device
+-- attempt_pairing
 -- ---------------------------------------------------------------------------
+--
+-- The whole pairing decision in one transaction: look the school up, check its
+-- locks, compare the code, count a failure or record the device. Everything
+-- runs under a row lock on the school's school_secrets row, which is also the
+-- row set_school_code updates, so
+--   * a burst of parallel guesses is counted one at a time, not all against the
+--     same stale counter;
+--   * a device cannot be inserted with a code that set_school_code has just
+--     replaced: it either commits first (and is then disconnected) or waits and
+--     is compared against the new code.
+-- A lockout only ever refuses a new pairing. It never touches school_devices.
 
-create or replace function public.pair_device(
-  p_school_id uuid,
+create or replace function public.attempt_pairing(
+  p_slug text,
+  p_code text,
   p_user_id uuid,
-  p_can_announce boolean,
-  p_can_display boolean,
-  p_label text
+  p_label text,
+  p_client_ip text,
+  p_now timestamptz default now()
 ) returns jsonb
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
+  v_school public.schools%rowtype;
   v_secrets public.school_secrets%rowtype;
+  v_ip public.school_pair_attempts%rowtype;
+  v_announce boolean;
+  v_display boolean;
+  v_ip_attempts integer;
+  v_ceiling integer;
+  v_ceiling_started timestamptz;
   v_row public.school_devices%rowtype;
 begin
-  select * into v_secrets
-  from public.school_secrets s where s.school_id = p_school_id;
+  select s.* into v_school from public.schools s where s.slug = p_slug;
   if not found then
-    raise exception 'school not found';
+    return pg_catalog.jsonb_build_object('status', 'refused');
   end if;
 
+  select * into v_secrets
+  from public.school_secrets s
+  where s.school_id = v_school.id
+  for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('status', 'refused');
+  end if;
+
+  -- School-wide ceiling: many addresses together cannot grind through codes.
+  if v_secrets.locked_until is not null and v_secrets.locked_until > p_now then
+    return pg_catalog.jsonb_build_object(
+      'status', 'locked', 'locked_until', v_secrets.locked_until);
+  end if;
+
+  delete from public.school_pair_attempts a
+  where a.school_id = v_school.id
+    and a.window_started_at < p_now - interval '1 day';
+
+  insert into public.school_pair_attempts (school_id, client_ip, attempts, window_started_at)
+  values (v_school.id, p_client_ip, 0, p_now)
+  on conflict (school_id, client_ip) do nothing;
+
+  select * into v_ip
+  from public.school_pair_attempts a
+  where a.school_id = v_school.id and a.client_ip = p_client_ip
+  for update;
+
+  if p_now - v_ip.window_started_at > interval '10 minutes' then
+    update public.school_pair_attempts a
+    set attempts = 0,
+        window_started_at = p_now,
+        -- An unexpired lock outlives the counting window.
+        locked_until = case when a.locked_until > p_now then a.locked_until end
+    where a.school_id = v_school.id and a.client_ip = p_client_ip
+    returning * into v_ip;
+  end if;
+
+  -- Per-address lock: one network's guessing locks that network, not the school.
+  if v_ip.locked_until is not null and v_ip.locked_until > p_now then
+    return pg_catalog.jsonb_build_object(
+      'status', 'locked', 'locked_until', v_ip.locked_until);
+  end if;
+
+  -- Hash against hash, both codes always evaluated, so timing does not follow
+  -- how much of a code matched. A null or empty stored code never matches.
+  v_announce := coalesce(v_secrets.announce_code, '') <> ''
+    and pg_catalog.sha256(pg_catalog.convert_to(coalesce(p_code, ''), 'UTF8'))
+      = pg_catalog.sha256(pg_catalog.convert_to(coalesce(v_secrets.announce_code, ''), 'UTF8'));
+  v_display := coalesce(v_secrets.display_code, '') <> ''
+    and pg_catalog.sha256(pg_catalog.convert_to(coalesce(p_code, ''), 'UTF8'))
+      = pg_catalog.sha256(pg_catalog.convert_to(coalesce(v_secrets.display_code, ''), 'UTF8'));
+
+  if not v_announce and not v_display then
+    v_ip_attempts := v_ip.attempts + 1;
+    update public.school_pair_attempts a
+    set attempts = v_ip_attempts,
+        locked_until = case when v_ip_attempts >= 10
+          then p_now + interval '15 minutes' else a.locked_until end
+    where a.school_id = v_school.id and a.client_ip = p_client_ip;
+
+    if v_secrets.failed_window_started_at is null
+       or p_now - v_secrets.failed_window_started_at > interval '1 hour' then
+      v_ceiling := 1;
+      v_ceiling_started := p_now;
+    else
+      v_ceiling := v_secrets.failed_attempts + 1;
+      v_ceiling_started := v_secrets.failed_window_started_at;
+    end if;
+    update public.school_secrets s
+    set failed_attempts = v_ceiling,
+        failed_window_started_at = v_ceiling_started,
+        locked_until = case when v_ceiling >= 100
+          then p_now + interval '15 minutes' else s.locked_until end,
+        updated_at = p_now
+    where s.school_id = v_school.id;
+
+    return pg_catalog.jsonb_build_object('status', 'refused');
+  end if;
+
+  -- A success is not counted against either limit.
   insert into public.school_devices as d
     (school_id, user_id, can_announce, can_display,
      announce_code_version, display_code_version, label, last_seen_at)
   values
-    (p_school_id, p_user_id, p_can_announce, p_can_display,
-     case when p_can_announce then v_secrets.announce_code_version end,
-     case when p_can_display then v_secrets.display_code_version end,
-     p_label, now())
+    (v_school.id, p_user_id, v_announce, v_display,
+     case when v_announce then v_secrets.announce_code_version end,
+     case when v_display then v_secrets.display_code_version end,
+     p_label, p_now)
   on conflict (user_id) do update
   set -- Same school: what the device could already do is kept and added to.
       -- Another school: nothing carries over.
@@ -236,16 +311,20 @@ begin
       last_seen_at = excluded.last_seen_at
   returning * into v_row;
 
-  return pg_catalog.to_jsonb(v_row);
+  return pg_catalog.jsonb_build_object(
+    'status', 'paired',
+    'school', pg_catalog.jsonb_build_object(
+      'id', v_school.id, 'name', v_school.name, 'slug', v_school.slug),
+    'can_announce', v_announce,
+    'can_display', v_display
+  );
 end;
 $$;
 
 revoke all on function public.create_school(uuid, text, text, text) from public, anon, authenticated;
-revoke all on function public.note_pair_failure(uuid, timestamptz) from public, anon, authenticated;
 revoke all on function public.set_school_code(uuid, text, text, boolean) from public, anon, authenticated;
-revoke all on function public.pair_device(uuid, uuid, boolean, boolean, text) from public, anon, authenticated;
+revoke all on function public.attempt_pairing(text, text, uuid, text, text, timestamptz) from public, anon, authenticated;
 
 grant execute on function public.create_school(uuid, text, text, text) to service_role;
-grant execute on function public.note_pair_failure(uuid, timestamptz) to service_role;
 grant execute on function public.set_school_code(uuid, text, text, boolean) to service_role;
-grant execute on function public.pair_device(uuid, uuid, boolean, boolean, text) to service_role;
+grant execute on function public.attempt_pairing(text, text, uuid, text, text, timestamptz) to service_role;
