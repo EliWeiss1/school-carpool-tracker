@@ -42,13 +42,21 @@ export function useSchoolSession({
   const refreshing = useRef(false);
   const recheckRef = useRef(onRecheck);
   recheckRef.current = onRecheck;
+  // Set by lock() so the sign-out it causes is not mistaken for someone else's.
+  const leavingRef = useRef(false);
 
   useEffect(() => {
     const { data } = client.auth.onAuthStateChange((event, session) => {
       store.apply(event, session);
+      // An office session that ends elsewhere (another tab, an expired
+      // refresh) must not leave a dead screen: the gate re-resolves to the
+      // device session if there is one, else the code prompt or sign-in.
+      if (kind === "office" && event === "SIGNED_OUT" && !leavingRef.current) {
+        recheckRef.current();
+      }
     });
     return () => data.subscription.unsubscribe();
-  }, [client, store]);
+  }, [client, kind, store]);
 
   return useMemo<StaffSession>(
     () => ({
@@ -85,6 +93,7 @@ export function useSchoolSession({
           recheckRef.current();
           return;
         }
+        leavingRef.current = true;
         const here = window.location.pathname + window.location.search;
         void client.auth
           .signOut()

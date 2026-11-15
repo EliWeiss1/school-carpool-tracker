@@ -3,94 +3,164 @@ import { describe, expect, it } from "vitest";
 import {
   cleanDeviceLabel,
   decideAccess,
+  decideRecheck,
   gateNotice,
   LAST_SCHOOL_KEY,
   normalizeCode,
   officeLoginHref,
   readLastSchool,
   rememberLastSchool,
+  sameAccess,
   type ScreenNeed,
   type SlugStorage,
   validateCode,
 } from "./school-access";
 
-const NEEDS: ScreenNeed[] = ["announce", "display", "office", "hub"];
-const DEVICES = [
-  null,
-  { canAnnounce: false, canDisplay: false },
-  { canAnnounce: true, canDisplay: false },
-  { canAnnounce: false, canDisplay: true },
-  { canAnnounce: true, canDisplay: true },
-];
+type Dev = { canAnnounce: boolean; canDisplay: boolean } | null;
+const NONE: Dev = null;
+const ANN: Dev = { canAnnounce: true, canDisplay: false };
+const DIS: Dev = { canAnnounce: false, canDisplay: true };
+const BOTH: Dev = { canAnnounce: true, canDisplay: true };
 
-describe("decideAccess", () => {
-  it("lets an office account into every screen with no code, device or not", () => {
-    for (const need of NEEDS) {
-      for (const device of DEVICES) {
-        expect(decideAccess({ isOffice: true, device }, need)).toEqual({
-          kind: "office",
-        });
-      }
-    }
-  });
+const device = (d: NonNullable<Dev>) => ({
+  kind: "device" as const,
+  canAnnounce: d.canAnnounce,
+  canDisplay: d.canDisplay,
+});
+const code = (reason: "not-connected" | "wrong-capability") => ({
+  kind: "needs-code" as const,
+  reason,
+});
+const OFFICE = { kind: "office" as const };
+const LOGIN = { kind: "needs-office-login" as const };
 
-  it("never lets a device into an office screen", () => {
-    for (const device of DEVICES) {
-      expect(decideAccess({ isOffice: false, device }, "office")).toEqual({
-        kind: "needs-office-login",
-      });
-    }
-  });
+describe("decideAccess: need x live office session x device access", () => {
+  // [need, isOffice, device, expected]. A device that already has what the
+  // screen needs wins over an office login, so an office sign-out in the same
+  // browser can never knock a board off; office is only the fallback.
+  const table: Array<[ScreenNeed, boolean, Dev, unknown]> = [
+    ["announce", false, NONE, code("not-connected")],
+    ["announce", false, ANN, device(ANN!)],
+    ["announce", false, DIS, code("wrong-capability")],
+    ["announce", false, BOTH, device(BOTH!)],
+    ["announce", true, NONE, OFFICE],
+    ["announce", true, ANN, device(ANN!)],
+    ["announce", true, DIS, OFFICE],
+    ["announce", true, BOTH, device(BOTH!)],
 
-  it("asks for a code when there is no device row", () => {
-    for (const need of ["announce", "display", "hub"] as const) {
-      expect(decideAccess({ isOffice: false, device: null }, need)).toEqual({
-        kind: "needs-code",
-        reason: "not-connected",
-      });
-    }
-  });
+    ["display", false, NONE, code("not-connected")],
+    ["display", false, ANN, code("wrong-capability")],
+    ["display", false, DIS, device(DIS!)],
+    ["display", false, BOTH, device(BOTH!)],
+    ["display", true, NONE, OFFICE],
+    ["display", true, ANN, OFFICE],
+    ["display", true, DIS, device(DIS!)],
+    ["display", true, BOTH, device(BOTH!)],
+
+    ["hub", false, NONE, code("not-connected")],
+    ["hub", false, ANN, device(ANN!)],
+    ["hub", false, DIS, device(DIS!)],
+    ["hub", false, BOTH, device(BOTH!)],
+    ["hub", true, NONE, OFFICE],
+    ["hub", true, ANN, device(ANN!)],
+    ["hub", true, DIS, device(DIS!)],
+    ["hub", true, BOTH, device(BOTH!)],
+
+    // Office screens never accept a device, however it was paired.
+    ["office", false, NONE, LOGIN],
+    ["office", false, ANN, LOGIN],
+    ["office", false, DIS, LOGIN],
+    ["office", false, BOTH, LOGIN],
+    ["office", true, NONE, OFFICE],
+    ["office", true, ANN, OFFICE],
+    ["office", true, DIS, OFFICE],
+    ["office", true, BOTH, OFFICE],
+  ];
+
+  it.each(table)(
+    "%s, office=%s, device=%j",
+    (need, isOffice, dev, expected) => {
+      expect(decideAccess({ isOffice, device: dev }, need)).toEqual(expected);
+    },
+  );
 
   it("treats a row with no capability as not connected", () => {
-    const device = { canAnnounce: false, canDisplay: false };
-    expect(decideAccess({ isOffice: false, device }, "hub")).toEqual({
-      kind: "needs-code",
+    expect(
+      decideAccess(
+        { isOffice: false, device: { canAnnounce: false, canDisplay: false } },
+        "hub",
+      ),
+    ).toEqual(code("not-connected"));
+  });
+});
+
+describe("decideRecheck", () => {
+  const cur = { canAnnounce: true, canDisplay: false };
+
+  it("keeps everything when the lookup failed", () => {
+    expect(decideRecheck("announce", cur, { ok: false })).toEqual({
+      action: "keep",
+    });
+  });
+
+  it("keeps (no re-render) when nothing changed", () => {
+    expect(
+      decideRecheck("announce", cur, { ok: true, device: { ...cur } }),
+    ).toEqual({ action: "keep" });
+  });
+
+  it("shows the code prompt when the row is gone", () => {
+    expect(decideRecheck("display", cur, { ok: true, device: null })).toEqual({
+      action: "show-code",
       reason: "not-connected",
     });
   });
 
-  it("opens announce only for an announce device, and display only for a board", () => {
-    const announce = { canAnnounce: true, canDisplay: false };
-    const board = { canAnnounce: false, canDisplay: true };
-    const both = { canAnnounce: true, canDisplay: true };
-
+  it("shows the code prompt when the needed capability is gone", () => {
     expect(
-      decideAccess({ isOffice: false, device: announce }, "announce"),
-    ).toEqual({ kind: "device", canAnnounce: true, canDisplay: false });
-    expect(
-      decideAccess({ isOffice: false, device: board }, "announce"),
-    ).toEqual({ kind: "needs-code", reason: "wrong-capability" });
-    expect(
-      decideAccess({ isOffice: false, device: announce }, "display"),
-    ).toEqual({ kind: "needs-code", reason: "wrong-capability" });
-    expect(decideAccess({ isOffice: false, device: board }, "display")).toEqual(
-      { kind: "device", canAnnounce: false, canDisplay: true },
-    );
-    expect(
-      decideAccess({ isOffice: false, device: both }, "announce").kind,
-    ).toBe("device");
-    expect(
-      decideAccess({ isOffice: false, device: both }, "display").kind,
-    ).toBe("device");
+      decideRecheck("announce", cur, {
+        ok: true,
+        device: { canAnnounce: false, canDisplay: true },
+      }),
+    ).toEqual({ action: "show-code", reason: "wrong-capability" });
   });
 
-  it("opens the hub for any capable device and reports what it can do", () => {
+  it("keeps the screen but updates the hub when it gains a capability", () => {
     expect(
-      decideAccess(
-        { isOffice: false, device: { canAnnounce: false, canDisplay: true } },
-        "hub",
+      decideRecheck("hub", cur, {
+        ok: true,
+        device: { canAnnounce: true, canDisplay: true },
+      }),
+    ).toEqual({ action: "update", canAnnounce: true, canDisplay: true });
+  });
+
+  it("does not drop a screen that lost only an unrelated capability", () => {
+    expect(
+      decideRecheck(
+        "announce",
+        { canAnnounce: true, canDisplay: true },
+        {
+          ok: true,
+          device: { canAnnounce: true, canDisplay: false },
+        },
       ),
-    ).toEqual({ kind: "device", canAnnounce: false, canDisplay: true });
+    ).toEqual({ action: "update", canAnnounce: true, canDisplay: false });
+  });
+});
+
+describe("sameAccess", () => {
+  const a = {
+    kind: "device" as const,
+    schoolId: "s1",
+    canAnnounce: true,
+    canDisplay: false,
+  };
+  it("is true only when kind, school and capabilities all match", () => {
+    expect(sameAccess(a, { ...a })).toBe(true);
+    expect(sameAccess(a, { ...a, kind: "office" })).toBe(false);
+    expect(sameAccess(a, { ...a, schoolId: "s2" })).toBe(false);
+    expect(sameAccess(a, { ...a, canDisplay: true })).toBe(false);
+    expect(sameAccess(a, { ...a, canAnnounce: false })).toBe(false);
   });
 });
 

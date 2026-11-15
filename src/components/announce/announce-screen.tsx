@@ -182,6 +182,8 @@ export function AnnounceScreen() {
       return next;
     } catch (error) {
       if (isPinError(error)) {
+        // Settle first: on a paired device lock() may leave this screen mounted.
+        reportError(error, "resolve/error");
         session.lock();
         return null;
       }
@@ -215,6 +217,9 @@ export function AnnounceScreen() {
       });
     } catch (error) {
       if (isPinError(error)) {
+        // Settle first (clears `resolving`): on a paired device lock() may
+        // leave this screen mounted, and a stuck busy flag ignores every tap.
+        reportError(error, "resolve/error");
         session.lock();
         return;
       }
@@ -396,6 +401,8 @@ export function AnnounceScreen() {
       void classRoster.refresh();
     } catch (error) {
       if (isPinError(error)) {
+        // Settle first (clears `confirmingKey`), as in runResolve.
+        reportError(error, "confirm/error");
         session.lock();
         return;
       }
@@ -479,6 +486,8 @@ export function AnnounceScreen() {
       void classRoster.refresh();
     } catch (error) {
       if (isPinError(error)) {
+        // Settle first (clears `confirmingKey`), as in runResolve.
+        reportError(error, "confirm/error");
         session.lock();
         return;
       }

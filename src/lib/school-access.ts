@@ -31,36 +31,120 @@ export type AccessDecision =
   | { kind: "needs-code"; reason: NeedsCodeReason }
   | { kind: "needs-office-login" };
 
+/** What the device row grants for this screen. Office screens grant nothing. */
+function deviceAllows(device: DeviceFacts | null, need: ScreenNeed): boolean {
+  if (device === null) return false;
+  switch (need) {
+    case "announce":
+      return device.canAnnounce;
+    case "display":
+      return device.canDisplay;
+    case "hub":
+      return device.canAnnounce || device.canDisplay;
+    case "office":
+      return false;
+  }
+}
+
+/**
+ * `isOffice` means a live office session for this school (the account belongs
+ * to it and is still signed in).
+ *
+ * A paired device wins over an office login whenever it already has what the
+ * screen needs. A board or curb phone must keep running on its own session, so
+ * an office sign-out in the same browser can never knock it off; the office
+ * session is only the fallback when there is no usable device session.
+ */
 export function decideAccess(
   facts: AccessFacts,
   need: ScreenNeed,
 ): AccessDecision {
-  // An office login covers every screen of its own school with no code.
-  if (facts.isOffice) return { kind: "office" };
-
-  // The office screens never accept a device, however it was paired: a code
-  // for a phone must not open the roster.
-  if (need === "office") return { kind: "needs-office-login" };
-
   const { device } = facts;
-  if (device === null || (!device.canAnnounce && !device.canDisplay)) {
-    return { kind: "needs-code", reason: "not-connected" };
+
+  if (deviceAllows(device, need) && device !== null) {
+    return {
+      kind: "device",
+      canAnnounce: device.canAnnounce,
+      canDisplay: device.canDisplay,
+    };
   }
 
-  const allowed =
-    need === "announce"
-      ? device.canAnnounce
-      : need === "display"
-        ? device.canDisplay
-        : true; // hub: anything this device can do is shown
+  if (facts.isOffice) return { kind: "office" };
 
-  return allowed
-    ? {
-        kind: "device",
-        canAnnounce: device.canAnnounce,
-        canDisplay: device.canDisplay,
-      }
-    : { kind: "needs-code", reason: "wrong-capability" };
+  // The office screens never take a device: a code for a phone must not open
+  // the roster.
+  if (need === "office") return { kind: "needs-office-login" };
+
+  const hasAnything =
+    device !== null && (device.canAnnounce || device.canDisplay);
+  return {
+    kind: "needs-code",
+    reason: hasAnything ? "wrong-capability" : "not-connected",
+  };
+}
+
+// --- Keeping a mounted device honest ----------------------------------------
+
+/** How often a mounted device session re-reads its own access. */
+export const RECHECK_INTERVAL_MS = 60_000;
+
+/** The result of reading this device's own `school_devices` row. */
+export type DeviceLookup =
+  { ok: false } | { ok: true; device: DeviceFacts | null };
+
+export type RecheckOutcome =
+  | { action: "keep" }
+  | { action: "update"; canAnnounce: boolean; canDisplay: boolean }
+  | { action: "show-code"; reason: NeedsCodeReason };
+
+/**
+ * What a mounted device session does with a fresh look at its row. A failed
+ * lookup (wifi blinked, a 5xx) changes nothing: a wall board must never drop to
+ * the code prompt because the network did. Only a row that is really gone, or
+ * has lost the capability this screen needs, takes the screen down. An
+ * unchanged answer is "keep", so nothing re-renders and screen state survives.
+ */
+export function decideRecheck(
+  need: Exclude<ScreenNeed, "office">,
+  current: DeviceFacts,
+  lookup: DeviceLookup,
+): RecheckOutcome {
+  if (!lookup.ok) return { action: "keep" };
+
+  const decision = decideAccess(
+    { isOffice: false, device: lookup.device },
+    need,
+  );
+  if (decision.kind === "needs-code") {
+    return { action: "show-code", reason: decision.reason };
+  }
+  if (decision.kind !== "device") return { action: "keep" };
+
+  return decision.canAnnounce === current.canAnnounce &&
+    decision.canDisplay === current.canDisplay
+    ? { action: "keep" }
+    : {
+        action: "update",
+        canAnnounce: decision.canAnnounce,
+        canDisplay: decision.canDisplay,
+      };
+}
+
+/** The identity of an access, so a silent re-check can tell "no change". */
+export interface AccessIdentity {
+  kind: "office" | "device";
+  schoolId: string;
+  canAnnounce: boolean;
+  canDisplay: boolean;
+}
+
+export function sameAccess(a: AccessIdentity, b: AccessIdentity): boolean {
+  return (
+    a.kind === b.kind &&
+    a.schoolId === b.schoolId &&
+    a.canAnnounce === b.canAnnounce &&
+    a.canDisplay === b.canDisplay
+  );
 }
 
 /** The sentence the gate shows above the code field, or null for none. */
