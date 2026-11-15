@@ -77,7 +77,8 @@ export interface CodesResponse {
 
 export interface SetCodeInput extends SchoolScoped {
   which: CodeTarget;
-  code: string;
+  /** Null turns pairing off for that code: nothing new can connect with it. */
+  code: string | null;
   disconnectDevices?: boolean;
 }
 export interface SetCodeResponse extends CodesResponse {
@@ -138,10 +139,13 @@ export function createSchoolApiClient(
   const write = <T>(
     { accessToken, deviceId, signal }: SessionAuth,
     fields: Record<string, unknown>,
+    // Fields whose null is a value, not an absence. `compact` drops nulls,
+    // which is right everywhere except where null is the instruction.
+    keepNull: Record<string, unknown> = {},
   ) =>
     post<T>(
       "school-write",
-      compact({ ...fields, deviceId }),
+      { ...compact({ ...fields, deviceId }), ...keepNull },
       signal,
       accessToken,
     );
@@ -179,13 +183,16 @@ export function createSchoolApiClient(
     },
 
     setCode({ schoolId, which, code, disconnectDevices, ...auth }) {
-      return write<SetCodeResponse>(auth, {
-        action: "set-code",
-        schoolId,
-        which,
-        code,
-        disconnectDevices,
-      });
+      return write<SetCodeResponse>(
+        auth,
+        {
+          action: "set-code",
+          schoolId,
+          which,
+          disconnectDevices,
+        },
+        { code },
+      );
     },
 
     listDevices({ schoolId, ...auth }) {

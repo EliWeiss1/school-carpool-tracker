@@ -17,6 +17,7 @@ import { CarpoolManager } from "./carpool-manager";
 import { ClassManager } from "./class-manager";
 import { CsvImportPanel } from "./csv-import-panel";
 import { ResetPanel } from "./reset-panel";
+import { SchoolPanels } from "./school/school-panels";
 import { RosterManager } from "./roster-manager";
 
 /**
@@ -102,6 +103,19 @@ export function AdminContent() {
       />
 
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8 sm:px-12">
+        {/* Only a school route has a school to configure. The legacy route
+            has one implicit school and the staff PIN, which may not touch
+            codes, devices or settings. */}
+        {school !== null && (
+          <SchoolPanels
+            session={session}
+            school={school}
+            counts={{
+              classes: classGroups.length,
+              students: students?.length ?? 0,
+            }}
+          />
+        )}
         <RosterManager
           session={session}
           students={students}

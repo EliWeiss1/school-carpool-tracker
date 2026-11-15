@@ -102,6 +102,23 @@ describe("school-write", () => {
     });
   });
 
+  it("sends a null code as null: that is how the office turns pairing off", async () => {
+    const { client, fetchImpl } = clientReturning(
+      jsonResponse({ announceCode: null, displayCode: "b", disconnected: 0 }),
+    );
+    await client.setCode({
+      ...AUTH,
+      schoolId: "s1",
+      which: "announce",
+      code: null,
+    });
+
+    const body = requestAt(fetchImpl, 0).body;
+    // Dropped, the server would read "no code sent" and refuse the request.
+    expect(Object.hasOwn(body, "code")).toBe(true);
+    expect(body.code).toBeNull();
+  });
+
   it("get-codes, set-code, list-devices and disconnect-device use their action names", async () => {
     const { client, fetchImpl } = clientReturning(
       jsonResponse({ announceCode: null, displayCode: null }),
