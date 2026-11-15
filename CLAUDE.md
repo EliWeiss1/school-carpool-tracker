@@ -129,7 +129,8 @@ describes production truthfully until the cutover in phase 7.
   `school_id` does not fail, it files the row under school #1** — the reason
   every store query goes through `scopedClient`.
 - **School functions** (`20261113120000_school_functions.sql`):
-  `create_school`, `note_pair_failure`, `set_school_code`, `pair_device`;
+  `create_school`, `attempt_pairing`, `set_school_code`, plus the
+  `school_pair_attempts` table;
   service-role only.
 - **The guard** (`_shared/handlers/guard.ts`). `guardRequest(request, deps,
   capability)` accepts a Supabase session (`Authorization: Bearer <access
@@ -143,7 +144,8 @@ describes production truthfully until the cutover in phase 7.
   (`auth-boundary.test.ts` enforces both).
 - **School-scoped stores.** `createSupabaseStores(env).forSchool(id)` returns a
   `RosterStore` for one school; `scopedClient` is the only place a query is
-  built (`store-scoping.test.ts` fails on a raw `.from(` / `.rpc(`).
+  built (`_shared/scoped-client.ts`, runtime-neutral and unit-tested;
+  `store-scoping.test.ts` fails on a raw `.from(` / `.rpc(` in the store).
   `handlers/tenant-isolation.test.ts` runs every store method and every
   endpoint against two schools with identical names.
 - **Two new Edge Functions**, neither of which accepts the staff PIN
@@ -159,9 +161,20 @@ describes production truthfully until the cutover in phase 7.
   | `school-write` — `list-devices` | `schoolId` | `{ devices[] }` (never a user id) |
   | `school-write` — `disconnect-device` | `schoolId`, `deviceRowId` | `{ disconnected }`; also deletes that device's anonymous session |
 
-  Wrong device codes: 5 per 10 minutes per network (in the function), and 10
-  per 10 minutes per school locks **new pairings** for 15 minutes (in the
-  database). A lockout never disconnects a device that is already connected.
+  Pairing is one atomic database step (`attempt_pairing`): it locks the
+  school's secrets row, checks the locks, compares the code and either counts
+  the failure or connects the device, so limits hold when codes arrive in
+  parallel and a code change cannot race a pairing. Wrong codes count per
+  (school, network): 10 in 10 minutes locks **that network's new pairings** to
+  that school for 15 minutes; 100 in an hour across all networks locks the
+  school's new pairings for 15. The function also keeps its own budget of 5
+  wrong codes per 10 minutes per network across all schools. Successes are
+  never counted. A lockout never disconnects a device that is already
+  connected, and setting a new code clears every lock.
+- **Guessing budgets are charged before the check and handed back on
+  success** (`RateLimiter.forgive`), for the staff PIN and for device codes.
+  Checking first and charging afterwards is not equivalent: the check awaits,
+  so a burst sent together all read an untouched budget.
 - **Office accounts** (Supabase Auth, `@supabase/ssr`): `/signup`, `/login`,
   `/forgot-password`, `/reset-password`, `/auth/confirm`, `/welcome` (creates
   the school), `/app` (launcher), `/s/[school]` (the school's hub).
