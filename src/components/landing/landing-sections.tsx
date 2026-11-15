@@ -313,12 +313,15 @@ export function ConfirmSection() {
 
 /* ---------------------------------------------------------------- setup */
 
-const steps = [
-  "Create your account",
-  "Add your roster",
-  "Set a device code",
-  "Open your link",
+const steps: { title: string; hint?: string }[] = [
+  { title: "Create your account" },
+  { title: "Drop in your spreadsheet", hint: "Any format. We sort it out." },
+  { title: "Set a device code" },
+  { title: "Open your link" },
 ];
+
+/** Where a roster can come from. Plain text, not controls, so a plain list. */
+const rosterSources = ["Excel", "Google Sheets", "CSV", "Copy & paste"];
 
 /**
  * A real sequence, so it is numbered. Each step sits under a dashed lane
@@ -337,7 +340,7 @@ export function SetupSection() {
         <ol className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
           {steps.map((step, index) => (
             <li
-              key={step}
+              key={step.title}
               className="border-t-4 border-dashed border-white/50 pt-6"
             >
               <p
@@ -346,10 +349,28 @@ export function SetupSection() {
               >
                 {index + 1}
               </p>
-              <h3 className="mt-3 font-display text-2xl font-bold">{step}</h3>
+              <h3 className="mt-3 font-display text-2xl font-bold">
+                {step.title}
+              </h3>
+              {step.hint ? (
+                <p className="mt-2 text-lg text-white/90">{step.hint}</p>
+              ) : null}
             </li>
           ))}
         </ol>
+        <ul className="mt-12 flex flex-wrap gap-3">
+          {rosterSources.map((source) => (
+            <li
+              key={source}
+              className="rounded-xl bg-white px-4 py-2 font-display text-lg font-bold text-curb-900"
+            >
+              {source}
+            </li>
+          ))}
+          <li className="rounded-xl bg-marigold-400 px-4 py-2 font-display text-lg font-bold text-curb-900">
+            Messy is fine
+          </li>
+        </ul>
       </Section>
     </div>
   );
