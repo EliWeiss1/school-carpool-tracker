@@ -27,33 +27,33 @@ export const DEMO_CHILDREN: readonly DemoChild[] = [
     class_group: "K2",
   },
   {
-    id: "demo-patel",
-    first_name: "Anika",
-    last_name: "Patel",
+    id: "demo-adler",
+    first_name: "Ari",
+    last_name: "Adler",
     class_group: "1st",
   },
   {
-    id: "demo-garcia",
-    first_name: "Mateo",
-    last_name: "Garcia",
+    id: "demo-shapiro",
+    first_name: "Noam",
+    last_name: "Shapiro",
     class_group: "3rd",
   },
   {
-    id: "demo-nguyen",
-    first_name: "Layla",
-    last_name: "Nguyen",
+    id: "demo-stern",
+    first_name: "Talia",
+    last_name: "Stern",
     class_group: "2nd",
   },
   {
-    id: "demo-okafor",
-    first_name: "Chidi",
-    last_name: "Okafor",
+    id: "demo-rosen",
+    first_name: "Jonah",
+    last_name: "Rosen",
     class_group: "4th",
   },
   {
-    id: "demo-berg",
-    first_name: "Noah",
-    last_name: "Berg",
+    id: "demo-gold",
+    first_name: "Shira",
+    last_name: "Gold",
     class_group: "5th",
   },
 ];
@@ -65,9 +65,9 @@ export const DEMO_CHILDREN: readonly DemoChild[] = [
  */
 export const DEMO_CALL_ORDER: readonly string[] = [
   "demo-cohen",
-  "demo-garcia",
-  "demo-okafor",
-  "demo-patel",
+  "demo-shapiro",
+  "demo-rosen",
+  "demo-adler",
 ];
 
 /**

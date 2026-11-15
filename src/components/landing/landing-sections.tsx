@@ -86,11 +86,11 @@ function AnnouncePicture() {
 
 const boardTiles = [
   { name: "Cohen", tone: "called" },
-  { name: "Patel", tone: "arrived" },
-  { name: "Garcia", tone: "waiting" },
-  { name: "Nguyen", tone: "waiting" },
-  { name: "Okafor", tone: "arrived" },
-  { name: "Berg", tone: "waiting" },
+  { name: "Adler", tone: "arrived" },
+  { name: "Shapiro", tone: "waiting" },
+  { name: "Stern", tone: "waiting" },
+  { name: "Rosen", tone: "arrived" },
+  { name: "Gold", tone: "waiting" },
 ] as const;
 
 /** Display: the board in miniature, in the board's own three tile colours. */
@@ -118,8 +118,8 @@ function DisplayPicture() {
 
 const rosterRows = [
   { name: "Maya Cohen", classGroup: "K2" },
-  { name: "Mateo Garcia", classGroup: "3rd" },
-  { name: "Layla Nguyen", classGroup: "2nd" },
+  { name: "Noam Shapiro", classGroup: "3rd" },
+  { name: "Talia Stern", classGroup: "2nd" },
 ];
 
 /** Office: three roster rows, the way /admin lists them. */
@@ -242,18 +242,21 @@ export function CarpoolSection() {
 
 const lookalikes = [
   { name: "Maya Cohen", classGroup: "K2" },
-  { name: "Elias Kohen", classGroup: "3rd" },
-  { name: "Zoe Koen", classGroup: "1st" },
+  { name: "Asher Kohen", classGroup: "3rd" },
+  { name: "Tamar Koen", classGroup: "1st" },
 ];
 
 /**
- * The trust band, in full marigold. The picture is the product's ambiguous
+ * The trust band, on a pale marigold wash: warm enough to read as the brand,
+ * quiet enough to sit between the ink band above it and the blue one below.
+ * (It was full marigold once; a whole screen of it was too loud.) The picture
+ * is the product's ambiguous
  * case exactly as /announce shows it: three names that sound alike, equal
  * weight, nothing chosen for you.
  */
 export function ConfirmSection() {
   return (
-    <div className="grain relative isolate overflow-hidden bg-marigold-500 bg-marigold-noon text-curb-900">
+    <div className="border-y border-marigold-100 bg-marigold-50 text-curb-900">
       <Section
         labelledBy="confirm-heading"
         className="grid gap-12 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-center lg:gap-16 lg:py-24"
@@ -265,7 +268,7 @@ export function ConfirmSection() {
           >
             A person always taps.
           </h2>
-          <p className="mt-6 max-w-md text-xl text-curb-800">
+          <p className="mt-6 max-w-md text-xl text-curb-700">
             Names that sound alike are shown side by side. Nothing reaches the
             board by itself.
           </p>
@@ -274,7 +277,7 @@ export function ConfirmSection() {
         <div>
           <p className="sr-only">
             Example: after hearing &ldquo;Cohen&rdquo;, the phone lists Maya
-            Cohen, Elias Kohen and Zoe Koen as three equal choices.
+            Cohen, Asher Kohen and Tamar Koen as three equal choices.
           </p>
           <div
             aria-hidden="true"

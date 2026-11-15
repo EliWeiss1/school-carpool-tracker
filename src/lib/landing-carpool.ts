@@ -23,9 +23,9 @@ export const CARPOOL_NAME = "Levy carpool";
 export const CARPOOL_BOARD: readonly DemoChild[] = [
   { id: "cp-noa", first_name: "Noa", last_name: "Levy", class_group: "2nd" },
   {
-    id: "cp-anika",
-    first_name: "Anika",
-    last_name: "Patel",
+    id: "cp-dalia",
+    first_name: "Dalia",
+    last_name: "Mizrahi",
     class_group: "1st",
   },
   {
@@ -35,16 +35,16 @@ export const CARPOOL_BOARD: readonly DemoChild[] = [
     class_group: "4th",
   },
   {
-    id: "cp-mateo",
-    first_name: "Mateo",
-    last_name: "Garcia",
+    id: "cp-yoni",
+    first_name: "Yoni",
+    last_name: "Segal",
     class_group: "3rd",
   },
-  { id: "cp-sam", first_name: "Sam", last_name: "Katz", class_group: "4th" },
+  { id: "cp-ezra", first_name: "Ezra", last_name: "Katz", class_group: "4th" },
   {
-    id: "cp-chidi",
-    first_name: "Chidi",
-    last_name: "Okafor",
+    id: "cp-ilan",
+    first_name: "Ilan",
+    last_name: "Peretz",
     class_group: "K2",
   },
 ];
@@ -52,7 +52,7 @@ export const CARPOOL_BOARD: readonly DemoChild[] = [
 export const CARPOOL_RIDER_IDS: readonly string[] = [
   "cp-noa",
   "cp-eitan",
-  "cp-sam",
+  "cp-ezra",
 ];
 
 export interface CarpoolDemoState {
